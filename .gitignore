@@ -31,7 +31,10 @@ cover-image.png
 memory/history/
 
 # Claude 本地配置
-.claude/
+.claude/settings.local.json
+.claude/config.json
+.claude/commands/
+.claude/worktrees/
 
 # Worktrees
 .worktrees/

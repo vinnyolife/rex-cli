@@ -1,0 +1,99 @@
+---
+name: skill-constraints
+description: Use when executing any skill or browser automation task - enforces operational constraints and best practices
+---
+
+# 技能使用约束
+
+## Overview
+
+所有技能操作必须遵循此约束规范，确保安全、高效、可追溯。
+
+## When to Use
+
+- 执行任何浏览器自动化操作时
+- 使用 MCP 工具（browser_snapshot, browser_screenshot 等）时
+- 进行任何运营操作（发布笔记、点赞、评论等）时
+
+## Core Pattern
+
+### 浏览器操作
+
+```markdown
+1. 优先使用 browser_snapshot 获取文本快照
+   - 比截图更高效，便于 grep 搜索
+   - 格式：{ profile: 'default' }
+
+2. 必须截图时，保存到 temp/ 目录
+   - 路径：aios/temp/{操作类型}_{时间戳}.png
+   - 示例：login_20240301_120000.png
+```
+
+### 操作间隔
+
+```bash
+# 随机等待 5-30 秒
+sleep $((RANDOM % 26 + 5))
+```
+
+## Rules
+
+### 禁止行为
+
+| 禁止 | 说明 |
+|------|------|
+| 直接在对话中粘贴大段截图 | 浪费 token，必须保存到文件 |
+| 跳过反检测脚本 | 每次操作前必须执行 |
+| 忽略操作间隔 | 必须随机 5-30 秒 |
+| 在非 temp 目录保存截图 | 必须保存到 aios/temp/ |
+
+### 必需行为
+
+| 必须 | 说明 |
+|------|------|
+| 操作前执行反检测 | 使用 skill/反检测脚本.json |
+| 截图保存到 temp/ | 路径固定为 aios/temp/ |
+| 使用 grep 搜索快照 | 而非目视查看截图 |
+| 记录到历史 | 关键操作写入 memory/history/ |
+
+### MCP 工具优先级
+
+1. **browser_snapshot** - 首选，获取文本快照
+2. **browser_screenshot** - 仅在必要时使用
+3. **browser_click** - 通过 selector 操作
+4. **browser_type** - 通过 selector 输入
+
+## Examples
+
+### Good
+
+```json
+// 获取页面快照
+browser_snapshot { profile: 'default' }
+
+// 搜索内容
+grep "关注" snapshot.txt
+
+// 截图保存到正确位置
+browser_screenshot { profile: 'default', filePath: 'aios/temp/follow_20240301_120000.png' }
+```
+
+### Bad
+
+```
+// 在对话中直接展示截图
+[直接在回复中嵌入截图]
+
+// 跳过间隔
+browser_click()  // 立即执行
+browser_click()  // 没有等待
+```
+
+## Common Mistakes
+
+| 错误 | 正确做法 |
+|------|----------|
+| 截图直接在对话中显示 | 保存到 temp/，用 Read 工具查看 |
+| 忽略随机间隔 | 每次操作后 sleep 5-30 秒 |
+| 用眼睛看截图找内容 | 用 grep 从快照搜索 |
+| 在项目根目录放临时文件 | 统一放 aios/temp/ |
