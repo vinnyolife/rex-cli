@@ -22,5 +22,6 @@
     "--no-first-run",
     "--safebrowsing-disable-auto-update"
   ],
-  "notes": "使用这些参数启动 Chrome 可以减少被检测为自动化的概率"
+  "initScript": "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });",
+  "notes": "使用这些参数启动 Chrome 可以减少被检测为自动化的概率。使用 navigate_page 时需要通过 initScript 参数注入此脚本"
 }
