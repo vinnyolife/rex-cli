@@ -31,3 +31,6 @@ memory/history/
 
 # Claude 本地配置
 .claude/
+
+# Worktrees
+.worktrees/
