@@ -1,0 +1,25 @@
+{
+  "name": "puppeteer-stealth-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Puppeteer Stealth MCP Server for anti-detection browser automation",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "ghost-cursor": "^1.5.3",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
