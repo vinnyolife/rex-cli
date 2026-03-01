@@ -67,7 +67,6 @@ export class BrowserLauncher {
       headless: false,
       args: STEALTH_ARGS,
       executablePath: profile.executablePath,
-      userDataDir: profileDir,
     });
 
     const context = await browser.newContext({

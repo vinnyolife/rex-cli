@@ -12,7 +12,7 @@ export async function click(selector: string, profile: string = 'default', doubl
     throw new Error('Page not found');
   }
 
-  await page.click(selector, { double });
+  await page.click(selector, { clickCount: double ? 2 : 1 });
 
   return {
     success: true,

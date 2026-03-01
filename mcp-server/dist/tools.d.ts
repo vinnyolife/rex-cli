@@ -24,12 +24,12 @@ export declare const fillSchema: z.ZodObject<{
     value: z.ZodString;
     pageId: z.ZodOptional<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
-    value: string;
     selector: string;
+    value: string;
     pageId?: number | undefined;
 }, {
-    value: string;
     selector: string;
+    value: string;
     pageId?: number | undefined;
 }>;
 export declare const typeSchema: z.ZodObject<{
