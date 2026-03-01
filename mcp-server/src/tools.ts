@@ -46,6 +46,10 @@ export const scrollSchema = z.object({
   pageId: z.number().optional(),
 });
 
+export const snapshotSchema = z.object({
+  pageId: z.number().optional(),
+});
+
 export const mouseMoveSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -110,7 +114,7 @@ export const tools = {
     if (!page) throw new Error('No active page');
 
     await page.click(selector);
-    await page.$eval(selector, (el: any) => el.value = '');
+    await page.$eval(selector, (el) => (el as HTMLInputElement | HTMLTextAreaElement).value = '');
     await page.type(selector, value);
     await randomDelay(300, 800);
     return { success: true };
@@ -140,8 +144,8 @@ export const tools = {
     return { success: true, image: buffer };
   },
 
-  stealth_snapshot: async (input: { pageId?: number }) => {
-    const pageId = input?.pageId;
+  stealth_snapshot: async (input: z.infer<typeof snapshotSchema>) => {
+    const { pageId } = snapshotSchema.parse(input);
     const page = getTargetPage(pageId);
     if (!page) throw new Error('No active page');
 
@@ -175,13 +179,13 @@ export const tools = {
     if (!page) throw new Error('No active page');
 
     if (y !== undefined) {
-      await page.evaluate((scrollY) => {
-        (globalThis as any).window.scrollBy({ top: scrollY, behavior: 'smooth' });
+      await page.evaluate((scrollY: number) => {
+        window.scrollBy({ top: scrollY, behavior: 'smooth' });
       }, y);
     } else {
       const scrollAmount = Math.random() * 500 + 300;
-      await page.evaluate((amount) => {
-        (globalThis as any).window.scrollBy({ top: amount, behavior: 'smooth' });
+      await page.evaluate((amount: number) => {
+        window.scrollBy({ top: amount, behavior: 'smooth' });
       }, scrollAmount);
     }
     await randomDelay(500, 1500);
@@ -193,8 +197,8 @@ export const tools = {
     const page = getTargetPage(pageId);
     if (!page) throw new Error('No active page');
 
-    // ghost-cursor doesn't support direct coordinate movement
-    // use page.mouse for coordinate-based movement
+    // ghost-cursor 的 move 方法只接受 selector，不支持直接坐标移动
+    // 使用 page.mouse 进行坐标移动
     await page.mouse.move(x, y);
     return { success: true };
   },
