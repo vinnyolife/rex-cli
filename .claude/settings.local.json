@@ -24,7 +24,17 @@
       "Bash(git:*)",
       "Bash(git/molei/codes:*)",
       "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(cd:*)",
+      "Bash(npm:*)",
+      "mcp__puppeteer-stealth__browser_launch",
+      "mcp__puppeteer-stealth__browser_navigate",
+      "mcp__puppeteer-stealth__browser_snapshot",
+      "mcp__puppeteer-stealth__browser_screenshot",
+      "mcp__puppeteer-stealth__browser_click",
+      "mcp__puppeteer-stealth__browser_type",
+      "mcp__puppeteer-stealth__browser_close",
+      "mcp__puppeteer-stealth__browser_list_tabs"
     ]
   },
   "approvalMode": "auto",
