@@ -37,7 +37,7 @@ scripts/ctx-agent.sh --agent codex-cli --prompt "Continue from latest checkpoint
 ## Read Next
 
 - [Quick Start](getting-started.md)
-- [Blog Hub](blog/index.md)
+- [Blog Site](https://cli.rexai.top/blog/)
 - [Changelog](changelog.md)
 - [CLI Workflows](use-cases.md)
 - [Architecture](architecture.md)

@@ -27,7 +27,7 @@ gemini
 ## 次に読む
 
 - [クイックスタート](getting-started.md)
-- [ブログハブ](blog/index.md)
+- [ブログサイト](https://cli.rexai.top/blog/ja/)
 - [変更履歴](changelog.md)
 - [CLI ワークフロー](use-cases.md)
 - [アーキテクチャ](architecture.md)

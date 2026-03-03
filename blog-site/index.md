@@ -5,7 +5,8 @@ description: Growth and engineering articles for the RexAI CLI ecosystem.
 
 # Blog Hub
 
-Use this section for discoverability content that captures search demand and routes readers to the right destination.
+This is a standalone blog surface for discoverability content.
+Product documentation is published separately at [cli.rexai.top](https://cli.rexai.top/).
 
 ## Initial Pillar Posts
 
@@ -15,7 +16,7 @@ Use this section for discoverability content that captures search demand and rou
 
 ## Release Tracking
 
-- [Changelog](../changelog.md)
+- [Changelog](https://cli.rexai.top/changelog/)
 
 ## Linking Rule
 

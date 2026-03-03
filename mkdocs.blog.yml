@@ -1,0 +1,95 @@
+site_name: rex-ai-boot Blog
+site_url: https://cli.rexai.top/blog/
+site_description: Growth and engineering blog for the rex-ai-boot ecosystem.
+site_author: RexAI
+repo_url: https://github.com/rexleimo/rex-ai-boot
+repo_name: rexleimo/rex-ai-boot
+
+docs_dir: blog-site
+site_dir: site/blog
+
+theme:
+  name: material
+  custom_dir: docs-site/overrides
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search:
+      lang:
+        - en
+        - zh
+        - ja
+        - ko
+  - i18n:
+      docs_structure: folder
+      reconfigure_material: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+          site_name: rex-ai-boot Blog
+          site_description: Growth and engineering blog for the rex-ai-boot ecosystem.
+        - locale: zh
+          name: 简体中文
+          build: true
+          site_name: rex-ai-boot 博客
+          site_description: 面向 rex-ai-boot 生态的增长与工程博客。
+          nav_translations:
+            Blog Home: 博客首页
+            Posts: 文章列表
+        - locale: ja
+          name: 日本語
+          build: true
+          site_name: rex-ai-boot ブログ
+          site_description: rex-ai-boot エコシステム向けの成長・技術ブログ。
+          nav_translations:
+            Blog Home: ブログホーム
+            Posts: 記事一覧
+        - locale: ko
+          name: 한국어
+          build: true
+          site_name: rex-ai-boot 블로그
+          site_description: rex-ai-boot 생태계를 위한 성장/엔지니어링 블로그.
+          nav_translations:
+            Blog Home: 블로그 홈
+            Posts: 글 목록
+
+extra:
+  links:
+    docs: https://cli.rexai.top/
+    product: https://cli.rexai.top/
+    blog_main: https://rexai.top/
+    tools: https://tool.rexai.top/
+
+extra_javascript:
+  - assets/analytics-placeholder.js
+
+extra_css:
+  - assets/custom.css
+
+nav:
+  - Blog Home: index.md
+  - Posts:
+      - Launch Post: launch-post.md
+      - CLI Comparison: cli-comparison-post.md
+      - Automation Playbook: automation-playbook-post.md

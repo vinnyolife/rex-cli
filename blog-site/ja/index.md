@@ -5,7 +5,8 @@ description: RexAI CLI エコシステム向けの成長・技術記事。
 
 # ブログハブ
 
-検索需要を受ける記事を配置し、読者を適切な目的地に誘導します。
+ここは検索流入向けの独立ブログです。
+製品ドキュメントは [cli.rexai.top](https://cli.rexai.top/ja/) で別運用しています。
 
 ## 初期ピラーページ
 
@@ -15,7 +16,7 @@ description: RexAI CLI エコシステム向けの成長・技術記事。
 
 ## リリース追跡
 
-- [変更履歴](../changelog.md)
+- [変更履歴](https://cli.rexai.top/ja/changelog/)
 
 ## リンクルール
 

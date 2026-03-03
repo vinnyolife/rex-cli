@@ -5,7 +5,8 @@ description: RexAI CLI 생태계를 위한 성장/엔지니어링 아티클.
 
 # 블로그 허브
 
-검색 수요를 받는 문서를 배치하고, 독자를 목적지로 연결합니다.
+여기는 검색 유입을 위한 독립 블로그입니다.
+제품 문서는 [cli.rexai.top](https://cli.rexai.top/ko/)에서 별도로 운영합니다.
 
 ## 초기 핵심 글
 
@@ -15,7 +16,7 @@ description: RexAI CLI 생태계를 위한 성장/엔지니어링 아티클.
 
 ## 릴리스 추적
 
-- [변경 로그](../changelog.md)
+- [변경 로그](https://cli.rexai.top/ko/changelog/)
 
 ## 링크 규칙
 
