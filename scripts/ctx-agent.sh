@@ -165,19 +165,31 @@ if [[ -n "$PROMPT" ]]; then
   else
     if [[ "$AGENT" == "claude-code" ]]; then
       set +e
-      OUTPUT="$(claude --print --append-system-prompt "$CONTEXT_TEXT" "$PROMPT" "${EXTRA_ARGS[@]}" 2>&1)"
+      if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+        OUTPUT="$(claude --print --append-system-prompt "$CONTEXT_TEXT" "$PROMPT" "${EXTRA_ARGS[@]}" 2>&1)"
+      else
+        OUTPUT="$(claude --print --append-system-prompt "$CONTEXT_TEXT" "$PROMPT" 2>&1)"
+      fi
       EXIT_CODE=$?
       set -e
     elif [[ "$AGENT" == "gemini-cli" ]]; then
       FULL_PROMPT="${CONTEXT_TEXT}"$'\n\n'"## New User Request"$'\n'"${PROMPT}"
       set +e
-      OUTPUT="$(gemini -p "$FULL_PROMPT" "${EXTRA_ARGS[@]}" 2>&1)"
+      if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+        OUTPUT="$(gemini -p "$FULL_PROMPT" "${EXTRA_ARGS[@]}" 2>&1)"
+      else
+        OUTPUT="$(gemini -p "$FULL_PROMPT" 2>&1)"
+      fi
       EXIT_CODE=$?
       set -e
     elif [[ "$AGENT" == "codex-cli" ]]; then
       FULL_PROMPT="${CONTEXT_TEXT}"$'\n\n'"## New User Request"$'\n'"${PROMPT}"
       set +e
-      OUTPUT="$(codex exec "$FULL_PROMPT" "${EXTRA_ARGS[@]}" 2>&1)"
+      if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+        OUTPUT="$(codex exec "$FULL_PROMPT" "${EXTRA_ARGS[@]}" 2>&1)"
+      else
+        OUTPUT="$(codex exec "$FULL_PROMPT" 2>&1)"
+      fi
       EXIT_CODE=$?
       set -e
     fi
@@ -224,9 +236,17 @@ if [[ -n "$PROMPT" ]]; then
   fi
 else
   if [[ "$AGENT" == "claude-code" ]]; then
-    exec claude --append-system-prompt "$CONTEXT_TEXT" "${EXTRA_ARGS[@]}"
+    if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+      exec claude --append-system-prompt "$CONTEXT_TEXT" "${EXTRA_ARGS[@]}"
+    else
+      exec claude --append-system-prompt "$CONTEXT_TEXT"
+    fi
   elif [[ "$AGENT" == "gemini-cli" ]]; then
-    exec gemini -i "$CONTEXT_TEXT" "${EXTRA_ARGS[@]}"
+    if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+      exec gemini -i "$CONTEXT_TEXT" "${EXTRA_ARGS[@]}"
+    else
+      exec gemini -i "$CONTEXT_TEXT"
+    fi
   elif [[ "$AGENT" == "codex-cli" ]]; then
     if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
       exec codex "${EXTRA_ARGS[@]}" "$CONTEXT_TEXT"
