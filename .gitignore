@@ -29,6 +29,7 @@ cover-image.png
 
 # 历史记录（可能包含敏感信息）
 memory/history/
+memory/context-db/
 
 # Claude 本地配置
 .claude/settings.local.json

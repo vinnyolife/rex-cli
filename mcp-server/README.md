@@ -125,4 +125,10 @@ scripts/ctx-agent.sh --agent claude-code --project rex-ai-boot
 
 # Gemini one-shot (auto logs prompt/response into context-db)
 scripts/ctx-agent.sh --agent gemini-cli --project rex-ai-boot --prompt "继续上一次任务，先给我下一步计划"
+
+# Codex one-shot (auto logs prompt/response/checkpoint into context-db)
+scripts/ctx-agent.sh --agent codex-cli --project rex-ai-boot --prompt "根据现有上下文继续实现"
 ```
+
+For full automation, use one-shot mode (`--prompt`) so the script performs all five steps automatically:
+`init -> session:new/latest -> event:add -> checkpoint -> context:pack`.

@@ -1,69 +1,45 @@
-# AIOS：面向 Codex、Claude Code、Gemini CLI 的 MCP Agent 工作流系统
+# rex-ai-boot (AIOS)
 
-AIOS 是一套本地优先（local-first）的 AI agent framework，核心目标是把 `MCP automation`、浏览器任务自动化、技能复用（`SKILL.md`）和人机协作审批整合到同一个工程里。
+本项目是一个面向 `Codex CLI`、`Claude Code`、`Gemini CLI` 的本地 Agent 工作流仓库。  
+目标不是做一个新的聊天客户端，而是给现有 CLI 增加两件事：
 
-SEO 关键词：`AI agent framework`、`MCP`、`Codex`、`Claude Code`、`Gemini CLI`、`OpenClaw alternative`、`OpenFang alternative`、`human-in-the-loop security`。
+1. 统一浏览器自动化能力（Playwright MCP，`browser_*` 工具）
+2. 跨 CLI 共享的文件系统 Context DB（可追溯会话记忆）
 
-## 项目定位（对标 OpenClaw / OpenFang）
+## 你最关心的点：为什么直接输入 `codex` 也会带 ContextDB？
 
-如果你在关注 OpenClaw、OpenFang 这类项目，AIOS 的目标能力是一致的：
+原理是 **zsh 包装函数透明接管**：
 
-- 多 Agent 客户端协作（Codex / Claude Code / Gemini CLI）
-- 基于 MCP 的工具调用与浏览器流程编排
-- 可复用的技能化工作流（skill + runbook）
-- 对高风险动作执行显式的人类确认
+- 安装脚本 [`scripts/install-contextdb-shell.sh`](scripts/install-contextdb-shell.sh) 会往 `~/.zshrc` 追加一行：
+  `source "/Users/rex/cool.cnb/rex-ai-boot/scripts/contextdb-shell.zsh"`
+- [`scripts/contextdb-shell.zsh`](scripts/contextdb-shell.zsh) 定义同名函数：`codex()`、`claude()`、`gemini()`
+- 在本仓库目录内，这些函数会调用 [`scripts/ctx-agent.sh`](scripts/ctx-agent.sh) 先处理 context，再启动原生 CLI
+- 在仓库外或管理子命令（如 `codex mcp`、`gemini hooks`）场景下，会直接透传到原命令
 
-差异点在于：AIOS 更强调“直接在现有仓库内落地”，通过本地配置、MCP server、技能目录和审批边界实现可控自动化。
+所以你仍然输入原命令，体验上不需要改操作习惯。
 
-## 核心能力
+## 系统架构
 
-- 统一浏览器 MCP 工具链：`browser_launch`、`browser_navigate`、`browser_click`、`browser_type`、`browser_snapshot`、`browser_screenshot`
-- CDP 优先连接模式，便于会话复用与稳定调试
-- 长流程任务可拆解为技能，支持持续执行与故障恢复
-- 登录态/权限墙识别（`browser_auth_check`）与人工接管
-- 对敏感动作设置审批门（approval gate）
+```text
+User -> codex/claude/gemini
+     -> (zsh wrapper: contextdb-shell.zsh)
+     -> ctx-agent.sh
+        -> contextdb CLI (init/session/event/checkpoint/pack)
+        -> 启动原生 codex/claude/gemini（注入 context packet）
+     -> mcp-server/browser_* (可选，浏览器自动化)
+```
 
-## 安全与敏感数据策略
+## 目录说明
 
-这套系统的默认原则是：敏感操作必须由用户确认。
-
-- Google / Meta / 即梦等登录墙场景，默认走人工协作接管
-- 工具层返回 `requiresHumanAction` / `auth` 信号
-- 在技能中明确“未登录即暂停，提示用户协作”
-- 凭据只放环境变量或密钥管理，不写入 prompt/技能文件
-- 对外发消息、发帖、提交类操作保留审计记录
-
-## 是否能做出和 OpenClaw / OpenFang 同级功能？
-
-可以做到同类型的核心能力，但不是“默认一键完全同构”。
-
-可对齐的能力：
-
-- Agent 驱动的工具编排
-- 浏览器工作流自动化（MCP + CDP/Playwright）
-- 技能化知识沉淀与跨客户端复用
-- 人机协作审批和高风险动作拦截
-
-需要按场景补齐的能力：
-
-- 某些平台级内置 channel/runtime 能力需要通过 MCP adapter 自行实现
-- 复杂组织级权限模型需要在你自己的配置层扩展
-
-## OpenClaw 的 `channel send`，AIOS 能做到吗？
-
-结论：能做，而且路径清晰。
-
-当前仓库还没有内置等价于 `openclaw message send` 的一组一等命令，但可通过 MCP 扩展实现：
-
-1. 增加 channel 适配层（Slack / Telegram / Discord / WhatsApp 等）。
-2. 暴露工具：`channel_send`、`channel_read`、`channel_react`、`channel_thread`。
-3. 对目标频道、目标用户做 allowlist 校验。
-4. 对敏感目标执行二次确认（human approval）。
-5. 全量记录 outbound 事件用于审计与回放。
+- `mcp-server/`: Playwright MCP 服务与 `contextdb` CLI 实现
+- `scripts/ctx-agent.sh`: 统一运行器（自动接入 ContextDB）
+- `scripts/contextdb-shell.zsh`: 透明接管 `codex/claude/gemini`
+- `memory/context-db/`: 会话数据（本地产物，已忽略提交）
+- `config/browser-profiles.json`: 浏览器 profile/CDP 配置
 
 ## 快速开始
 
-### 1. 构建浏览器 MCP 服务
+### 1) 构建 MCP 与 ContextDB CLI
 
 ```bash
 cd mcp-server
@@ -71,65 +47,92 @@ npm install
 npm run build
 ```
 
-### 2. 配置浏览器 profile（推荐 CDP 优先）
-
-`config/browser-profiles.json` 示例：
-
-```json
-{
-  "profiles": {
-    "default": { "name": "default", "cdpPort": 9222 },
-    "local": {
-      "name": "local",
-      "userDataDir": ".browser-profiles/local",
-      "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    }
-  }
-}
-```
-
-### 3. 仅为 Codex + Claude Code 安装 `find-skills`
+### 2) 安装透明接管（一次即可）
 
 ```bash
-npx skills add https://github.com/vercel-labs/skills --skill find-skills --agent codex claude-code --yes
+cd ..
+./scripts/install-contextdb-shell.sh
+source ~/.zshrc
 ```
 
-说明：这里显式限制为 `codex` 和 `claude-code`，不会给其他 agent 客户端安装。
+安装脚本会在 `~/.zshrc` 写入一个 `ROOTPATH` 逻辑块（不是写死单条 source）：
 
-### 4. 重启客户端生效
+```zsh
+export ROOTPATH="${ROOTPATH:-<repo-root>}"
+if [[ -f "$ROOTPATH/scripts/contextdb-shell.zsh" ]]; then
+  source "$ROOTPATH/scripts/contextdb-shell.zsh"
+fi
+```
 
-重启 Codex 与 Claude Code，让新技能与工具定义加载完成。
+如果仓库搬家，只要改 `ROOTPATH` 即可，无需重装 CLI。
 
-## 统一 Context DB（面向所有 CLI）
+### 3) 直接使用原命令
 
-为解决 Gemini CLI / Claude Code 等工具缺少“共享任务记忆”的问题，仓库新增了文件系统 context DB：
+```bash
+codex
+claude
+gemini
+```
 
-- 路径：`memory/context-db/`
-- 分层：`L0 摘要` + `L1 checkpoint` + `L2 原始事件`
-- 用法：由 `mcp-server` 内的 `contextdb` CLI 统一读写
+## 两种运行模式
 
-示例：
+### A. 交互模式（直接 `codex` / `claude` / `gemini`）
+
+- 自动做：`init`、`session:latest/new`、`context:pack`
+- 用途：启动时自动带上历史上下文
+- 边界：不会在每一轮消息后自动写 checkpoint
+
+### B. One-shot 模式（推荐做全自动闭环）
+
+```bash
+scripts/ctx-agent.sh --agent codex-cli --project rex-ai-boot --prompt "继续上次任务并执行下一步"
+```
+
+one-shot 下会自动执行完整 5 步：
+`init -> session:new/latest -> event:add -> checkpoint -> context:pack`
+
+## ContextDB 数据结构（L0/L1/L2）
+
+```text
+memory/context-db/
+  manifest.json
+  index/sessions.jsonl
+  sessions/<session_id>/
+    meta.json
+    l0-summary.md
+    l1-checkpoints.jsonl
+    l2-events.jsonl
+    state.json
+  exports/<session_id>-context.md
+```
+
+## 常用命令
 
 ```bash
 cd mcp-server
 npm run contextdb -- init
-npm run contextdb -- session:new --agent gemini-cli --project rex-ai-boot --goal "持续任务上下文"
-npm run contextdb -- context:pack --session <session_id>
+npm run contextdb -- session:new --agent claude-code --project rex-ai-boot --goal "stabilize flow"
+npm run contextdb -- event:add --session <id> --role user --text "need retry plan"
+npm run contextdb -- checkpoint --session <id> --summary "blocked by auth" --status blocked --next "wait-login|resume"
+npm run contextdb -- context:pack --session <id> --out memory/context-db/exports/<id>-context.md
 ```
 
-将导出的 context 包作为新会话首段上下文喂给各 CLI，可实现跨工具连续记忆。
-
-也可以直接用统一启动脚本（仓库根目录）：
+## 开发验证
 
 ```bash
-scripts/ctx-agent.sh --agent claude-code --project rex-ai-boot
-scripts/ctx-agent.sh --agent gemini-cli --project rex-ai-boot --prompt "延续上一轮任务"
+cd mcp-server
+npm test
+npm run typecheck
+npm run build
 ```
 
-## 参考项目
+## 卸载透明接管
 
-- OpenClaw: https://github.com/openclaw/openclaw
-- OpenClaw CLI Message: https://docs.openclaw.ai/cli/message
-- OpenClaw Agent Send: https://docs.openclaw.ai/tools/agent-send
-- OpenFang: https://github.com/RightNow-AI/openfang
-- OpenFang 官网: https://www.openfang.sh/
+从 `~/.zshrc` 删除这一行后重新加载 shell：
+
+```bash
+grep -v 'contextdb-shell.zsh' ~/.zshrc > ~/.zshrc.tmp && mv ~/.zshrc.tmp ~/.zshrc
+source ~/.zshrc
+```
+
+删除后 `codex/claude/gemini` 会恢复原生行为。
