@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-03
+
+- chore: bump version after browser mcp onboarding rollout
+
 ## [0.3.0] - 2026-03-03
 
 - feat: add one-command browser mcp install/doctor and default cdp fallback
