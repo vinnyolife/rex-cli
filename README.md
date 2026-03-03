@@ -100,8 +100,8 @@ Windows PowerShell helper script:
 
 ### 3.1 Scope control (avoid cross-project reuse)
 
-By default, wrappers run in **all git repositories** (`CTXDB_WRAP_MODE=all`).
-If you want isolation, set one of these in `~/.zshrc`:
+By default, wrappers run only in the `ROOTPATH` repository (`CTXDB_WRAP_MODE=repo-only`).
+If you want a different scope, set one of these in `~/.zshrc`:
 
 ```zsh
 # only enable in rex-ai-boot itself

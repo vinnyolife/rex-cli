@@ -4,7 +4,7 @@
 # - ROOTPATH
 # - CTXDB_RUNNER
 # - CTXDB_REPO_NAME
-# - CTXDB_WRAP_MODE: all|repo-only|opt-in|off
+# - CTXDB_WRAP_MODE: all|repo-only|opt-in|off (default: repo-only)
 # - CTXDB_MARKER_FILE (default: .contextdb-enable)
 
 $script:CTXDB_LAST_WORKSPACE = ""
@@ -40,7 +40,7 @@ function Get-WorkspaceRoot {
 function Should-Wrap-Workspace {
   param([string]$Workspace)
 
-  $mode = if ($env:CTXDB_WRAP_MODE) { $env:CTXDB_WRAP_MODE } else { "all" }
+  $mode = if ($env:CTXDB_WRAP_MODE) { $env:CTXDB_WRAP_MODE } else { "repo-only" }
 
   switch ($mode) {
     "all" { return $true }

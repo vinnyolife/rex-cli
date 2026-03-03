@@ -6,7 +6,7 @@
 # - ROOTPATH: repo root where scripts/ctx-agent.sh lives
 # - CTXDB_RUNNER: explicit runner path (highest priority)
 # - CTXDB_REPO_NAME: explicit project name (optional)
-# - CTXDB_WRAP_MODE: all|repo-only|opt-in|off (default: all)
+# - CTXDB_WRAP_MODE: all|repo-only|opt-in|off (default: repo-only)
 # - CTXDB_MARKER_FILE: marker filename for opt-in mode (default: .contextdb-enable)
 
 typeset -g CTXDB_LAST_WORKSPACE=""
@@ -39,7 +39,7 @@ _ctxdb_detect_workspace_root() {
 
 _ctxdb_should_wrap_workspace() {
   local workspace="$1"
-  local mode="${CTXDB_WRAP_MODE:-all}"
+  local mode="${CTXDB_WRAP_MODE:-repo-only}"
 
   case "$mode" in
     all)

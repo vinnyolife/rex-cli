@@ -100,8 +100,8 @@ Windows PowerShell 可使用：
 
 ### 3.1 作用域控制（避免跨项目复用）
 
-默认行为是 **所有 git 项目都启用包装**（`CTXDB_WRAP_MODE=all`）。
-如果你希望隔离，可在 `~/.zshrc` 设置：
+默认行为是仅在 `ROOTPATH` 仓库启用包装（`CTXDB_WRAP_MODE=repo-only`）。
+如果你希望使用其他范围，可在 `~/.zshrc` 设置：
 
 ```zsh
 # 只在 rex-ai-boot 项目启用
