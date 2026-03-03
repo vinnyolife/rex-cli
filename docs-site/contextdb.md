@@ -35,6 +35,37 @@ npm run contextdb -- checkpoint --session <id> --summary "phase done" --status r
 npm run contextdb -- context:pack --session <id> --out memory/context-db/exports/<id>-context.md
 ```
 
+## Packet Controls (P0)
+
+`context:pack` now supports token-aware and filter-aware export:
+
+```bash
+npm run contextdb -- context:pack \
+  --session <id> \
+  --limit 60 \
+  --token-budget 1200 \
+  --kinds prompt,response,error \
+  --refs core.ts,cli.ts
+```
+
+- `--token-budget`: cap recent-event payload by estimated token budget.
+- `--kinds` / `--refs`: include only matching events.
+- default dedupe is enabled for repeated events in the packet view.
+
+## Retrieval Commands (P1)
+
+ContextDB now provides lightweight retrieval over sidecar indexes:
+
+```bash
+npm run contextdb -- search --query "auth race" --project demo --kinds response --refs auth.ts
+npm run contextdb -- timeline --session <id> --limit 30
+npm run contextdb -- event:get --id <sessionId>#<seq>
+```
+
+- `search`: query indexed events.
+- `timeline`: merged event/checkpoint feed.
+- `event:get`: fetch a specific event by stable ID.
+
 ## Session ID Format
 
 Session ids use this style:

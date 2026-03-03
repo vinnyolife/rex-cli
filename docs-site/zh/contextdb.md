@@ -26,6 +26,35 @@ npm run contextdb -- session:new --agent codex-cli --project demo --goal "implem
 npm run contextdb -- context:pack --session <id> --out memory/context-db/exports/<id>-context.md
 ```
 
+## 上下文包控制（P0）
+
+`context:pack` 支持 token 预算与事件过滤：
+
+```bash
+npm run contextdb -- context:pack \
+  --session <id> \
+  --limit 60 \
+  --token-budget 1200 \
+  --kinds prompt,response,error \
+  --refs core.ts,cli.ts
+```
+
+- `--token-budget`：按估算 token 控制 L2 事件体积。
+- `--kinds` / `--refs`：只打包匹配事件。
+- 默认会对重复事件做去重。
+
+## 检索命令（P1）
+
+```bash
+npm run contextdb -- search --query "auth race" --project demo --kinds response --refs auth.ts
+npm run contextdb -- timeline --session <id> --limit 30
+npm run contextdb -- event:get --id <sessionId>#<seq>
+```
+
+- `search`：按索引查询事件。
+- `timeline`：合并 event/checkpoint 时间线。
+- `event:get`：按稳定 ID 获取单条事件。
+
 ## 常见问答
 
 ### ContextDB 是云数据库吗？

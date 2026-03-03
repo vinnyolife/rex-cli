@@ -67,8 +67,9 @@ PRs should include:
 - Trigger: when the user message is exactly `cap`, execute this flow in the current repo.
 - Required flow:
   1. `git status --short` and confirm there are changes.
-  2. `git add -A`.
-  3. Commit with a Conventional Commit message from current task context.
-  4. If no clear message is available, use fallback `chore: cap snapshot <YYYY-MM-DD>`.
-  5. `git push` (or set upstream once when required).
+  2. If behavior/commands/workflow changed, sync impacted skill docs first (keep `.codex/skills/*` and `.claude/skills/*` aligned).
+  3. `git add -A`.
+  4. Commit with a Conventional Commit message from current task context.
+  5. If no clear message is available, use fallback `chore: cap snapshot <YYYY-MM-DD>`.
+  6. `git push` (or set upstream once when required).
 - If there are no changes, report a no-op instead of creating an empty commit.

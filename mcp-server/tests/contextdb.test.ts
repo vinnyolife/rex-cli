@@ -6,9 +6,12 @@ import path from 'node:path';
 
 import {
   appendEvent,
+  buildTimeline,
   buildContextPacket,
   createSession,
   ensureContextDb,
+  getEventById,
+  searchEvents,
   writeCheckpoint,
 } from '../src/contextdb/core.js';
 
@@ -175,4 +178,154 @@ test('buildContextPacket composes markdown for agent handoff', async () => {
   assert.match(packet.markdown, /Context Packet/);
   assert.match(packet.markdown, /filesystem-only context DB MVP/);
   assert.match(packet.markdown, /Analyze OpenViking/);
+});
+
+test('appendEvent deduplicates rapid duplicate events', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-ai-boot',
+    goal: 'Validate dedupe',
+  });
+
+  const first = await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'assistant',
+    kind: 'response',
+    text: 'Same response body',
+    refs: ['core.ts'],
+  });
+  const second = await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'assistant',
+    kind: 'response',
+    text: 'Same response body',
+    refs: ['core.ts'],
+  });
+
+  const eventsPath = path.join(
+    workspace,
+    'memory',
+    'context-db',
+    'sessions',
+    session.sessionId,
+    'l2-events.jsonl'
+  );
+  const eventsRaw = await fs.readFile(eventsPath, 'utf8');
+  const lines = eventsRaw.trim().split('\n').filter(Boolean);
+
+  assert.equal(lines.length, 1);
+  assert.equal(first.seq, second.seq);
+});
+
+test('buildContextPacket supports kind/ref filtering and token budget', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'claude-code',
+    project: 'rex-ai-boot',
+    goal: 'Filter packet events',
+  });
+
+  await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'user',
+    kind: 'prompt',
+    text: 'First prompt should be excluded.',
+    refs: ['task.md'],
+  });
+  await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'assistant',
+    kind: 'response',
+    text: 'Long response for pack budget verification and downstream context handoff.',
+    refs: ['core.ts', 'cli.ts'],
+  });
+  await writeCheckpoint({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    summary: 'Checkpoint summary for packet.',
+    status: 'running',
+    nextActions: ['Continue'],
+  });
+
+  const packet = await buildContextPacket({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    eventLimit: 50,
+    tokenBudget: 18,
+    kinds: ['response'],
+    refs: ['core.ts'],
+  });
+
+  assert.match(packet.markdown, /Event Filters: kinds=response refs=core\.ts/);
+  assert.match(packet.markdown, /response/);
+  assert.doesNotMatch(packet.markdown, /First prompt should be excluded/);
+});
+
+test('searchEvents, getEventById, and buildTimeline use sidecar indexes', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'gemini-cli',
+    project: 'rex-ai-boot',
+    goal: 'Exercise sidecar index APIs',
+  });
+
+  await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'user',
+    kind: 'prompt',
+    text: 'Investigate auth race condition',
+    refs: ['auth.ts'],
+  });
+  await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'assistant',
+    kind: 'response',
+    text: 'Auth race likely in refresh path',
+    refs: ['auth.ts', 'token.ts'],
+  });
+  await writeCheckpoint({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    summary: 'Race condition isolated.',
+    status: 'running',
+    nextActions: ['Patch token refresh'],
+    artifacts: ['logs/auth-race.log'],
+  });
+
+  const found = await searchEvents({
+    workspaceRoot: workspace,
+    query: 'auth race',
+    project: 'rex-ai-boot',
+    kinds: ['response'],
+    refs: ['auth.ts'],
+    limit: 10,
+  });
+
+  assert.equal(found.results.length, 1);
+  assert.match(found.results[0].eventId, new RegExp(`^${session.sessionId}#`));
+
+  const byId = await getEventById({
+    workspaceRoot: workspace,
+    eventId: found.results[0].eventId,
+  });
+  assert.equal(byId.event?.kind, 'response');
+  assert.match(byId.event?.text ?? '', /refresh path/);
+
+  const timeline = await buildTimeline({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    limit: 5,
+  });
+  assert.ok(timeline.items.length >= 2);
+  assert.ok(timeline.items.some((item) => item.itemType === 'checkpoint'));
 });

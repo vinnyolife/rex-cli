@@ -16,15 +16,18 @@ description: Use when the user sends `cap` or asks for a fast commit-and-push sh
 1. Preflight
    - Run `git status --short`.
    - If there are no changes, report no-op and stop.
-2. Stage
+2. Sync Gate
+   - If this task changes behavior/commands/workflow, update impacted skills first.
+   - Keep `.codex/skills/*` and `.claude/skills/*` in sync for shared skills.
+3. Stage
    - Run `git add -A`.
-3. Commit
+4. Commit
    - Prefer a Conventional Commit message based on current task context.
    - Fallback message: `chore: cap snapshot <YYYY-MM-DD>`.
-4. Push
+5. Push
    - Run `git push`.
    - If upstream is missing, run `git push --set-upstream origin <current-branch>`.
-5. Report
+6. Report
    - Return commit hash, branch, and push result.
 
 ## Safety Rules

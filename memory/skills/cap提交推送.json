@@ -9,6 +9,7 @@
   ],
   "workflow": [
     "git status --short 检查是否有变更",
+    "如果改动影响功能/命令/流程，先同步更新相关 skills（.codex/.claude）",
     "git add -A 暂存所有变更",
     "按 Conventional Commit 规范生成提交信息并提交",
     "git push 推送到远端分支（必要时设置 upstream）",

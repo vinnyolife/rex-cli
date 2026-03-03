@@ -20,3 +20,28 @@ cd mcp-server
 npm run contextdb -- init
 npm run contextdb -- context:pack --session <id> --out memory/context-db/exports/<id>-context.md
 ```
+
+## 컨텍스트 패킷 제어 (P0)
+
+`context:pack`은 토큰 예산과 이벤트 필터를 지원합니다.
+
+```bash
+npm run contextdb -- context:pack \
+  --session <id> \
+  --limit 60 \
+  --token-budget 1200 \
+  --kinds prompt,response,error \
+  --refs core.ts,cli.ts
+```
+
+- `--token-budget`: L2 이벤트를 추정 토큰 기준으로 제한
+- `--kinds` / `--refs`: 조건에 맞는 이벤트만 포함
+- 중복 이벤트는 기본적으로 제거
+
+## 검색 명령 (P1)
+
+```bash
+npm run contextdb -- search --query "auth race" --project demo --kinds response --refs auth.ts
+npm run contextdb -- timeline --session <id> --limit 30
+npm run contextdb -- event:get --id <sessionId>#<seq>
+```

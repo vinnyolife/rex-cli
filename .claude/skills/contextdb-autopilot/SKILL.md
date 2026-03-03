@@ -42,3 +42,32 @@ scripts/ctx-agent.sh \
 ## Verification
 - Context packet output: `memory/context-db/exports/<session_id>-context.md`
 - Session files: `memory/context-db/sessions/<session_id>/`
+
+## New ContextDB Retrieval Commands
+
+Use these for index-first retrieval before full packet expansion:
+
+```bash
+cd mcp-server
+npm run contextdb -- search --query "auth race" --project rex-ai-boot --kinds response --refs auth.ts
+npm run contextdb -- timeline --session <session_id> --limit 30
+npm run contextdb -- event:get --id <session_id>#<seq>
+```
+
+## Packet Budget and Filters
+
+Use token-aware packet export to control cost:
+
+```bash
+cd mcp-server
+npm run contextdb -- context:pack \
+  --session <session_id> \
+  --limit 60 \
+  --token-budget 1200 \
+  --kinds prompt,response,error \
+  --refs core.ts,cli.ts
+```
+
+Defaults:
+- Event dedupe in packet view is enabled.
+- You can disable with `--no-dedupe` when needed for debugging.

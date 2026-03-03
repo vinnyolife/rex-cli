@@ -2,11 +2,14 @@
 import path from 'node:path';
 import {
   appendEvent,
+  buildTimeline,
   buildContextPacket,
   createSession,
   ensureContextDb,
   findLatestSession,
+  getEventById,
   resolveWorkspaceRoot,
+  searchEvents,
   writeCheckpoint,
 } from './core.js';
 
@@ -22,7 +25,10 @@ function usage(): string {
     '  contextdb session:latest --agent <name> [--project <name>]',
     '  contextdb event:add --session <id> --role <user|assistant|tool|system> --text <text> [--kind <kind>] [--refs a,b]',
     '  contextdb checkpoint --session <id> --summary <text> [--status running|blocked|done] [--next a|b] [--artifacts a|b]',
-    '  contextdb context:pack --session <id> [--limit 30] [--out memory/context-db/exports/<id>.md] [--stdout]',
+    '  contextdb context:pack --session <id> [--limit 30] [--token-budget 1200] [--kinds prompt,response,error] [--refs a,b] [--no-dedupe] [--out memory/context-db/exports/<id>.md] [--stdout]',
+    '  contextdb search [--query <text>] [--project <name>] [--session <id>] [--role <role>] [--kinds a,b] [--refs a,b] [--limit 20]',
+    '  contextdb timeline [--project <name> | --session <id>] [--limit 50]',
+    '  contextdb event:get --id <sessionId>#<seq>',
     '',
   ].join('\n');
 }
@@ -144,6 +150,7 @@ async function main(): Promise<void> {
     case 'context:pack': {
       const sessionId = getOption(options, 'session');
       const limit = typeof options.limit === 'string' ? Number(options.limit) : 30;
+      const tokenBudget = typeof options['token-budget'] === 'string' ? Number(options['token-budget']) : undefined;
       const out = typeof options.out === 'string'
         ? options.out
         : path.join('memory', 'context-db', 'exports', `${sessionId}-context.md`);
@@ -152,6 +159,10 @@ async function main(): Promise<void> {
         workspaceRoot,
         sessionId,
         eventLimit: Number.isFinite(limit) ? limit : 30,
+        tokenBudget: tokenBudget !== undefined && Number.isFinite(tokenBudget) ? tokenBudget : undefined,
+        kinds: getOptionalCsv(options, 'kinds'),
+        refs: getOptionalCsv(options, 'refs'),
+        dedupeEvents: options['no-dedupe'] === true ? false : true,
         outputPath: out,
       });
 
@@ -160,6 +171,43 @@ async function main(): Promise<void> {
       } else {
         console.log(JSON.stringify({ outputPath: result.outputPath, sessionId }, null, 2));
       }
+      return;
+    }
+
+    case 'search': {
+      const limit = typeof options.limit === 'string' ? Number(options.limit) : 20;
+      const result = await searchEvents({
+        workspaceRoot,
+        query: typeof options.query === 'string' ? options.query : undefined,
+        project: typeof options.project === 'string' ? options.project : undefined,
+        sessionId: typeof options.session === 'string' ? options.session : undefined,
+        role: typeof options.role === 'string' ? (options.role as 'system' | 'user' | 'assistant' | 'tool') : undefined,
+        kinds: getOptionalCsv(options, 'kinds'),
+        refs: getOptionalCsv(options, 'refs'),
+        limit: Number.isFinite(limit) ? limit : 20,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    case 'timeline': {
+      const limit = typeof options.limit === 'string' ? Number(options.limit) : 50;
+      const result = await buildTimeline({
+        workspaceRoot,
+        project: typeof options.project === 'string' ? options.project : undefined,
+        sessionId: typeof options.session === 'string' ? options.session : undefined,
+        limit: Number.isFinite(limit) ? limit : 50,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    case 'event:get': {
+      const result = await getEventById({
+        workspaceRoot,
+        eventId: getOption(options, 'id'),
+      });
+      console.log(JSON.stringify(result, null, 2));
       return;
     }
 

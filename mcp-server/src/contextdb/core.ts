@@ -19,6 +19,7 @@ export interface SessionMeta {
 }
 
 export interface ContextEvent {
+  seq?: number;
   ts: string;
   role: EventRole;
   kind: string;
@@ -27,6 +28,7 @@ export interface ContextEvent {
 }
 
 export interface Checkpoint {
+  seq?: number;
   ts: string;
   status: SessionStatus;
   summary: string;
@@ -46,6 +48,53 @@ interface SessionPaths {
 const DB_RELATIVE_PATH = path.join('memory', 'context-db');
 const MANIFEST_NAME = 'manifest.json';
 const INDEX_SESSIONS_NAME = 'sessions.jsonl';
+const INDEX_EVENTS_NAME = 'events.jsonl';
+const INDEX_CHECKPOINTS_NAME = 'checkpoints.jsonl';
+const CHARS_PER_TOKEN_ESTIMATE = 4;
+const EVENT_DEDUP_WINDOW_MS = 30_000;
+const SESSION_LOCK_TIMEOUT_MS = 10_000;
+
+export interface IndexedEvent {
+  eventId: string;
+  sessionId: string;
+  seq: number;
+  ts: string;
+  tsEpoch: number;
+  project: string;
+  agent: string;
+  role: EventRole;
+  kind: string;
+  text: string;
+  refs: string[];
+  textHash: string;
+}
+
+export interface IndexedCheckpoint {
+  checkpointId: string;
+  sessionId: string;
+  seq: number;
+  ts: string;
+  tsEpoch: number;
+  project: string;
+  agent: string;
+  status: SessionStatus;
+  summary: string;
+  nextActions: string[];
+  artifacts: string[];
+}
+
+export interface TimelineEntry {
+  itemType: 'event' | 'checkpoint';
+  ts: string;
+  tsEpoch: number;
+  project: string;
+  sessionId: string;
+  agent: string;
+  label: string;
+  details: string;
+  refs: string[];
+  id: string;
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -63,6 +112,42 @@ function toJsonLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toEpoch(ts: string): number {
+  const epoch = Date.parse(ts);
+  return Number.isFinite(epoch) ? epoch : 0;
+}
+
+function normalizeRefs(refs: string[]): string[] {
+  return Array.from(
+    new Set(
+      refs
+        .map((ref) => ref.trim())
+        .filter((ref) => ref.length > 0)
+    )
+  ).sort();
+}
+
+function hashText(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+function sanitizeInline(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN_ESTIMATE);
+}
+
+function eventSignature(event: Pick<ContextEvent, 'role' | 'kind' | 'text' | 'refs'>): string {
+  const normalized = `${event.role}|${event.kind}|${sanitizeInline(event.text)}|${normalizeRefs(event.refs).join(',')}`;
+  return hashText(normalized);
+}
+
 async function ensureFile(filePath: string, content: string = ''): Promise<void> {
   try {
     await fs.access(filePath);
@@ -75,24 +160,66 @@ async function appendJsonLine(filePath: string, value: unknown): Promise<void> {
   await fs.appendFile(filePath, toJsonLine(value), 'utf8');
 }
 
+async function readLastJsonLine<T>(filePath: string): Promise<T | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    const lines = raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    if (lines.length === 0) return null;
+    return JSON.parse(lines[lines.length - 1]) as T;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 async function readJson<T>(filePath: string): Promise<T> {
   const raw = await fs.readFile(filePath, 'utf8');
   return JSON.parse(raw) as T;
 }
 
+async function writeAtomicFile(filePath: string, content: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  const tmpPath = path.join(
+    dir,
+    `.${path.basename(filePath)}.tmp.${process.pid}.${crypto.randomUUID().slice(0, 8)}`
+  );
+  await fs.writeFile(tmpPath, content, 'utf8');
+  try {
+    await fs.rename(tmpPath, filePath);
+  } catch (error) {
+    await fs.unlink(tmpPath).catch(() => {});
+    throw error;
+  }
+}
+
 async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await writeAtomicFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function readJsonLines<T>(filePath: string): Promise<T[]> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return raw
+    const rows: T[] = [];
+    for (const line of raw
       .split('\n')
       .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as T);
-  } catch {
+      .filter((line) => line.length > 0)) {
+      try {
+        rows.push(JSON.parse(line) as T);
+      } catch {
+        // keep processing remaining lines instead of dropping the entire file
+      }
+    }
+    return rows;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw error;
+    }
     return [];
   }
 }
@@ -105,6 +232,14 @@ function getSessionsIndexPath(workspaceRoot: string): string {
   return path.join(getDbRoot(workspaceRoot), 'index', INDEX_SESSIONS_NAME);
 }
 
+function getEventsIndexPath(workspaceRoot: string): string {
+  return path.join(getDbRoot(workspaceRoot), 'index', INDEX_EVENTS_NAME);
+}
+
+function getCheckpointsIndexPath(workspaceRoot: string): string {
+  return path.join(getDbRoot(workspaceRoot), 'index', INDEX_CHECKPOINTS_NAME);
+}
+
 function getSessionPaths(workspaceRoot: string, sessionId: string): SessionPaths {
   const dir = path.join(getDbRoot(workspaceRoot), 'sessions', sessionId);
   return {
@@ -115,6 +250,42 @@ function getSessionPaths(workspaceRoot: string, sessionId: string): SessionPaths
     events: path.join(dir, 'l2-events.jsonl'),
     state: path.join(dir, 'state.json'),
   };
+}
+
+async function acquireSessionLock(lockPath: string, timeoutMs: number = SESSION_LOCK_TIMEOUT_MS): Promise<() => Promise<void>> {
+  const start = Date.now();
+  while (true) {
+    try {
+      const handle = await fs.open(lockPath, 'wx');
+      return async () => {
+        try {
+          await handle.close();
+        } finally {
+          await fs.unlink(lockPath).catch(() => {});
+        }
+      };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`Session lock timeout for ${lockPath}`);
+      }
+      await sleep(25 + Math.floor(Math.random() * 100));
+    }
+  }
+}
+
+async function withSessionLock<T>(workspaceRoot: string, sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const paths = getSessionPaths(workspaceRoot, sessionId);
+  const lockPath = path.join(paths.dir, '.session.lock');
+  const release = await acquireSessionLock(lockPath);
+  try {
+    return await fn();
+  } finally {
+    await release();
+  }
 }
 
 async function touchSessionMeta(workspaceRoot: string, sessionId: string, mutate?: (meta: SessionMeta) => SessionMeta): Promise<SessionMeta> {
@@ -193,6 +364,8 @@ export async function ensureContextDb(workspaceRoot: string): Promise<string> {
   }
 
   await ensureFile(getSessionsIndexPath(workspaceRoot), '');
+  await ensureFile(getEventsIndexPath(workspaceRoot), '');
+  await ensureFile(getCheckpointsIndexPath(workspaceRoot), '');
   return dbRoot;
 }
 
@@ -230,17 +403,20 @@ export async function createSession(input: CreateSessionInput): Promise<SessionM
 
   await Promise.all([
     writeJson(paths.meta, meta),
-    fs.writeFile(
+    writeAtomicFile(
       paths.summary,
       `# Session ${sessionId}\n\nPending first checkpoint.\n`,
-      'utf8'
     ),
     ensureFile(paths.checkpoints, ''),
     ensureFile(paths.events, ''),
     writeJson(paths.state, {
       sessionId,
       lastEventAt: null,
+      lastEventSeq: 0,
       lastCheckpointAt: null,
+      lastCheckpointSeq: 0,
+      status: 'running',
+      nextActions: [],
     }),
   ]);
 
@@ -272,23 +448,59 @@ export async function appendEvent(input: AppendEventInput): Promise<ContextEvent
 
   await ensureContextDb(input.workspaceRoot);
   const paths = getSessionPaths(input.workspaceRoot, input.sessionId);
+  return await withSessionLock(input.workspaceRoot, input.sessionId, async () => {
+    const state = await readJson<Record<string, unknown>>(paths.state);
+    const nextSeq = (typeof state.lastEventSeq === 'number'
+      ? state.lastEventSeq
+      : Number(state.lastEventSeq) || 0) + 1;
 
-  const event: ContextEvent = {
-    ts: nowIso(),
-    role: input.role,
-    kind: input.kind || 'message',
-    text: input.text,
-    refs: input.refs ?? [],
-  };
+    const event: ContextEvent = {
+      seq: nextSeq,
+      ts: nowIso(),
+      role: input.role,
+      kind: input.kind || 'message',
+      text: input.text,
+      refs: normalizeRefs(input.refs ?? []),
+    };
 
-  await appendJsonLine(paths.events, event);
-  await touchSessionMeta(input.workspaceRoot, input.sessionId);
+    const lastEvent = await readLastJsonLine<ContextEvent>(paths.events);
+    if (lastEvent) {
+      const sameSignature = eventSignature({
+        role: lastEvent.role,
+        kind: lastEvent.kind,
+        text: lastEvent.text,
+        refs: lastEvent.refs ?? [],
+      }) === eventSignature(event);
+      const withinWindow = Math.abs(toEpoch(event.ts) - toEpoch(lastEvent.ts)) <= EVENT_DEDUP_WINDOW_MS;
+      if (sameSignature && withinWindow) {
+        return lastEvent;
+      }
+    }
 
-  const state = await readJson<Record<string, unknown>>(paths.state);
-  state.lastEventAt = event.ts;
-  await writeJson(paths.state, state);
+    await appendJsonLine(paths.events, event);
+    const meta = await touchSessionMeta(input.workspaceRoot, input.sessionId);
 
-  return event;
+    state.lastEventAt = event.ts;
+    state.lastEventSeq = nextSeq;
+    await writeJson(paths.state, state);
+
+    const indexed: IndexedEvent = {
+      eventId: `${input.sessionId}#${nextSeq}`,
+      sessionId: input.sessionId,
+      seq: nextSeq,
+      ts: event.ts,
+      tsEpoch: toEpoch(event.ts),
+      project: meta.project,
+      agent: meta.agent,
+      role: event.role,
+      kind: event.kind,
+      text: event.text,
+      refs: event.refs,
+      textHash: hashText(sanitizeInline(event.text)),
+    };
+    await appendJsonLine(getEventsIndexPath(input.workspaceRoot), indexed);
+    return event;
+  });
 }
 
 export interface WriteCheckpointInput {
@@ -308,28 +520,50 @@ export async function writeCheckpoint(input: WriteCheckpointInput): Promise<Chec
   await ensureContextDb(input.workspaceRoot);
   const paths = getSessionPaths(input.workspaceRoot, input.sessionId);
   const status = input.status ?? 'running';
-  const checkpoint: Checkpoint = {
-    ts: nowIso(),
-    status,
-    summary: input.summary,
-    nextActions: input.nextActions ?? [],
-    artifacts: input.artifacts ?? [],
-  };
+  return await withSessionLock(input.workspaceRoot, input.sessionId, async () => {
+    const state = await readJson<Record<string, unknown>>(paths.state);
+    const nextSeq = (typeof state.lastCheckpointSeq === 'number'
+      ? state.lastCheckpointSeq
+      : Number(state.lastCheckpointSeq) || 0) + 1;
 
-  await appendJsonLine(paths.checkpoints, checkpoint);
-  const meta = await touchSessionMeta(input.workspaceRoot, input.sessionId, (prev) => ({
-    ...prev,
-    status,
-  }));
-  await fs.writeFile(paths.summary, formatSummaryMarkdown(meta, checkpoint), 'utf8');
+    const checkpoint: Checkpoint = {
+      seq: nextSeq,
+      ts: nowIso(),
+      status,
+      summary: input.summary,
+      nextActions: input.nextActions ?? [],
+      artifacts: input.artifacts ?? [],
+    };
 
-  const state = await readJson<Record<string, unknown>>(paths.state);
-  state.lastCheckpointAt = checkpoint.ts;
-  state.status = status;
-  state.nextActions = checkpoint.nextActions;
-  await writeJson(paths.state, state);
+    await appendJsonLine(paths.checkpoints, checkpoint);
+    const meta = await touchSessionMeta(input.workspaceRoot, input.sessionId, (prev) => ({
+      ...prev,
+      status,
+    }));
+    await writeAtomicFile(paths.summary, formatSummaryMarkdown(meta, checkpoint));
 
-  return checkpoint;
+    state.lastCheckpointAt = checkpoint.ts;
+    state.lastCheckpointSeq = nextSeq;
+    state.status = status;
+    state.nextActions = checkpoint.nextActions;
+    await writeJson(paths.state, state);
+
+    const indexed: IndexedCheckpoint = {
+      checkpointId: `${input.sessionId}#C${nextSeq}`,
+      sessionId: input.sessionId,
+      seq: nextSeq,
+      ts: checkpoint.ts,
+      tsEpoch: toEpoch(checkpoint.ts),
+      project: meta.project,
+      agent: meta.agent,
+      status: checkpoint.status,
+      summary: checkpoint.summary,
+      nextActions: checkpoint.nextActions,
+      artifacts: checkpoint.artifacts,
+    };
+    await appendJsonLine(getCheckpointsIndexPath(input.workspaceRoot), indexed);
+    return checkpoint;
+  });
 }
 
 export async function getSessionMeta(workspaceRoot: string, sessionId: string): Promise<SessionMeta> {
@@ -360,6 +594,10 @@ export interface BuildPacketInput {
   workspaceRoot: string;
   sessionId: string;
   eventLimit?: number;
+  tokenBudget?: number;
+  kinds?: string[];
+  refs?: string[];
+  dedupeEvents?: boolean;
   outputPath?: string;
 }
 
@@ -372,6 +610,9 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
   await ensureContextDb(input.workspaceRoot);
   const paths = getSessionPaths(input.workspaceRoot, input.sessionId);
   const eventLimit = input.eventLimit ?? 30;
+  const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
+    ? Math.floor(input.tokenBudget)
+    : null;
 
   const [meta, summaryRaw, checkpoints, events] = await Promise.all([
     readJson<SessionMeta>(paths.meta),
@@ -381,14 +622,74 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
   ]);
 
   const latestCheckpoint = checkpoints[checkpoints.length - 1] ?? null;
-  const tailEvents = events.slice(Math.max(0, events.length - eventLimit));
+  const kindFilters = new Set((input.kinds ?? []).map((kind) => kind.trim()).filter((kind) => kind.length > 0));
+  const refFilters = new Set(normalizeRefs(input.refs ?? []));
+
+  let filteredEvents = events;
+  if (kindFilters.size > 0) {
+    filteredEvents = filteredEvents.filter((event) => kindFilters.has(event.kind));
+  }
+  if (refFilters.size > 0) {
+    filteredEvents = filteredEvents.filter((event) => (event.refs ?? []).some((ref) => refFilters.has(ref)));
+  }
+
+  if (input.dedupeEvents !== false) {
+    const seen = new Set<string>();
+    const deduped: ContextEvent[] = [];
+    for (let index = filteredEvents.length - 1; index >= 0; index -= 1) {
+      const event = filteredEvents[index];
+      const signature = eventSignature({
+        role: event.role,
+        kind: event.kind,
+        text: event.text,
+        refs: event.refs ?? [],
+      });
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      deduped.push(event);
+    }
+    filteredEvents = deduped.reverse();
+  }
+
+  const cappedEvents = eventLimit > 0
+    ? filteredEvents.slice(Math.max(0, filteredEvents.length - eventLimit))
+    : filteredEvents;
+
+  let selectedEvents = cappedEvents;
+  let eventTokensUsed = 0;
+  if (tokenBudget !== null) {
+    const selectedFromTail: ContextEvent[] = [];
+    for (let index = cappedEvents.length - 1; index >= 0; index -= 1) {
+      const event = cappedEvents[index];
+      const lineText = `${event.role}/${event.kind}: ${sanitizeInline(event.text)}`;
+      const lineTokens = estimateTokens(lineText);
+      if (selectedFromTail.length > 0 && eventTokensUsed + lineTokens > tokenBudget) {
+        break;
+      }
+      if (selectedFromTail.length === 0 && eventTokensUsed + lineTokens > tokenBudget) {
+        const maxChars = Math.max(32, tokenBudget * CHARS_PER_TOKEN_ESTIMATE);
+        selectedFromTail.push({
+          ...event,
+          text: `${sanitizeInline(event.text).slice(0, maxChars)} [truncated]`,
+        });
+        eventTokensUsed = estimateTokens(`${event.role}/${event.kind}: ${sanitizeInline(selectedFromTail[0].text)}`);
+        break;
+      }
+      selectedFromTail.push(event);
+      eventTokensUsed += lineTokens;
+    }
+    selectedEvents = selectedFromTail.reverse();
+  } else {
+    eventTokensUsed = selectedEvents.reduce((sum, event) => {
+      return sum + estimateTokens(`${event.role}/${event.kind}: ${sanitizeInline(event.text)}`);
+    }, 0);
+  }
 
   const checkpointBlock = latestCheckpoint
     ? [
       `- Status: ${latestCheckpoint.status}`,
       `- Time: ${latestCheckpoint.ts}`,
-      '',
-      latestCheckpoint.summary,
+      `- Sequence: ${latestCheckpoint.seq ?? '(legacy)'}`,
       '',
       'Next Actions:',
       ...(latestCheckpoint.nextActions.length > 0
@@ -402,9 +703,13 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
     ].join('\n')
     : 'No checkpoint yet.';
 
-  const eventBlock = tailEvents.length > 0
-    ? tailEvents
-      .map((item, index) => `${index + 1}. [${item.ts}] ${item.role}/${item.kind}: ${item.text}`)
+  const eventBlock = selectedEvents.length > 0
+    ? selectedEvents
+      .map((item, index) => {
+        const eventId = item.seq ? `${input.sessionId}#${item.seq}` : `${input.sessionId}#?`;
+        const refsLabel = (item.refs && item.refs.length > 0) ? ` refs=[${item.refs.join(', ')}]` : '';
+        return `${index + 1}. [${item.ts}] (${eventId}) ${item.role}/${item.kind}${refsLabel}: ${sanitizeInline(item.text)}`;
+      })
       .join('\n')
     : '1. (no events yet)';
 
@@ -417,14 +722,16 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
     `- Project: ${meta.project}`,
     `- Goal: ${meta.goal}`,
     `- Status: ${meta.status}`,
+    `- Event Filters: kinds=${kindFilters.size > 0 ? Array.from(kindFilters).join(',') : '(all)'} refs=${refFilters.size > 0 ? Array.from(refFilters).join(',') : '(all)'}`,
+    `- Event Window: selected=${selectedEvents.length} filtered=${filteredEvents.length} cap=${eventLimit} tokenBudget=${tokenBudget ?? 'unbounded'} tokenUsed=${eventTokensUsed}`,
     '',
     '## L0 Summary',
     summaryRaw.trim(),
     '',
-    '## Latest Checkpoint (L1)',
+    '## L1 Snapshot',
     checkpointBlock,
     '',
-    `## Recent Events (L2, last ${eventLimit})`,
+    `## Recent Events (L2)`,
     eventBlock,
     '',
     '## Handoff Prompt',
@@ -441,6 +748,140 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
     : path.resolve(input.workspaceRoot, input.outputPath);
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, markdown, 'utf8');
+  await writeAtomicFile(outputPath, markdown);
   return { markdown, outputPath };
+}
+
+export interface SearchEventsInput {
+  workspaceRoot: string;
+  query?: string;
+  project?: string;
+  sessionId?: string;
+  role?: EventRole;
+  kinds?: string[];
+  refs?: string[];
+  limit?: number;
+}
+
+export interface SearchEventsOutput {
+  results: IndexedEvent[];
+}
+
+export async function searchEvents(input: SearchEventsInput): Promise<SearchEventsOutput> {
+  await ensureContextDb(input.workspaceRoot);
+  const events = await readJsonLines<IndexedEvent>(getEventsIndexPath(input.workspaceRoot));
+  const limit = input.limit && Number.isFinite(input.limit) ? Math.max(1, Math.floor(input.limit)) : 20;
+  const query = typeof input.query === 'string' && input.query.trim().length > 0
+    ? input.query.trim().toLowerCase()
+    : null;
+  const kindFilters = new Set((input.kinds ?? []).map((kind) => kind.trim()).filter((kind) => kind.length > 0));
+  const refFilters = new Set(normalizeRefs(input.refs ?? []));
+
+  const filtered = events.filter((event) => {
+    if (input.project && event.project !== input.project) return false;
+    if (input.sessionId && event.sessionId !== input.sessionId) return false;
+    if (input.role && event.role !== input.role) return false;
+    if (kindFilters.size > 0 && !kindFilters.has(event.kind)) return false;
+    if (refFilters.size > 0 && !event.refs.some((ref) => refFilters.has(ref))) return false;
+    if (query && !sanitizeInline(event.text).toLowerCase().includes(query)) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => b.tsEpoch - a.tsEpoch);
+  return { results: filtered.slice(0, limit) };
+}
+
+export interface GetEventByIdInput {
+  workspaceRoot: string;
+  eventId: string;
+}
+
+export interface GetEventByIdOutput {
+  eventId: string;
+  sessionId: string;
+  project: string;
+  agent: string;
+  event: ContextEvent | null;
+}
+
+export async function getEventById(input: GetEventByIdInput): Promise<GetEventByIdOutput> {
+  const matched = input.eventId.match(/^(.*)#(\d+)$/);
+  if (!matched) {
+    throw new Error('eventId must match "<sessionId>#<seq>"');
+  }
+  const sessionId = matched[1];
+  const seq = Number(matched[2]);
+  if (!Number.isFinite(seq) || seq <= 0) {
+    throw new Error('eventId sequence must be a positive integer');
+  }
+
+  await ensureContextDb(input.workspaceRoot);
+  const [meta, events] = await Promise.all([
+    getSessionMeta(input.workspaceRoot, sessionId),
+    readJsonLines<ContextEvent>(getSessionPaths(input.workspaceRoot, sessionId).events),
+  ]);
+
+  const bySeq = events.find((event) => event.seq === seq);
+  const fallback = events[seq - 1] ?? null;
+  return {
+    eventId: input.eventId,
+    sessionId,
+    project: meta.project,
+    agent: meta.agent,
+    event: bySeq ?? fallback,
+  };
+}
+
+export interface BuildTimelineInput {
+  workspaceRoot: string;
+  project?: string;
+  sessionId?: string;
+  limit?: number;
+}
+
+export interface BuildTimelineOutput {
+  items: TimelineEntry[];
+}
+
+export async function buildTimeline(input: BuildTimelineInput): Promise<BuildTimelineOutput> {
+  await ensureContextDb(input.workspaceRoot);
+  const [events, checkpoints] = await Promise.all([
+    readJsonLines<IndexedEvent>(getEventsIndexPath(input.workspaceRoot)),
+    readJsonLines<IndexedCheckpoint>(getCheckpointsIndexPath(input.workspaceRoot)),
+  ]);
+  const limit = input.limit && Number.isFinite(input.limit) ? Math.max(1, Math.floor(input.limit)) : 50;
+
+  const entries: TimelineEntry[] = [
+    ...events.map((event): TimelineEntry => ({
+      itemType: 'event',
+      ts: event.ts,
+      tsEpoch: event.tsEpoch,
+      project: event.project,
+      sessionId: event.sessionId,
+      agent: event.agent,
+      label: `${event.role}/${event.kind}`,
+      details: sanitizeInline(event.text),
+      refs: event.refs,
+      id: event.eventId,
+    })),
+    ...checkpoints.map((checkpoint): TimelineEntry => ({
+      itemType: 'checkpoint',
+      ts: checkpoint.ts,
+      tsEpoch: checkpoint.tsEpoch,
+      project: checkpoint.project,
+      sessionId: checkpoint.sessionId,
+      agent: checkpoint.agent,
+      label: `checkpoint/${checkpoint.status}`,
+      details: sanitizeInline(checkpoint.summary),
+      refs: checkpoint.artifacts,
+      id: checkpoint.checkpointId,
+    })),
+  ].filter((entry) => {
+    if (input.project && entry.project !== input.project) return false;
+    if (input.sessionId && entry.sessionId !== input.sessionId) return false;
+    return true;
+  });
+
+  entries.sort((a, b) => b.tsEpoch - a.tsEpoch);
+  return { items: entries.slice(0, limit) };
 }
