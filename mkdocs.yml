@@ -44,15 +44,44 @@ plugins:
           name: English
           default: true
           build: true
+          site_name: rex-ai-boot Documentation
+          site_description: Local-first multi-CLI agent workflow docs for Codex CLI, Claude Code, and Gemini CLI.
         - locale: zh
           name: 简体中文
           build: true
+          site_name: rex-ai-boot 文档
+          site_description: 面向 Codex CLI、Claude Code、Gemini CLI 的本地优先多 CLI 智能体工作流文档。
+          nav_translations:
+            Overview: 概览
+            Quick Start: 快速开始
+            CLI Workflows: CLI 工作流
+            Architecture: 架构
+            ContextDB: ContextDB
+            Troubleshooting: 故障排查
         - locale: ja
           name: 日本語
           build: true
+          site_name: rex-ai-boot ドキュメント
+          site_description: Codex CLI、Claude Code、Gemini CLI 向けのローカルファーストなマルチ CLI エージェント運用ドキュメント。
+          nav_translations:
+            Overview: 概要
+            Quick Start: クイックスタート
+            CLI Workflows: CLI ワークフロー
+            Architecture: アーキテクチャ
+            ContextDB: ContextDB
+            Troubleshooting: トラブルシューティング
         - locale: ko
           name: 한국어
           build: true
+          site_name: rex-ai-boot 문서
+          site_description: Codex CLI, Claude Code, Gemini CLI를 위한 로컬 우선 멀티 CLI 에이전트 워크플로 문서.
+          nav_translations:
+            Overview: 개요
+            Quick Start: 빠른 시작
+            CLI Workflows: CLI 워크플로
+            Architecture: 아키텍처
+            ContextDB: ContextDB
+            Troubleshooting: 문제 해결
 
 extra:
   links:
