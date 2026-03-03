@@ -10,9 +10,7 @@
 
 原理是 **zsh 包装函数透明接管**：
 
-- 安装脚本 [`scripts/install-contextdb-shell.sh`](scripts/install-contextdb-shell.sh) 会往 `~/.zshrc` 追加一行：
-  `source "/Users/rex/cool.cnb/rex-ai-boot/scripts/contextdb-shell.zsh"`
-- [`scripts/contextdb-shell.zsh`](scripts/contextdb-shell.zsh) 定义同名函数：`codex()`、`claude()`、`gemini()`
+- [`scripts/contextdb-shell.zsh`](scripts/contextdb-shell.zsh) 通过 shell function 接管 `codex()`、`claude()`、`gemini()`
 - 在本仓库目录内，这些函数会调用 [`scripts/ctx-agent.sh`](scripts/ctx-agent.sh) 先处理 context，再启动原生 CLI
 - 在仓库外或管理子命令（如 `codex mcp`、`gemini hooks`）场景下，会直接透传到原命令
 
@@ -49,22 +47,34 @@ npm run build
 
 ### 2) 安装透明接管（一次即可）
 
+> 安全建议：优先手动编辑 `~/.zshrc`，并先备份。不要盲目执行会改写 shell 配置的命令。
+
+先备份：
+
 ```bash
-cd ..
-./scripts/install-contextdb-shell.sh
-source ~/.zshrc
+cp ~/.zshrc ~/.zshrc.bak.$(date +%Y%m%d-%H%M%S)
 ```
 
-安装脚本会在 `~/.zshrc` 写入一个 `ROOTPATH` 逻辑块（不是写死单条 source）：
+再手动把下面这段加入 `~/.zshrc`：
 
 ```zsh
-export ROOTPATH="${ROOTPATH:-<repo-root>}"
+# >>> contextdb-shell >>>
+export ROOTPATH="${ROOTPATH:-$HOME/cool.cnb/rex-ai-boot}"
 if [[ -f "$ROOTPATH/scripts/contextdb-shell.zsh" ]]; then
   source "$ROOTPATH/scripts/contextdb-shell.zsh"
 fi
+# <<< contextdb-shell <<<
 ```
 
-如果仓库搬家，只要改 `ROOTPATH` 即可，无需重装 CLI。
+加载配置：
+
+```bash
+source ~/.zshrc
+```
+
+如果仓库不在 `$HOME/cool.cnb/rex-ai-boot`，把 `ROOTPATH` 改成你的真实路径。
+
+可选：你也可以运行安装脚本 [`scripts/install-contextdb-shell.sh`](scripts/install-contextdb-shell.sh)，但仍建议先手动备份 `~/.zshrc`。
 
 ### 3) 直接使用原命令
 
@@ -128,10 +138,17 @@ npm run build
 
 ## 卸载透明接管
 
-从 `~/.zshrc` 删除这一行后重新加载 shell：
+手动打开 `~/.zshrc`，删除下面这个区块，再重新加载 shell：
+
+```zsh
+# >>> contextdb-shell >>>
+...
+# <<< contextdb-shell <<<
+```
+
+然后执行：
 
 ```bash
-grep -v 'contextdb-shell.zsh' ~/.zshrc > ~/.zshrc.tmp && mv ~/.zshrc.tmp ~/.zshrc
 source ~/.zshrc
 ```
 
