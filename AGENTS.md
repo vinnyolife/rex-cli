@@ -1,0 +1,63 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+This repository is a local-first AI agent workspace centered on browser automation via MCP.
+
+- `mcp-server/`: TypeScript Playwright MCP server (main runtime code).
+- `mcp-server/src/index.ts`: MCP server entry point and tool routing.
+- `mcp-server/src/browser/`: browser launcher, profile manager, auth checks, and tool actions.
+- `config/`: runtime configuration such as `browser-profiles.json` and safety-related settings.
+- `memory/`: JSON knowledge/skills/specs used by agent workflows.
+- `docs/plans/`: implementation and design plans.
+- `tasks/`: task templates and execution tracking artifacts.
+
+Do not manually edit `mcp-server/dist/`; it is generated output.
+
+## Build, Test, and Development Commands
+Run commands from `mcp-server/` unless noted:
+
+- `npm install`: install dependencies.
+- `npm run dev`: run MCP server from TypeScript with `tsx`.
+- `npm run typecheck`: strict TS type validation (`tsc --noEmit`).
+- `npm run build`: compile to `dist/`.
+- `npm run start`: run built server (`node dist/index.js`).
+
+Typical local flow:
+```bash
+cd mcp-server
+npm install
+npm run typecheck && npm run build
+```
+
+## Coding Style & Naming Conventions
+- Language: TypeScript (ESM, strict mode).
+- Indentation: 2 spaces; keep semicolons.
+- File names: kebab-case for action modules (for example `auth-check.ts`), `index.ts` for module entry points.
+- Tool names exposed to MCP should follow `browser_*` naming.
+- Keep configuration JSON keys stable; prefer additive changes over renaming.
+
+## Testing Guidelines
+There is no dedicated automated test suite yet. Minimum verification for each change:
+
+1. `npm run typecheck`
+2. `npm run build`
+3. Manual MCP smoke test (`browser_launch` -> `browser_navigate` -> `browser_snapshot`/`browser_auth_check` -> `browser_close`)
+
+Document manual test steps in PRs when behavior changes.
+
+## Commit & Pull Request Guidelines
+Git history follows Conventional Commit style:
+- `feat: ...`, `fix: ...`, `docs: ...`, `chore: ...`
+- Optional scope is common (for example `feat(skills): ...`).
+
+PRs should include:
+- concise problem/solution summary,
+- affected paths,
+- verification evidence (command output or checklist),
+- screenshots/log snippets for browser-flow changes,
+- linked task/issue when applicable.
+
+## Security & Configuration Tips
+- Never commit credentials, cookies, or personal browser profile data.
+- Prefer CDP-based profile config in `config/browser-profiles.json` for stable login reuse.
+- Preserve human-in-the-loop checks for auth walls and sensitive outbound actions.
