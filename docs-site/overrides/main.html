@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "RexAI",
+    "url": "https://docs.rexai.top",
+    "sameAs": [
+      "https://cli.rexai.top",
+      "https://rexai.top",
+      "https://tool.rexai.top"
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "RexAI CLI Growth Hub",
+    "url": "https://docs.rexai.top",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://docs.rexai.top/?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+{% endblock %}

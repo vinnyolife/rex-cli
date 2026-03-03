@@ -1,0 +1,71 @@
+site_name: RexAI CLI Growth Hub
+site_url: https://docs.rexai.top
+site_description: Growth and product documentation hub for RexAI CLI ecosystem.
+site_author: RexAI
+repo_url: https://github.com/rexleimo/rex-ai-boot
+repo_name: rexleimo/rex-ai-boot
+
+docs_dir: docs-site
+site_dir: site
+
+theme:
+  name: material
+  custom_dir: docs-site/overrides
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/openai
+      name: X
+  canonical_targets:
+    cli: https://cli.rexai.top
+    blog: https://rexai.top
+    tools: https://tool.rexai.top
+
+extra_javascript:
+  - assets/analytics-placeholder.js
+
+extra_css:
+  - assets/custom.css
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Use Cases: use-cases.md
+  - Community: community.md
+  - Community Ops:
+      - Posting Policy: community/posting-policy.md
+      - Post Templates: community/post-templates.md
+  - Blog:
+      - Overview: blog/index.md
+      - Launch Post: blog/launch-post.md
+      - CLI Comparison: blog/cli-comparison-post.md
+      - Automation Playbook: blog/automation-playbook-post.md
+  - SEO:
+      - Keyword Map: seo/keyword-map.md
+      - Content Clusters: seo/content-clusters.md
+      - Programmatic Template: seo/programmatic-page-template.md
+  - Monetization:
+      - Plan: monetization/plan.md
+      - Pricing Intent: monetization/pricing-intent.md

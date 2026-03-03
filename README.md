@@ -11,8 +11,8 @@ It does not replace those clients. Instead, it adds two shared capabilities:
 The mechanism is **transparent zsh wrapping**:
 
 - [`scripts/contextdb-shell.zsh`](scripts/contextdb-shell.zsh) defines shell functions for `codex()`, `claude()`, and `gemini()`
-- Inside this repo, those functions call [`scripts/ctx-agent.sh`](scripts/ctx-agent.sh) to prepare context before launching the original CLI
-- Outside this repo, or for management subcommands (for example `codex mcp`, `gemini hooks`), commands pass through unchanged
+- In any git project, those functions call [`scripts/ctx-agent.sh`](scripts/ctx-agent.sh) (from `ROOTPATH`) and use the current git root as `--workspace`
+- Outside git projects, or for management subcommands (for example `codex mcp`, `gemini hooks`), commands pass through unchanged
 
 So you keep using the same command names and normal interactive flow.
 
@@ -32,7 +32,7 @@ User -> codex/claude/gemini
 - `mcp-server/`: Playwright MCP service and `contextdb` CLI implementation
 - `scripts/ctx-agent.sh`: Unified runner that integrates ContextDB
 - `scripts/contextdb-shell.zsh`: Transparent wrappers for `codex/claude/gemini`
-- `memory/context-db/`: Runtime session artifacts (ignored by git)
+- `memory/context-db/`: Runtime session artifacts for this repo (ignored by git)
 - `config/browser-profiles.json`: Browser profile/CDP config
 
 ## Quick Start
@@ -84,11 +84,14 @@ claude
 gemini
 ```
 
+After setup, the same behavior works in other git repositories too (they write to each repo's own `memory/context-db/`).
+
 ## Two Runtime Modes
 
 ### A) Interactive mode (`codex` / `claude` / `gemini`)
 
 - Automatically performs: `init`, `session:latest/new`, `context:pack`
+- Scope: current git project root (`--workspace <git-root>`)
 - Best for normal interactive work with startup context resume
 - Limitation: does not auto-write checkpoint after every turn
 
@@ -115,6 +118,8 @@ memory/context-db/
     state.json
   exports/<session_id>-context.md
 ```
+
+In global mode, this structure is created per project under that project's git root.
 
 ## Common Commands
 

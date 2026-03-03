@@ -5,7 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MCP_DIR="$ROOT_DIR/mcp-server"
 
 AGENT=""
-PROJECT="$(basename "$ROOT_DIR")"
+PROJECT=""
+WORKSPACE_ROOT=""
 GOAL=""
 SESSION_ID=""
 PROMPT=""
@@ -23,6 +24,7 @@ Usage:
 
 Options:
   --agent <name>      Agent name: claude-code | gemini-cli | codex-cli
+  --workspace <path>  Workspace root to store context-db (default: current git root, else current dir)
   --project <name>    Project name (default: current directory name)
   --goal <text>       Session goal (used when creating a new session)
   --session <id>      Reuse a specific session id
@@ -40,6 +42,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --agent)
       AGENT="${2:-}"; shift 2 ;;
+    --workspace)
+      WORKSPACE_ROOT="${2:-}"; shift 2 ;;
     --project)
       PROJECT="${2:-}"; shift 2 ;;
     --goal)
@@ -90,10 +94,27 @@ if ! [[ "$MAX_LOG_CHARS" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+if [[ -z "$WORKSPACE_ROOT" ]]; then
+  WORKSPACE_ROOT="$(command git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$PWD")"
+fi
+
+if [[ ! -d "$WORKSPACE_ROOT" ]]; then
+  echo "--workspace is not a directory: $WORKSPACE_ROOT"
+  exit 1
+fi
+
+WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
+
+if [[ -z "$PROJECT" ]]; then
+  PROJECT="$(basename "$WORKSPACE_ROOT")"
+fi
+
 ctx() {
+  local cmd="$1"
+  shift
   (
     cd "$MCP_DIR"
-    npm run -s contextdb -- "$@"
+    npm run -s contextdb -- "$cmd" --workspace "$WORKSPACE_ROOT" "$@"
   )
 }
 
@@ -122,10 +143,11 @@ fi
 PACK_PATH="memory/context-db/exports/${SESSION_ID}-context.md"
 # Step 5 (pre-run): build context packet and feed into agent prompt
 ctx context:pack --session "$SESSION_ID" --limit "$EVENT_LIMIT" --out "$PACK_PATH" >/dev/null
-PACK_ABS="$ROOT_DIR/$PACK_PATH"
+PACK_ABS="$WORKSPACE_ROOT/$PACK_PATH"
 CONTEXT_TEXT="$(cat "$PACK_ABS")"
 
 echo "Session: $SESSION_ID"
+echo "Workspace: $WORKSPACE_ROOT"
 echo "Context packet: $PACK_ABS"
 
 if [[ -n "$PROMPT" ]]; then

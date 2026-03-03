@@ -11,8 +11,8 @@
 原理是 **zsh 包装函数透明接管**：
 
 - [`scripts/contextdb-shell.zsh`](scripts/contextdb-shell.zsh) 通过 shell function 接管 `codex()`、`claude()`、`gemini()`
-- 在本仓库目录内，这些函数会调用 [`scripts/ctx-agent.sh`](scripts/ctx-agent.sh) 先处理 context，再启动原生 CLI
-- 在仓库外或管理子命令（如 `codex mcp`、`gemini hooks`）场景下，会直接透传到原命令
+- 在任意 git 项目里，这些函数会调用 `ROOTPATH` 下的 [`scripts/ctx-agent.sh`](scripts/ctx-agent.sh)，并把当前 git 根目录作为 `--workspace`
+- 在非 git 目录，或管理子命令（如 `codex mcp`、`gemini hooks`）场景下，会直接透传到原命令
 
 所以你仍然输入原命令，体验上不需要改操作习惯。
 
@@ -32,7 +32,7 @@ User -> codex/claude/gemini
 - `mcp-server/`: Playwright MCP 服务与 `contextdb` CLI 实现
 - `scripts/ctx-agent.sh`: 统一运行器（自动接入 ContextDB）
 - `scripts/contextdb-shell.zsh`: 透明接管 `codex/claude/gemini`
-- `memory/context-db/`: 会话数据（本地产物，已忽略提交）
+- `memory/context-db/`: 本仓库会话数据（本地产物，已忽略提交）
 - `config/browser-profiles.json`: 浏览器 profile/CDP 配置
 
 ## 快速开始
@@ -84,11 +84,14 @@ claude
 gemini
 ```
 
+配置完成后，在其他 git 项目里也同样生效（上下文写入该项目自己的 `memory/context-db/`）。
+
 ## 两种运行模式
 
 ### A. 交互模式（直接 `codex` / `claude` / `gemini`）
 
 - 自动做：`init`、`session:latest/new`、`context:pack`
+- 作用域：当前 git 项目根目录（`--workspace <git-root>`）
 - 用途：启动时自动带上历史上下文
 - 边界：不会在每一轮消息后自动写 checkpoint
 
@@ -115,6 +118,8 @@ memory/context-db/
     state.json
   exports/<session_id>-context.md
 ```
+
+全局模式下，上述结构会在每个项目根目录各自创建一份。
 
 ## 常用命令
 

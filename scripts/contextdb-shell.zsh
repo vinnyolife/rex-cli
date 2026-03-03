@@ -1,29 +1,33 @@
 # ContextDB transparent command wrappers for zsh.
 # Source this file in ~/.zshrc to make codex/claude/gemini auto-load context packets
-# when current directory is a repo containing scripts/ctx-agent.sh.
+# in any git project, using a centralized ctx-agent runner.
 #
 # Optional overrides:
-# - ROOTPATH: prefer this repo root for wrapper routing
+# - ROOTPATH: repo root where scripts/ctx-agent.sh lives
 # - CTXDB_RUNNER: explicit runner path (highest priority)
 # - CTXDB_REPO_NAME: explicit project name (optional)
 
-typeset -g CTXDB_LAST_ROOT=""
+typeset -g CTXDB_LAST_WORKSPACE=""
 
-_ctxdb_find_repo_root() {
-  local rootpath="${ROOTPATH:-}"
-
-  if [[ -n "$rootpath" ]] && [[ -x "$rootpath/scripts/ctx-agent.sh" ]]; then
-    case "$PWD/" in
-      "$rootpath"/|"$rootpath"/*)
-        printf '%s\n' "$rootpath"
-        return 0
-      ;;
-    esac
+_ctxdb_detect_runner() {
+  if [[ -n "${CTXDB_RUNNER:-}" ]] && [[ -x "${CTXDB_RUNNER}" ]]; then
+    printf '%s\n' "${CTXDB_RUNNER}"
+    return 0
   fi
 
+  local rootpath="${ROOTPATH:-}"
+  if [[ -n "$rootpath" ]] && [[ -x "$rootpath/scripts/ctx-agent.sh" ]]; then
+    printf '%s\n' "$rootpath/scripts/ctx-agent.sh"
+    return 0
+  fi
+
+  return 1
+}
+
+_ctxdb_detect_workspace_root() {
   local git_root=""
   git_root="$(command git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
-  if [[ -n "$git_root" ]] && [[ -x "$git_root/scripts/ctx-agent.sh" ]]; then
+  if [[ -n "$git_root" ]]; then
     printf '%s\n' "$git_root"
     return 0
   fi
@@ -82,22 +86,23 @@ _ctxdb_run_or_passthrough() {
   local passthrough="$1"
   shift
 
-  local root=""
-  root="$(_ctxdb_find_repo_root || true)"
-  if [[ -z "$root" ]]; then
+  local runner=""
+  runner="$(_ctxdb_detect_runner || true)"
+  if [[ -z "$runner" ]]; then
     command "$passthrough" "$@"
     return $?
   fi
 
-  local runner="${CTXDB_RUNNER:-$root/scripts/ctx-agent.sh}"
-  if [[ ! -x "$runner" ]]; then
+  local workspace=""
+  workspace="$(_ctxdb_detect_workspace_root || true)"
+  if [[ -z "$workspace" ]]; then
     command "$passthrough" "$@"
     return $?
   fi
 
-  local project="${CTXDB_REPO_NAME:-${root:t}}"
-  CTXDB_LAST_ROOT="$root"
-  "$runner" --agent "$agent" --project "$project" -- "$@"
+  local project="${CTXDB_REPO_NAME:-${workspace:t}}"
+  CTXDB_LAST_WORKSPACE="$workspace"
+  "$runner" --workspace "$workspace" --agent "$agent" --project "$project" -- "$@"
 }
 
 codex() {

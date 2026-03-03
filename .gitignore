@@ -15,6 +15,8 @@ secrets.json
 .DS_Store
 Thumbs.db
 temp/
+site/
+.venv-docs/
 
 # 大文件（图片、视频）
 images/
