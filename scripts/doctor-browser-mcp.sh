@@ -60,6 +60,19 @@ check_cmd node
 check_cmd npm
 check_cmd npx
 
+# Advisory: Playwright + our build scripts expect a modern Node runtime.
+NODE_VERSION=""
+set +e
+NODE_VERSION="$(node -p "process.versions.node" 2>/dev/null)"
+NODE_STATUS=$?
+set -e
+if [[ $NODE_STATUS -eq 0 && -n "$NODE_VERSION" ]]; then
+  NODE_MAJOR="${NODE_VERSION%%.*}"
+  if [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] && (( NODE_MAJOR < 20 )); then
+    warn "node version is $NODE_VERSION (recommended: >= 20)"
+  fi
+fi
+
 echo
 echo "[2/6] mcp-server files"
 if [[ -f "$MCP_DIR/package.json" ]]; then

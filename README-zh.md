@@ -35,6 +35,13 @@ User -> codex/claude/gemini
 - `memory/context-db/`: 本仓库会话数据（本地产物，已忽略提交）
 - `config/browser-profiles.json`: 浏览器 profile/CDP 配置
 
+## 前置条件
+
+- Git
+- Node.js **20+**（推荐：**22 LTS**）并带 `npm`
+- Windows：PowerShell（Windows PowerShell 5.x 或 PowerShell 7）
+- 可选（仅文档站点）：Python 3.10+（`pip install -r docs-requirements.txt`）
+
 ## 快速开始
 
 执行 `scripts/*.sh` 或 `scripts/*.ps1` 前，先 clone 并进入仓库根目录：

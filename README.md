@@ -35,6 +35,13 @@ User -> codex/claude/gemini
 - `memory/context-db/`: Runtime session artifacts for this repo (ignored by git)
 - `config/browser-profiles.json`: Browser profile/CDP config
 
+## Prerequisites
+
+- Git
+- Node.js **20+** (recommended: **22 LTS**) with `npm`
+- Windows: PowerShell (Windows PowerShell 5.x or PowerShell 7)
+- Optional (docs only): Python 3.10+ for MkDocs (`pip install -r docs-requirements.txt`)
+
 ## Quick Start
 
 Before running any `scripts/*.sh` or `scripts/*.ps1` commands, clone and enter this repository:

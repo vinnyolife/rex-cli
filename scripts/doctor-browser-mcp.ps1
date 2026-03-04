@@ -15,6 +15,24 @@ function Ok([string]$Msg) { Write-Host "OK   $Msg" }
 function Warn([string]$Msg) { $script:WarnCount += 1; Write-Host "WARN $Msg" }
 function Err([string]$Msg) { $script:ErrCount += 1; Write-Host "ERR  $Msg" }
 
+function Get-OptionalPropertyValue {
+  param(
+    [Parameter(Mandatory = $false)]$Object,
+    [Parameter(Mandatory = $true)][string]$Name
+  )
+
+  if ($null -eq $Object) {
+    return $null
+  }
+
+  $prop = $Object.PSObject.Properties[$Name]
+  if ($null -ne $prop) {
+    return $prop.Value
+  }
+
+  return $null
+}
+
 function Check-Command([string]$Name) {
   if (Get-Command $Name -ErrorAction SilentlyContinue) { Ok "command exists: $Name" }
   else { Err "missing command: $Name" }
@@ -46,6 +64,19 @@ Check-Command node
 Check-Command npm
 Check-Command npx
 
+# Advisory: Playwright + our build scripts expect a modern Node runtime.
+try {
+  $nodeVersion = (& node -p "process.versions.node" 2>$null)
+  if ($LASTEXITCODE -eq 0 -and $nodeVersion) {
+    $majorText = ($nodeVersion.Trim().Split('.')[0])
+    $major = 0
+    if ([int]::TryParse($majorText, [ref]$major) -and $major -lt 20) {
+      Warn "node version is $nodeVersion (recommended: >= 20)"
+    }
+  }
+} catch {
+}
+
 Write-Host ""
 Write-Host "[2/6] mcp-server files"
 if (Test-Path (Join-Path $McpDir "package.json")) { Ok "mcp-server/package.json found" } else { Err "missing mcp-server/package.json" }
@@ -76,38 +107,61 @@ if (-not (Test-Path $ProfileConfig)) {
 
 $defaultProfile = $null
 if (Test-Path $ProfileConfig) {
+  $cfg = $null
   try {
     $cfg = Get-Content -Path $ProfileConfig -Raw | ConvertFrom-Json
-    $defaultProfile = $cfg.profiles.default
-    if ($defaultProfile.executablePath) {
-      if (Test-Path $defaultProfile.executablePath) { Ok "default executablePath exists" }
-      else { Warn "default executablePath not found: $($defaultProfile.executablePath)" }
-    }
-    if ($defaultProfile.userDataDir) {
-      Ok "default userDataDir set: $($defaultProfile.userDataDir)"
-    }
   }
   catch {
-    Err "profile config is not valid JSON"
+    Err "profile config JSON parse failed: $($_.Exception.Message)"
+  }
+
+  if ($cfg) {
+    $profiles = Get-OptionalPropertyValue -Object $cfg -Name "profiles"
+    $defaultProfile = Get-OptionalPropertyValue -Object $profiles -Name "default"
+    if (-not $defaultProfile) {
+      Warn "profile config has no profiles.default entry"
+    } else {
+      $executablePath = Get-OptionalPropertyValue -Object $defaultProfile -Name "executablePath"
+      if ($executablePath) {
+        if (Test-Path $executablePath) { Ok "default executablePath exists" }
+        else { Warn "default executablePath not found: $executablePath" }
+      }
+
+      $userDataDir = Get-OptionalPropertyValue -Object $defaultProfile -Name "userDataDir"
+      if ($userDataDir) {
+        Ok "default userDataDir set: $userDataDir"
+      }
+    }
   }
 }
 
 Write-Host ""
 Write-Host "[5/6] default profile mode"
-if ($defaultProfile -and $defaultProfile.cdpUrl) {
-  Ok "default profile uses cdpUrl: $($defaultProfile.cdpUrl)"
-}
-elseif ($defaultProfile -and $defaultProfile.cdpPort) {
-  $port = [int]$defaultProfile.cdpPort
-  if (Test-PortOpen -Port $port) {
-    Ok "default CDP port is reachable: $port"
-  }
-  else {
-    Warn "default CDP port is not reachable: $port (profile=default will auto-fallback to local launch)"
-  }
+if (-not $defaultProfile) {
+  Warn "default profile not configured; skipping CDP mode checks"
 }
 else {
-  Ok "default profile uses local launch mode (no CDP dependency)"
+  $cdpUrl = Get-OptionalPropertyValue -Object $defaultProfile -Name "cdpUrl"
+  $cdpPortValue = Get-OptionalPropertyValue -Object $defaultProfile -Name "cdpPort"
+
+  if ($cdpUrl) {
+    Ok "default profile uses cdpUrl: $cdpUrl"
+  }
+  elseif ($cdpPortValue) {
+    $port = 0
+    if (-not [int]::TryParse([string]$cdpPortValue, [ref]$port)) {
+      Warn "default cdpPort is not a valid integer: $cdpPortValue"
+    }
+    elseif (Test-PortOpen -Port $port) {
+      Ok "default CDP port is reachable: $port"
+    }
+    else {
+      Warn "default CDP port is not reachable: $port (profile=default will auto-fallback to local launch)"
+    }
+  }
+  else {
+    Ok "default profile uses local launch mode (no CDP dependency)"
+  }
 }
 
 Write-Host ""

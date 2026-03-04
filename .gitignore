@@ -71,5 +71,8 @@ memory/skills/skills/
 .codex/state_*.sqlite*
 .codex/skills/.system/
 
+# Gemini CLI local artifacts (do not commit)
+.gemini/settings.json
+
 # Local analysis clones (do not commit)
 everything-claude-code/
