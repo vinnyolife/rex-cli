@@ -146,6 +146,7 @@ extra_css:
   - assets/custom.css
 
 nav:
+  - Home: index.md
   - Blog: https://cli.rexai.top/blog/
   - Getting Started:
       - Quick Start: getting-started.md
