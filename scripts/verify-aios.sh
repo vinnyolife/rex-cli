@@ -106,6 +106,10 @@ if [[ -x "$SCRIPT_DIR/doctor-contextdb-skills.sh" ]]; then
   run_doctor "doctor-contextdb-skills" "$SCRIPT_DIR/doctor-contextdb-skills.sh" --client all
 fi
 
+if [[ -x "$SCRIPT_DIR/doctor-superpowers.sh" ]]; then
+  run_doctor "doctor-superpowers" "$SCRIPT_DIR/doctor-superpowers.sh"
+fi
+
 if [[ -x "$SCRIPT_DIR/doctor-security-config.sh" ]]; then
   security_args=()
   if [[ "$GLOBAL_SECURITY" == "true" ]]; then

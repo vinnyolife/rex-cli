@@ -90,6 +90,7 @@ Write-Host "Strict: $Strict"
 
 $effectiveWarns += Invoke-Doctor -Label 'doctor-contextdb-shell' -Path (Join-Path $ScriptDir 'doctor-contextdb-shell.ps1')
 $effectiveWarns += Invoke-Doctor -Label 'doctor-contextdb-skills' -Path (Join-Path $ScriptDir 'doctor-contextdb-skills.ps1') -Args @('-Client', 'all')
+$effectiveWarns += Invoke-Doctor -Label 'doctor-superpowers' -Path (Join-Path $ScriptDir 'doctor-superpowers.ps1')
 
 $securityArgs = @()
 if ($GlobalSecurity) {

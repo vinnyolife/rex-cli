@@ -11,13 +11,14 @@ Usage:
   scripts/uninstall-all.sh [options]
 
 Options:
-  --components <list>          Comma list: shell,skills,browser (default: shell,skills)
+  --components <list>          Comma list: shell,skills,browser,superpowers (default: shell,skills)
   --client <all|codex|claude|gemini|opencode>
                                Skills target clients (default: all)
   -h, --help                   Show this help
 
 Notes:
   browser component has no destructive auto-uninstall by default.
+  superpowers component has no destructive auto-uninstall by default.
 USAGE
 }
 
@@ -71,10 +72,10 @@ validate_components() {
   for item in "${COMPONENT_LIST[@]}"; do
     [[ -n "$item" ]] || continue
     case "$item" in
-      all|browser|shell|skills) ;;
+      all|browser|shell|skills|superpowers) ;;
       *)
         echo "Unsupported component: $item" >&2
-        echo "Allowed: browser,shell,skills (or all)" >&2
+        echo "Allowed: browser,shell,skills,superpowers (or all)" >&2
         exit 1
         ;;
     esac
@@ -102,6 +103,12 @@ if has_component browser; then
   echo "[info] Browser MCP has no destructive auto-uninstall script."
   echo "[info] It is safe to keep mcp-server build/runtime artifacts."
   echo "[info] For manual cleanup, remove mcp-server/node_modules and mcp-server/dist if needed."
+fi
+
+if has_component superpowers; then
+  echo "[info] Superpowers has no destructive auto-uninstall script."
+  echo "[info] It is safe to keep ~/.codex/superpowers."
+  echo "[info] For manual cleanup, remove ~/.agents/skills/superpowers and ~/.codex/superpowers if needed."
 fi
 
 if has_component shell; then

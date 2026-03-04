@@ -26,8 +26,8 @@ function Get-ComponentSet {
   }
 
   foreach ($item in $parts) {
-    if ($item -notin @('all', 'browser', 'shell', 'skills')) {
-      throw "Unsupported component: $item. Allowed: browser,shell,skills (or all)"
+    if ($item -notin @('all', 'browser', 'shell', 'skills', 'superpowers')) {
+      throw "Unsupported component: $item. Allowed: browser,shell,skills,superpowers (or all)"
     }
   }
 
@@ -72,6 +72,12 @@ if (Has-Component -Set $componentSet -Needle 'browser') {
   Write-Host '[info] Browser MCP has no destructive auto-uninstall script.'
   Write-Host '[info] It is safe to keep mcp-server build/runtime artifacts.'
   Write-Host '[info] For manual cleanup, remove mcp-server/node_modules and mcp-server/dist if needed.'
+}
+
+if (Has-Component -Set $componentSet -Needle 'superpowers') {
+  Write-Host '[info] Superpowers has no destructive auto-uninstall script.'
+  Write-Host '[info] It is safe to keep ~/.codex/superpowers.'
+  Write-Host '[info] For manual cleanup, remove ~/.agents/skills/superpowers and ~/.codex/superpowers if needed.'
 }
 
 if (Has-Component -Set $componentSet -Needle 'shell') {
