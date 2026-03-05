@@ -7,6 +7,7 @@ import { type } from './actions/type.js';
 import { snapshot } from './actions/snapshot.js';
 import { screenshot } from './actions/screenshot.js';
 import { authCheck } from './actions/auth-check.js';
+import { challengeCheck } from './actions/challenge-check.js';
 
 export {
   profileManager,
@@ -17,6 +18,7 @@ export {
   snapshot,
   screenshot,
   authCheck,
+  challengeCheck,
 };
 
 // MCP 工具定义
@@ -82,6 +84,16 @@ export const tools = [
   {
     name: 'browser_auth_check',
     description: 'Check whether current page likely requires manual login',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profile: { type: 'string', default: 'default' },
+      },
+    },
+  },
+  {
+    name: 'browser_challenge_check',
+    description: 'Check whether current page is blocked by anti-bot challenge (Cloudflare/Google/captcha)',
     inputSchema: {
       type: 'object',
       properties: {

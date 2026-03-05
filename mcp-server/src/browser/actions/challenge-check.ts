@@ -1,7 +1,7 @@
 import { browserLauncher } from '../launcher.js';
-import { detectAuthRequired, detectChallengeRequired } from '../auth.js';
+import { detectChallengeRequired } from '../auth.js';
 
-export async function authCheck(profile: string = 'default') {
+export async function challengeCheck(profile: string = 'default') {
   const state = browserLauncher.getState(profile);
   if (!state || state.activePageId === null) {
     throw new Error('No active page');
@@ -12,15 +12,11 @@ export async function authCheck(profile: string = 'default') {
     throw new Error('Page not found');
   }
 
-  const [auth, challenge] = await Promise.all([
-    detectAuthRequired(page),
-    detectChallengeRequired(page),
-  ]);
+  const challenge = await detectChallengeRequired(page);
   return {
     success: true,
     profile,
-    auth,
     challenge,
-    requiresHumanAction: auth.requiresHumanLogin || challenge.requiresHumanVerification,
+    requiresHumanAction: challenge.requiresHumanVerification,
   };
 }

@@ -2,7 +2,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
-import { tools as playwrightTools, browserLauncher, navigate, click, type, snapshot, screenshot, authCheck } from './browser/index.js';
+import { tools as playwrightTools, browserLauncher, navigate, click, type, snapshot, screenshot, authCheck, challengeCheck, } from './browser/index.js';
 const server = new Server({
     name: 'playwright-browser-mcp',
     version: '1.0.0',
@@ -73,6 +73,9 @@ const toolHandlers = {
     },
     browser_auth_check: async (args) => {
         return await authCheck(args?.profile);
+    },
+    browser_challenge_check: async (args) => {
+        return await challengeCheck(args?.profile);
     },
     browser_screenshot: async (args) => {
         const { fullPage, profile, filePath } = args ?? {};
