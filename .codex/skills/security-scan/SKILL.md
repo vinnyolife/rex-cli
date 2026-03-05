@@ -11,7 +11,16 @@ Use this skill when:
 - Editing skills, hooks, MCP config, or client settings
 - Before publishing/releasing changes that affect other projects
 
+## Mandatory Privacy Rule (No Bypass)
+- For config-like files that may contain keys/tokens/passwords, **do not read raw file content directly**.
+- Always read through Privacy Guard first:
+  - `aios privacy read --file <path>` (preferred)
+  - or `node scripts/privacy-guard.mjs read --file <path>`
+- If Privacy Guard reports guard-disabled for sensitive files, enable it first:
+  - `aios privacy enable`
+
 ## Quick Path
+- Ensure strict mode is on: `aios privacy enforce-on`
 - Run the repo verifier: `aios doctor` (preferred when shell integration is installed).
 - Or run: `scripts/doctor-security-config.sh` / `scripts/doctor-security-config.ps1`.
 
@@ -19,6 +28,7 @@ Use this skill when:
 1. **Secrets**
    - No API keys/tokens/cookies committed to git.
    - Prefer env vars + local-only config files ignored by git.
+   - Use Privacy Guard read output when inspection is required.
    - If scanning finds secrets, rotate them, then remove from history if needed.
 
 2. **Tool/permission scope**
@@ -36,4 +46,3 @@ Use this skill when:
 ## Output Discipline
 - Never paste secret values into chat logs or commits.
 - Capture only redacted findings + exact file paths and remediation steps.
-

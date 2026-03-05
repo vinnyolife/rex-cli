@@ -116,13 +116,63 @@ aios() {
       echo "[warn] missing update script: $script"
       return 1
       ;;
+    privacy)
+      local script="$rootpath/scripts/privacy-guard.mjs"
+      if ! command -v node >/dev/null 2>&1; then
+        echo "[warn] node not found; privacy guard unavailable"
+        return 1
+      fi
+      if [[ ! -f "$script" ]]; then
+        echo "[warn] missing privacy guard script: $script"
+        return 1
+      fi
+
+      local action="${1:-status}"
+      shift || true
+
+      case "$action" in
+        init|status|set|read|redact)
+          node "$script" "$action" "$@"
+          return $?
+          ;;
+        enable)
+          node "$script" set --enabled true --mode regex --enforce true --block-when-disabled true --detect-content true "$@"
+          return $?
+          ;;
+        disable)
+          node "$script" set --enabled false "$@"
+          return $?
+          ;;
+        ollama-on)
+          node "$script" set --enabled true --mode hybrid --ollama-enabled true --model qwen3.5:4b "$@"
+          return $?
+          ;;
+        ollama-off)
+          node "$script" set --mode regex --ollama-enabled false "$@"
+          return $?
+          ;;
+        enforce-on)
+          node "$script" set --enforce true --block-when-disabled true --detect-content true "$@"
+          return $?
+          ;;
+        enforce-off)
+          node "$script" set --enforce false --block-when-disabled false "$@"
+          return $?
+          ;;
+        *)
+          echo "[warn] unknown aios privacy action: $action"
+          echo "Usage: aios privacy <status|init|set|read|redact|enable|disable|ollama-on|ollama-off|enforce-on|enforce-off> [args]"
+          return 1
+          ;;
+      esac
+      ;;
     ""|-h|--help|help)
-      echo "Usage: aios <doctor|update> [args]"
+      echo "Usage: aios <doctor|update|privacy> [args]"
       return 0
       ;;
     *)
       echo "[warn] unknown aios subcommand: $sub"
-      echo "Usage: aios <doctor|update> [args]"
+      echo "Usage: aios <doctor|update|privacy> [args]"
       return 1
       ;;
   esac
@@ -130,3 +180,4 @@ aios() {
 
 alias aios-doctor='aios doctor'
 alias aios-update='aios update'
+alias aios-privacy='aios privacy'

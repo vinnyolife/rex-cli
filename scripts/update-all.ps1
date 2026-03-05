@@ -77,6 +77,7 @@ if (Has-Component -Set $componentSet -Needle 'browser') {
 
 if (Has-Component -Set $componentSet -Needle 'shell') {
   Run-Script -Path (Join-Path $ScriptDir 'update-contextdb-shell.ps1') -Args @('-Mode', $Mode)
+  Run-Script -Path (Join-Path $ScriptDir 'install-privacy-guard.ps1')
   if (-not $SkipDoctor) {
     Run-Script -Path (Join-Path $ScriptDir 'doctor-contextdb-shell.ps1')
   }

@@ -19,10 +19,32 @@ Project URL: <https://github.com/rexleimo/rex-cli>
 - Gemini CLI
 - OpenCode
 
-It adds two practical capabilities without replacing native CLIs:
+It adds three practical capabilities without replacing native CLIs:
 
 1. **Filesystem ContextDB** for resumable memory across sessions.
 2. **Unified workflow layer** so you still run `codex`, `claude`, `gemini`, and `opencode` directly.
+3. **Privacy Guard** to redact config/secret-like files before they are read by skills/automation.
+
+## Major Upgrade: Privacy Guard (`~/.rexcil`)
+
+Privacy Guard is the key upgrade in this release.
+
+- Config path: `~/.rexcil/privacy-guard.json`
+- Default state: initialized and enabled during shell setup (strict for sensitive files)
+- Purpose: avoid leaking raw secrets into logs, prompts, and cross-session memory
+
+Use the required strict read entry for config-like files:
+
+```bash
+aios privacy read --file <path>
+```
+
+Optional local model route:
+
+```bash
+aios privacy ollama-on
+# hybrid mode + ollama model qwen3.5:4b
+```
 
 ## What RexCLI Delivers for Ops Funnels
 

@@ -1,10 +1,11 @@
 # RexCLI (AIOS)
 
 本项目是一个面向 `Codex CLI`、`Claude Code`、`Gemini CLI` 的本地 Agent 工作流仓库。  
-目标不是做一个新的聊天客户端，而是给现有 CLI 增加两件事：
+目标不是做一个新的聊天客户端，而是给现有 CLI 增加三件事：
 
 1. 统一浏览器自动化能力（Playwright MCP，`browser_*` 工具）
 2. 跨 CLI 共享的文件系统 Context DB（可追溯会话记忆）
+3. 配置/密钥文件读取前的 Privacy Guard 脱敏（`~/.rexcil/privacy-guard.json`）
 
 ## 先用起来（不想看原理就看这里）
 
@@ -65,6 +66,7 @@ User -> codex/claude/gemini
 - `scripts/contextdb-shell-bridge.mjs`: 跨平台包裹/透传决策桥
 - `scripts/ctx-agent.mjs`: 统一运行器（自动接入 ContextDB）
 - `scripts/contextdb-shell.zsh`: 透明接管 `codex/claude/gemini`
+- `scripts/privacy-guard.mjs`: Privacy Guard CLI（`init/status/set/redact`）
 - `memory/context-db/`: 本仓库会话数据（本地产物，已忽略提交）
 - `config/browser-profiles.json`: 浏览器 profile/CDP 配置
 
@@ -108,6 +110,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components all
 ```
 
 这会在一次流程里安装 Browser MCP、shell 包装层、全局 skills（可选）和 superpowers。
+
+Shell 安装时会自动初始化 Privacy Guard，配置文件默认在 `~/.rexcil/privacy-guard.json`。
+现已默认启用严格策略：命中敏感配置文件时必须先脱敏读取：
+
+```bash
+# 查看状态/严格策略
+aios privacy status
+
+# 读取配置类文件必须走这里
+aios privacy read --file <path>
+
+# 可选：启用本地 ollama + qwen3.5:4b
+aios privacy ollama-on
+```
 
 按需选择组件示例：
 
@@ -184,6 +200,31 @@ ContextDB 包装和 CLI 的 Skills 加载是两层机制：
 - `CODEX_HOME` 建议保持为绝对路径（推荐 `~/.codex`），不要设置为相对路径 `.codex`。
 
 如果你不希望跨项目复用技能，请把自定义技能放在仓库本地目录，而不是 `~` 下的全局目录。
+
+### 3.3 Privacy Guard（默认严格）
+
+Privacy Guard 配置在 `~/.rexcil/privacy-guard.json`，默认开启严格策略。
+
+```bash
+# 查看当前配置
+aios privacy status
+
+# 读取配置/密钥类文件必须走该入口
+aios privacy read --file config/browser-profiles.json
+```
+
+可选本地模型模式：
+
+```bash
+aios privacy ollama-on
+# 等价于 hybrid 模式 + qwen3.5:4b
+```
+
+如需临时关闭：
+
+```bash
+aios privacy disable
+```
 
 ### 4) 直接使用原命令
 

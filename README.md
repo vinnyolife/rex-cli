@@ -1,10 +1,11 @@
 # RexCLI (AIOS)
 
 This repository provides a local-first agent workflow for `Codex CLI`, `Claude Code`, and `Gemini CLI`.
-It does not replace those clients. Instead, it adds two shared capabilities:
+It does not replace those clients. Instead, it adds three shared capabilities:
 
 1. Unified browser automation via Playwright MCP (`browser_*` tools)
 2. Cross-CLI filesystem Context DB for resumable task memory
+3. Privacy Guard redaction before reading config/secret-like files (`~/.rexcil/privacy-guard.json`)
 
 ## Start Here (Use First, Read Later)
 
@@ -65,6 +66,7 @@ User -> codex/claude/gemini
 - `scripts/contextdb-shell-bridge.mjs`: Cross-platform wrap/passthrough decision bridge
 - `scripts/ctx-agent.mjs`: Unified runner that integrates ContextDB
 - `scripts/contextdb-shell.zsh`: Transparent wrappers for `codex/claude/gemini`
+- `scripts/privacy-guard.mjs`: Privacy guard config + redaction CLI (`init/status/set/redact`)
 - `memory/context-db/`: Runtime session artifacts for this repo (ignored by git)
 - `config/browser-profiles.json`: Browser profile/CDP config
 
@@ -108,6 +110,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components all
 ```
 
 This installs Browser MCP, shell wrappers, optional global skills, and superpowers in one flow.
+
+Privacy Guard is now initialized automatically during shell setup, with config stored at `~/.rexcil/privacy-guard.json`.
+It is enabled by default and enforces redaction for sensitive config files:
+
+```bash
+# check status / strict policy
+aios privacy status
+
+# required read path for config-like files
+aios privacy read --file <path>
+
+# optional local ollama path (qwen3.5:4b)
+aios privacy ollama-on
+```
 
 Component selection examples:
 
@@ -184,6 +200,31 @@ ContextDB wrapping and CLI skill loading are different layers:
 - Keep `CODEX_HOME` as an absolute home path (recommended: `~/.codex`). Do not set `CODEX_HOME=.codex`.
 
 If you don't want cross-project skill reuse, keep custom skills in repo-local folders instead of global home directories.
+
+### 3.3 Privacy Guard (strict by default)
+
+Privacy Guard is controlled by `~/.rexcil/privacy-guard.json` and runs in strict mode by default.
+
+```bash
+# inspect current state
+aios privacy status
+
+# required read path for config/secret-like files
+aios privacy read --file config/browser-profiles.json
+```
+
+Optional local model path:
+
+```bash
+aios privacy ollama-on
+# equivalent mode: hybrid with qwen3.5:4b on local ollama
+```
+
+If you must disable temporarily:
+
+```bash
+aios privacy disable
+```
 
 ### 4) Use original commands directly
 

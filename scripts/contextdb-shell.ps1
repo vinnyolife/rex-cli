@@ -142,6 +142,42 @@ function aios {
       $global:LASTEXITCODE = $LASTEXITCODE
       return
     }
+    "privacy" {
+      $script = Join-Path $env:ROOTPATH "scripts/privacy-guard.mjs"
+      if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "[warn] node not found; privacy guard unavailable"
+        $global:LASTEXITCODE = 1
+        return
+      }
+      if (-not (Test-Path -LiteralPath $script)) {
+        Write-Host "[warn] missing privacy guard script: $script"
+        $global:LASTEXITCODE = 1
+        return
+      }
+
+      $action = if ($rest.Count -gt 0) { $rest[0] } else { 'status' }
+      $privacyArgs = if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() }
+
+      switch ($action) {
+        "init" { & node $script "init" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "status" { & node $script "status" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "set" { & node $script "set" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "read" { & node $script "read" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "redact" { & node $script "redact" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "enable" { & node $script "set" "--enabled" "true" "--mode" "regex" "--enforce" "true" "--block-when-disabled" "true" "--detect-content" "true" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "disable" { & node $script "set" "--enabled" "false" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "ollama-on" { & node $script "set" "--enabled" "true" "--mode" "hybrid" "--ollama-enabled" "true" "--model" "qwen3.5:4b" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "ollama-off" { & node $script "set" "--mode" "regex" "--ollama-enabled" "false" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "enforce-on" { & node $script "set" "--enforce" "true" "--block-when-disabled" "true" "--detect-content" "true" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        "enforce-off" { & node $script "set" "--enforce" "false" "--block-when-disabled" "false" @privacyArgs; $global:LASTEXITCODE = $LASTEXITCODE; return }
+        default {
+          Write-Host "[warn] unknown aios privacy action: $action"
+          Write-Host "Usage: aios privacy <status|init|set|read|redact|enable|disable|ollama-on|ollama-off|enforce-on|enforce-off> [args]"
+          $global:LASTEXITCODE = 1
+          return
+        }
+      }
+    }
     "" { }
     "-h" { }
     "--help" { }
@@ -151,6 +187,6 @@ function aios {
     }
   }
 
-  Write-Host "Usage: aios <doctor|update> [args]"
+  Write-Host "Usage: aios <doctor|update|privacy> [args]"
   $global:LASTEXITCODE = 0
 }

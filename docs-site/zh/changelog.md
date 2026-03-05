@@ -14,6 +14,7 @@ description: 版本历史、升级说明与文档变更入口。
 
 ## 最近版本
 
+- `0.8.0`（2026-03-05）：新增严格 Privacy Guard（`~/.rexcil`），配置类文件必须走脱敏读取路径，支持 Ollama（`qwen3.5:4b`）并接入安装流程
 - `0.7.0`（2026-03-05）：新增浏览器反自动化挑战检测（`browser_challenge_check`）与明确人工接管信号
 - `0.6.2`（2026-03-04）：修复 opt-in wrapper 模式下未自动创建 `.contextdb-enable` 的问题
 - `0.6.1`（2026-03-04）：加固 Windows `browser doctor`，并明确 Node 20+ 前置要求

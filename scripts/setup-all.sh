@@ -132,6 +132,7 @@ fi
 
 if has_component shell; then
   run_script "$SCRIPT_DIR/install-contextdb-shell.sh" --mode "$WRAP_MODE"
+  run_script "$SCRIPT_DIR/install-privacy-guard.sh"
   if [[ "$SKIP_DOCTOR" != "true" ]]; then
     run_script "$SCRIPT_DIR/doctor-contextdb-shell.sh"
   fi

@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-05
+
+- add strict privacy guard with ollama-backed redaction
+
 ## [0.7.0] - 2026-03-05
 
 - feat: add browser challenge detection and handoff signals

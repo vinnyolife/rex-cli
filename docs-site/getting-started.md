@@ -33,6 +33,37 @@ This page combines macOS, Linux, and Windows setup into one flow. Use the OS tab
     . $PROFILE
     ```
 
+### 0.1 Privacy Guard Strict Read (enabled by default)
+
+Shell setup now initializes Privacy Guard config at `~/.rexcil/privacy-guard.json` and enables strict redaction policy by default.
+For config or secret-like files, use the strict read path:
+
+=== "macOS / Linux"
+
+    ```bash
+    aios privacy read --file <path>
+    ```
+
+=== "Windows (PowerShell)"
+
+    ```powershell
+    aios privacy read --file <path>
+    ```
+
+Optional local model path (Ollama + `qwen3.5:4b`):
+
+=== "macOS / Linux"
+
+    ```bash
+    aios privacy ollama-on
+    ```
+
+=== "Windows (PowerShell)"
+
+    ```powershell
+    aios privacy ollama-on
+    ```
+
 Component selection examples:
 
 === "macOS / Linux"

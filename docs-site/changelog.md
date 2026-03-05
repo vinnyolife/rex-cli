@@ -14,6 +14,7 @@ Use this page to track what changed in `RexCLI` and jump to release-related docs
 
 ## Recent Versions
 
+- `0.8.0` (2026-03-05): add strict Privacy Guard (`~/.rexcil`) with required redacted read path, Ollama (`qwen3.5:4b`) support, and setup integration
 - `0.7.0` (2026-03-05): add browser anti-bot challenge detection (`browser_challenge_check`) and explicit human-handoff signals
 - `0.6.2` (2026-03-04): fix auto-create `.contextdb-enable` for opt-in wrapper mode
 - `0.6.1` (2026-03-04): harden browser doctor on Windows and clarify Node 20+ prerequisite
