@@ -59,6 +59,34 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Guard stale reruns
+        id: freshness
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: "main",
+            });
+            const latestSha = data.commit.sha;
+            const isLatest = context.sha === latestSha;
+            core.setOutput("latest_sha", latestSha);
+            core.setOutput("is_latest", isLatest ? "true" : "false");
+            if (!isLatest) {
+              core.warning(
+                `Skip deploy for stale run commit ${context.sha}; latest main is ${latestSha}.`,
+              );
+            }
+
       - name: Deploy to GitHub Pages
+        if: steps.freshness.outputs.is_latest == 'true'
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Skip stale deploy
+        if: steps.freshness.outputs.is_latest != 'true'
+        run: |
+          echo "stale run detected: ${GITHUB_SHA}"
+          echo "latest main: ${{ steps.freshness.outputs.latest_sha }}"
+          echo "deployment intentionally skipped"
