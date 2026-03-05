@@ -14,6 +14,7 @@ description: 릴리스 이력, 업그레이드 안내, 관련 문서 링크.
 
 ## 최근 버전
 
+- `0.7.0` (2026-03-05): 브라우저 반자동화 챌린지 감지(`browser_challenge_check`)와 명시적 인간 인수인계 신호 추가
 - `0.6.2` (2026-03-04): opt-in wrapper 모드에서 `.contextdb-enable` 자동 생성 누락 문제 수정
 - `0.6.1` (2026-03-04): Windows browser doctor 안정화 및 Node 20+ 요구사항 명확화
 - `0.6.0` (2026-03-04): 멀티 CLI doctor + security scan skills 패키지 추가

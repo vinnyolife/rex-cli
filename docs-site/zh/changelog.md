@@ -14,6 +14,7 @@ description: 版本历史、升级说明与文档变更入口。
 
 ## 最近版本
 
+- `0.7.0`（2026-03-05）：新增浏览器反自动化挑战检测（`browser_challenge_check`）与明确人工接管信号
 - `0.6.2`（2026-03-04）：修复 opt-in wrapper 模式下未自动创建 `.contextdb-enable` 的问题
 - `0.6.1`（2026-03-04）：加固 Windows `browser doctor`，并明确 Node 20+ 前置要求
 - `0.6.0`（2026-03-04）：新增跨 CLI `doctor` 与安全扫描 skills 套件

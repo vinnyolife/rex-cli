@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-05
+
+- feat: add browser challenge detection and handoff signals
+
 ## [0.6.2] - 2026-03-04
 
 - fix: auto-create .contextdb-enable for opt-in wrapper mode
