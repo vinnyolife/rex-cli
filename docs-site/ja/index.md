@@ -1,11 +1,11 @@
 ---
 title: 概要
-description: 既存の Codex/Claude/Gemini ワークフローを OpenClaw スタイル能力で強化する入口。
+description: 既存の Codex/Claude/Gemini/OpenCode ワークフローを OpenClaw スタイル能力で強化する入口。
 ---
 
 # RexCLI ドキュメント
 
-> 今の CLI 習慣はそのまま。`codex` / `claude` / `gemini` に OpenClaw スタイルの能力レイヤーを追加します。
+> 今の CLI 習慣はそのまま。`codex` / `claude` / `gemini` / `opencode` に OpenClaw スタイルの能力レイヤーを追加します。
 
 [30秒で開始（Primary CTA）](getting-started.md){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="hero" data-rex-target="quick_start" }
 [能力ケースを見る](case-library.md){ .md-button data-rex-track="cta_click" data-rex-location="hero" data-rex-target="case_library" }
@@ -22,7 +22,7 @@ description: 既存の Codex/Claude/Gemini ワークフローを OpenClaw スタ
 ネイティブ CLI を置き換えず、次の 2 つを追加します。
 
 1. ファイルシステム ContextDB（セッション記憶）
-2. 透過ラッパー（`codex` / `claude` / `gemini` をそのまま利用）
+2. 統合ワークフロー層（`codex` / `claude` / `gemini` / `opencode` をそのまま利用）
 
 ## RexCLI の提供価値（運用視点）
 
@@ -42,7 +42,7 @@ description: 既存の Codex/Claude/Gemini ワークフローを OpenClaw スタ
 
 ### 3. ContextDB による複数 CLI 連携の安定化
 
-- 典型入力: Codex/Claude/Gemini の運用フローと引き継ぎ課題。
+- 典型入力: Codex/Claude/Gemini/OpenCode の運用フローと引き継ぎ課題。
 - 中核動作: checkpoint 粒度、記憶引き継ぎルール、one-shot/interactive 導線の定義。
 - 標準成果物: 標準引き継ぎコマンド、再開テンプレート、跨セッション運用基準。
 - 検収指標: ツール切替時の背景再説明コストを削減。
@@ -80,6 +80,7 @@ codex
 codex
 claude
 gemini
+opencode
 ```
 
 ## 次に読む

@@ -1,11 +1,11 @@
 ---
 title: Overview
-description: Upgrade your existing Codex/Claude/Gemini workflow with OpenClaw-style capabilities.
+description: Upgrade your existing Codex/Claude/Gemini/OpenCode workflow with OpenClaw-style capabilities.
 ---
 
 # RexCLI
 
-> Keep your current CLI workflow. Add OpenClaw-style capabilities on top of `codex`, `claude`, and `gemini`.
+> Keep your current CLI workflow. Add OpenClaw-style capabilities on top of `codex`, `claude`, `gemini`, and `opencode`.
 
 [Start in 30 seconds (Primary CTA)](getting-started.md){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="hero" data-rex-target="quick_start" }
 [See Capability Cases](case-library.md){ .md-button data-rex-track="cta_click" data-rex-location="hero" data-rex-target="case_library" }
@@ -22,7 +22,7 @@ Project URL: <https://github.com/rexleimo/rex-cli>
 It adds two practical capabilities without replacing native CLIs:
 
 1. **Filesystem ContextDB** for resumable memory across sessions.
-2. **Unified wrapper flow** so you still run `codex`, `claude`, or `gemini` directly.
+2. **Unified workflow layer** so you still run `codex`, `claude`, `gemini`, and `opencode` directly.
 
 ## What RexCLI Delivers for Ops Funnels
 
@@ -42,7 +42,7 @@ It adds two practical capabilities without replacing native CLIs:
 
 ### 3. Multi-CLI handoff stabilization with ContextDB
 
-- Typical input: existing Codex/Claude/Gemini flow and common handoff failures.
+- Typical input: existing Codex/Claude/Gemini/OpenCode flow and common handoff failures.
 - Core actions: define checkpoint granularity, memory handoff rules, one-shot and interactive flows.
 - Standard deliverables: handoff command set, restart templates, cross-session workflow baseline.
 - Success metrics: less repeated background explanation after tool switching or session restart.
@@ -101,6 +101,7 @@ codex
 codex
 claude
 gemini
+opencode
 
 # one-shot mode (full 5-step pipeline)
 scripts/ctx-agent.sh --agent codex-cli --prompt "Continue from latest checkpoint"
