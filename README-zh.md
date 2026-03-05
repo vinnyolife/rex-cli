@@ -188,6 +188,41 @@ touch .contextdb-enable
 export CTXDB_AUTO_CREATE_MARKER=0
 ```
 
+### 3.1.1 常见坑：Node ABI 与 `better-sqlite3` 不匹配
+
+如果启动时报错：
+
+```text
+contextdb init failed: ... better_sqlite3.node ...
+... compiled against NODE_MODULE_VERSION 115 ...
+... requires NODE_MODULE_VERSION 127 ...
+```
+
+根因：
+- 包装层会用你当前 shell 的 Node 运行时执行 ContextDB。
+- `mcp-server/node_modules/better-sqlite3` 是原生模块，必须和当前 Node ABI 一致。
+- 常见场景是你在 Node 22 项目里运行 `codex`，但 `aios/mcp-server` 依赖是用 Node 20 安装的。
+
+修复：
+
+```bash
+cd "$ROOTPATH/mcp-server"
+npm rebuild better-sqlite3
+# 如果仅 rebuild 不够，再执行：
+# npm install
+```
+
+验证：
+
+```bash
+cd "$ROOTPATH/mcp-server"
+npm run contextdb -- init --workspace <你的项目根目录>
+```
+
+预防建议：
+- 每次切换 Node 主版本后，在 `mcp-server` 重新构建原生依赖。
+- 如果不希望跨项目触发包装，保持 `CTXDB_WRAP_MODE=repo-only`（或临时设为 `off`）。
+
 ### 3.2 Skills 作用域（重要）
 
 ContextDB 包装和 CLI 的 Skills 加载是两层机制：

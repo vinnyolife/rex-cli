@@ -188,6 +188,41 @@ Latest behavior:
 export CTXDB_AUTO_CREATE_MARKER=0
 ```
 
+### 3.1.1 Common pitfall: Node ABI mismatch (`better-sqlite3`)
+
+If startup fails with:
+
+```text
+contextdb init failed: ... better_sqlite3.node ...
+... compiled against NODE_MODULE_VERSION 115 ...
+... requires NODE_MODULE_VERSION 127 ...
+```
+
+Root cause:
+- The wrapper runs ContextDB with your current shell Node runtime.
+- `mcp-server/node_modules/better-sqlite3` is a native addon and must match that Node ABI.
+- A common case is running `codex` in a Node 22 project while `aios/mcp-server` dependencies were installed under Node 20.
+
+Fix:
+
+```bash
+cd "$ROOTPATH/mcp-server"
+npm rebuild better-sqlite3
+# fallback if rebuild is not enough:
+# npm install
+```
+
+Verify:
+
+```bash
+cd "$ROOTPATH/mcp-server"
+npm run contextdb -- init --workspace <your-project-root>
+```
+
+Prevention:
+- After switching Node major versions, rebuild native deps in `mcp-server`.
+- If you do not want cross-project wrapping, keep `CTXDB_WRAP_MODE=repo-only` (or `off` temporarily).
+
 ### 3.2 Skill scope (important)
 
 ContextDB wrapping and CLI skill loading are different layers:
