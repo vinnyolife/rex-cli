@@ -26,7 +26,19 @@
       "Bash(ls:*)",
       "Bash(mkdocs build:*)",
       "Bash(pip3 install:*)",
-      "Bash(gh run:*)"
+      "Bash(gh run:*)",
+      "Bash(curl:*)",
+      "Bash(cp:*)",
+      "Bash(node:*)",
+      "mcp__playwright-browser-mcp__browser_launch",
+      "mcp__playwright-browser-mcp__browser_snapshot",
+      "mcp__playwright-browser-mcp__browser_navigate",
+      "mcp__playwright-browser-mcp__browser_click",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__playwright-browser-mcp__browser_auth_check",
+      "mcp__chrome-devtools__new_page",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__click"
     ]
   },
   "approvalMode": "auto",

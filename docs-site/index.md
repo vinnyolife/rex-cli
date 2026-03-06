@@ -7,8 +7,10 @@ description: Upgrade your existing Codex/Claude/Gemini/OpenCode workflow with Op
 
 > Keep your current CLI workflow. Add OpenClaw-style capabilities on top of `codex`, `claude`, `gemini`, and `opencode`.
 
-[Quick Start](getting-started.md){ .md-button .md-button--primary }
-[Superpowers](superpowers.md){ .md-button }
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=home_hero_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="home_hero" data-rex-target="github_star" }
+[Quick Start](getting-started.md){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="home_hero" data-rex-target="quick_start" }
+[Compare Workflows](cli-comparison.md){ .md-button data-rex-track="cta_click" data-rex-location="home_hero" data-rex-target="compare_workflows" }
+[Superpowers](superpowers.md){ .md-button data-rex-track="cta_click" data-rex-location="home_hero" data-rex-target="superpowers" }
 
 Project URL: <https://github.com/rexleimo/rex-cli>
 
@@ -53,6 +55,7 @@ codex
 
 - [Superpowers](superpowers.md) - Automation skills that make your CLI smarter
 - [Quick Start](getting-started.md)
+- [Raw CLI vs RexCLI](cli-comparison.md)
 - [Case Library](case-library.md)
 - [Architecture](architecture.md)
 - [ContextDB](contextdb.md)

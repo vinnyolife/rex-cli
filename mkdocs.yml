@@ -68,7 +68,11 @@ plugins:
             Architecture: 架构
             CLI Workflows: CLI 工作流
             Resources: 资源
+            CLI Comparison: CLI 对比
             Case Library: 官方案例库
+            Case - Cross-CLI Handoff: 案例 - 跨 CLI 交接
+            Case - Browser Auth-Wall Flow: 案例 - 浏览器认证墙流程
+            Case - Privacy Guard Config Read: 案例 - Privacy Guard 配置读取
             Changelog: 更新日志
             Friends: 友情链接
             External: 外部链接
@@ -91,7 +95,11 @@ plugins:
             Architecture: アーキテクチャ
             CLI Workflows: CLI ワークフロー
             Resources: リソース
+            CLI Comparison: CLI 比較
             Case Library: 公式ケースライブラリ
+            Case - Cross-CLI Handoff: 事例 - クロスCLI引き継ぎ
+            Case - Browser Auth-Wall Flow: 事例 - ブラウザ認証ウォール
+            Case - Privacy Guard Config Read: 事例 - Privacy Guard設定読取
             Changelog: 変更履歴
             Friends: リンク集
             External: 外部リンク
@@ -114,7 +122,11 @@ plugins:
             Architecture: 아키텍처
             CLI Workflows: CLI 워크플로
             Resources: 리소스
+            CLI Comparison: CLI 비교
             Case Library: 공식 사례 라이브러리
+            Case - Cross-CLI Handoff: 사례 - 크로스 CLI 핸드오프
+            Case - Browser Auth-Wall Flow: 사례 - 브라우저 인증 장벽 흐름
+            Case - Privacy Guard Config Read: 사례 - Privacy Guard 설정 읽기
             Changelog: 변경 로그
             Friends: 추천 링크
             External: 외부 링크
@@ -155,7 +167,11 @@ nav:
       - Architecture: architecture.md
       - CLI Workflows: use-cases.md
   - Resources:
+      - CLI Comparison: cli-comparison.md
       - Case Library: case-library.md
+      - Case - Cross-CLI Handoff: case-cross-cli-handoff.md
+      - Case - Browser Auth-Wall Flow: case-auth-wall-browser.md
+      - Case - Privacy Guard Config Read: case-privacy-guard.md
       - Changelog: changelog.md
       - Friends: friends.md
   - External:

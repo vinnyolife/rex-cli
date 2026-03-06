@@ -13,6 +13,14 @@ Each case includes:
 - `Run`: copy-paste commands
 - `Evidence`: what proves success
 
+## Featured English Deep Dives
+
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=case_library_featured_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="case_library_featured" data-rex-target="github_star" }
+[Raw CLI vs RexCLI Layer](cli-comparison.md){ data-rex-track="cta_click" data-rex-location="case_library_featured" data-rex-target="compare_workflows" }
+[Case: Cross-CLI Handoff](case-cross-cli-handoff.md){ data-rex-track="cta_click" data-rex-location="case_library_featured" data-rex-target="case_handoff" }
+[Case: Browser Auth-Wall Flow](case-auth-wall-browser.md){ data-rex-track="cta_click" data-rex-location="case_library_featured" data-rex-target="case_authwall" }
+[Case: Privacy Guard Config Read](case-privacy-guard.md){ data-rex-track="cta_click" data-rex-location="case_library_featured" data-rex-target="case_privacy" }
+
 ## Case 1: 5-minute fresh setup on a new machine
 
 **When to use**
