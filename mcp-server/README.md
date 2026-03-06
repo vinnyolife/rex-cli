@@ -25,7 +25,7 @@ Configure your client MCP config (use the absolute path printed by installer):
   "mcpServers": {
     "playwright-browser-mcp": {
       "command": "node",
-      "args": ["/ABS/PATH/rex-ai-boot/mcp-server/dist/index.js"]
+      "args": ["/ABS/PATH/rex-cli/mcp-server/dist/index.js"]
     }
   }
 }
@@ -125,11 +125,11 @@ This repo now includes a lightweight filesystem context DB under `memory/context
 ```bash
 cd mcp-server
 npm run contextdb -- init
-npm run contextdb -- session:new --agent claude-code --project rex-ai-boot --goal "stabilize browser automation"
+npm run contextdb -- session:new --agent claude-code --project rex-cli --goal "stabilize browser automation"
 npm run contextdb -- event:add --session <session_id> --role user --text "Need retry and checkpoint strategy"
 npm run contextdb -- checkpoint --session <session_id> --summary "Auth wall found; waiting human login" --status blocked --next "wait-login|resume-run"
 npm run contextdb -- context:pack --session <session_id> --out memory/context-db/exports/<session_id>-context.md
-npm run contextdb -- search --query "auth race" --project rex-ai-boot
+npm run contextdb -- search --query "auth race" --project rex-cli
 npm run contextdb -- timeline --session <session_id> --limit 30
 npm run contextdb -- event:get --id <session_id>#<seq>
 npm run contextdb -- index:rebuild
@@ -140,7 +140,7 @@ Optional semantic rerank:
 ```bash
 export CONTEXTDB_SEMANTIC=1
 export CONTEXTDB_SEMANTIC_PROVIDER=token
-npm run contextdb -- search --query "issue auth" --project rex-ai-boot --semantic
+npm run contextdb -- search --query "issue auth" --project rex-cli --semantic
 ```
 
 Unknown or unavailable providers fall back to lexical query automatically.
@@ -164,13 +164,13 @@ From repository root:
 
 ```bash
 # Claude interactive (loads latest session context)
-scripts/ctx-agent.sh --agent claude-code --project rex-ai-boot
+scripts/ctx-agent.sh --agent claude-code --project rex-cli
 
 # Gemini one-shot (auto logs prompt/response into context-db)
-scripts/ctx-agent.sh --agent gemini-cli --project rex-ai-boot --prompt "继续上一次任务，先给我下一步计划"
+scripts/ctx-agent.sh --agent gemini-cli --project rex-cli --prompt "继续上一次任务，先给我下一步计划"
 
 # Codex one-shot (auto logs prompt/response/checkpoint into context-db)
-scripts/ctx-agent.sh --agent codex-cli --project rex-ai-boot --prompt "根据现有上下文继续实现"
+scripts/ctx-agent.sh --agent codex-cli --project rex-cli --prompt "根据现有上下文继续实现"
 ```
 
 For full automation, use one-shot mode (`--prompt`) so the script performs all five steps automatically:

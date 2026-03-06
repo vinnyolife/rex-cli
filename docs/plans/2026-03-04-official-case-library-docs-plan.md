@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add an official, discoverable case library that shows what rex-ai-boot can do with reproducible commands and evidence criteria.
+**Goal:** Add an official, discoverable case library that shows what rex-cli can do with reproducible commands and evidence criteria.
 
 **Architecture:** Introduce a dedicated `case-library` doc as the canonical capability map, then cross-link it from Overview and CLI Workflows so users can find concrete scenarios in under one click. Keep localized entry pages aligned so non-English users can still discover and run the same flows.
 

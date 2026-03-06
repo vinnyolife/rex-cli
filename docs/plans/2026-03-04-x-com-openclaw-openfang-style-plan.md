@@ -24,7 +24,7 @@
 ```text
 Most AI agent stacks look great in demos, then break in setup.
 
-We built rex-ai-boot to make real workflows stable across:
+We built rex-cli to make real workflows stable across:
 Codex + Claude Code + Gemini CLI + OpenCode
 
 One capability layer.
@@ -69,7 +69,7 @@ Composition: 16:9, strong center focus, readable typography, no watermark.
 Design a bold technical infographic for X.com about AI coding workflow reliability.
 Main title: "One Capability Layer, Four AI Clients".
 Show four nodes: Codex, Claude Code, Gemini CLI, OpenCode.
-All connect to a central layer named "rex-ai-boot".
+All connect to a central layer named "rex-cli".
 Below central layer show features: "doctor", "security check", "skills sync", "versioned release".
 Visual style: modern developer tooling, clean geometry, high readability, no cartoon.
 Palette: deep navy, electric cyan, white text, orange accent.

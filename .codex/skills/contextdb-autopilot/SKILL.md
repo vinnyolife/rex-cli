@@ -20,9 +20,9 @@ Runtime core: `scripts/ctx-agent-core.mjs` (single source for sh/mjs wrappers)
 Use one-shot mode (`--prompt`) for full automation.
 
 ```bash
-scripts/ctx-agent.sh --agent codex-cli --project rex-ai-boot --prompt "继续上次任务，先做最小变更"
-scripts/ctx-agent.sh --agent claude-code --project rex-ai-boot --prompt "延续当前会话并输出下一步"
-scripts/ctx-agent.sh --agent gemini-cli --project rex-ai-boot --prompt "基于已有上下文继续执行"
+scripts/ctx-agent.sh --agent codex-cli --project rex-cli --prompt "继续上次任务，先做最小变更"
+scripts/ctx-agent.sh --agent claude-code --project rex-cli --prompt "延续当前会话并输出下一步"
+scripts/ctx-agent.sh --agent gemini-cli --project rex-cli --prompt "基于已有上下文继续执行"
 ```
 
 ## Session Control
@@ -39,7 +39,7 @@ Example:
 ```bash
 scripts/ctx-agent.sh \
   --agent codex-cli \
-  --project rex-ai-boot \
+  --project rex-cli \
   --session codex-cli-20260303T010101-abcd1234 \
   --status done \
   --prompt "所有改动完成，给最终总结"
@@ -55,7 +55,7 @@ Use these for index-first retrieval before full packet expansion:
 
 ```bash
 cd mcp-server
-npm run contextdb -- search --query "auth race" --project rex-ai-boot --kinds response --refs auth.ts
+npm run contextdb -- search --query "auth race" --project rex-cli --kinds response --refs auth.ts
 npm run contextdb -- timeline --session <session_id> --limit 30
 npm run contextdb -- event:get --id <session_id>#<seq>
 npm run contextdb -- index:rebuild
@@ -66,7 +66,7 @@ Optional semantic rerank:
 ```bash
 export CONTEXTDB_SEMANTIC=1
 export CONTEXTDB_SEMANTIC_PROVIDER=token
-npm run contextdb -- search --query "issue auth" --project rex-ai-boot --semantic
+npm run contextdb -- search --query "issue auth" --project rex-cli --semantic
 ```
 
 Recovery:

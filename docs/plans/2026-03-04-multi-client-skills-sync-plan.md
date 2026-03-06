@@ -43,8 +43,8 @@
 ### Task 2 (P0): Add Gemini skills target (native extension format)
 
 **Files:**
-- Create: `.gemini/extensions/rex-ai-boot-skills/gemini-extension.json`
-- Create: `.gemini/extensions/rex-ai-boot-skills/SKILL.md`
+- Create: `.gemini/extensions/rex-cli-skills/gemini-extension.json`
+- Create: `.gemini/extensions/rex-cli-skills/SKILL.md`
 - Create: `scripts/skills/generate-gemini-extension.sh`
 - Create: `scripts/skills/generate-gemini-extension.ps1`
 - Modify: `scripts/install-contextdb-skills.sh`

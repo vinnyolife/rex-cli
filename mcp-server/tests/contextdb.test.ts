@@ -52,7 +52,7 @@ test('contextdb cli supports index:rebuild', async () => {
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'codex-cli',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'rebuild index smoke test',
   });
 
@@ -79,7 +79,7 @@ test('createSession writes metadata and index record', async () => {
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'claude-code',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'Diagnose flaky browser launch',
     tags: ['debug', 'browser'],
   });
@@ -101,7 +101,7 @@ test('createSession writes metadata and index record', async () => {
 
   const meta = JSON.parse(metaRaw) as { agent: string; project: string; goal: string };
   assert.equal(meta.agent, 'claude-code');
-  assert.equal(meta.project, 'rex-ai-boot');
+  assert.equal(meta.project, 'rex-cli');
   assert.equal(meta.goal, 'Diagnose flaky browser launch');
   assert.match(indexRaw, new RegExp(session.sessionId));
 });
@@ -111,7 +111,7 @@ test('appendEvent and writeCheckpoint persist l2/l1 context', async () => {
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'gemini-cli',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'Publish xiaohongshu post safely',
   });
 
@@ -182,7 +182,7 @@ test('buildContextPacket composes markdown for agent handoff', async () => {
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'claude-code',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'Generate image workflow docs',
   });
 
@@ -216,7 +216,7 @@ test('appendEvent deduplicates rapid duplicate events', async () => {
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'codex-cli',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'Validate dedupe',
   });
 
@@ -257,7 +257,7 @@ test('buildContextPacket supports kind/ref filtering and token budget', async ()
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'claude-code',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'Filter packet events',
   });
 
@@ -304,7 +304,7 @@ test('searchEvents, getEventById, and buildTimeline use sidecar indexes', async 
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'gemini-cli',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'Exercise sidecar index APIs',
   });
 
@@ -336,7 +336,7 @@ test('searchEvents, getEventById, and buildTimeline use sidecar indexes', async 
   const found = await searchEvents({
     workspaceRoot: workspace,
     query: 'auth race',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     kinds: ['response'],
     refs: ['auth.ts'],
     limit: 10,
@@ -366,7 +366,7 @@ test('searchEvents rebuilds sqlite sidecar when context.db is missing', async ()
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'codex-cli',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'recover from missing sqlite sidecar',
   });
 
@@ -395,7 +395,7 @@ test('searchEvents rebuilds sqlite sidecar when context.db is missing', async ()
       '--workspace',
       workspace,
       '--project',
-      'rex-ai-boot',
+      'rex-cli',
       '--query',
       'recover this event',
       '--limit',
@@ -415,7 +415,7 @@ test('searchEvents rebuilds sqlite sidecar when context.db is missing', async ()
 
   const searchFromCore = await searchEvents({
     workspaceRoot: workspace,
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     query: 'recover this event',
     limit: 5,
   });
@@ -427,7 +427,7 @@ test('searchEvents semantic mode reranks lexical candidates and falls back safel
   const session = await createSession({
     workspaceRoot: workspace,
     agent: 'codex-cli',
-    project: 'rex-ai-boot',
+    project: 'rex-cli',
     goal: 'semantic retrieval smoke test',
   });
 
@@ -454,7 +454,7 @@ test('searchEvents semantic mode reranks lexical candidates and falls back safel
     process.env.CONTEXTDB_SEMANTIC = '0';
     const lexicalFallback = await searchEvents({
       workspaceRoot: workspace,
-      project: 'rex-ai-boot',
+      project: 'rex-cli',
       query: 'issue auth',
       kinds: ['response'],
       semantic: true,
@@ -466,7 +466,7 @@ test('searchEvents semantic mode reranks lexical candidates and falls back safel
     process.env.CONTEXTDB_SEMANTIC_PROVIDER = 'token';
     const semantic = await searchEvents({
       workspaceRoot: workspace,
-      project: 'rex-ai-boot',
+      project: 'rex-cli',
       query: 'issue auth',
       kinds: ['response'],
       semantic: true,
