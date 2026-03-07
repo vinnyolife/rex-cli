@@ -1,20 +1,20 @@
 ---
-title: Blog Hub
-description: Growth and engineering articles for the RexAI CLI ecosystem.
+title: 블로그 허브
+description: RexAI CLI 생태계를 위한 성장/엔지니어링 아티클.
 ---
 
-# Blog Hub
+# 블로그 허브
 
-This is a standalone blog surface for discoverability content.
-Product documentation is published separately at [cli.rexai.top](https://cli.rexai.top/).
+여기는 검색 유입을 위한 독립 블로그입니다.
+제품 문서는 [cli.rexai.top](https://cli.rexai.top/ko/)에서 별도로 운영합니다.
 
-## Initial Pillar Posts
+## 초기 핵심 글
 
-- [Launch Post](launch-post.md)
-- [CLI Comparison](cli-comparison-post.md)
-- [Automation Playbook](automation-playbook-post.md)
+- [런치 포스트](launch-post.md)
+- [CLI 비교](cli-comparison-post.md)
+- [자동화 플레이북](automation-playbook-post.md)
 
-## Latest Posts
+## 최신 글
 
-- [I Automated Xiaohongshu Operations with AI - Now My Colleagues Think I Hired an Assistant](xiaohongshu-automation.md)
-- [Stop Wasting Time Choosing AI Coding Tools in 2026](ai-cli-comparison.md)
+- [小手작업 그만! AI 자동화로 매일 2시간씩 절약한 방법](xiaohongshu-automation.md)
+- [2026년 AI 프로그래밍 CLI 누가最强? Claude Code vs Codex vs Gemini 심층 비교](ai-cli-comparison.md)
