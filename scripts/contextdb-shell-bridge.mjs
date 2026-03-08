@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { getCommandSpawnSpec } from './lib/platform/process.mjs';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -232,11 +233,12 @@ function tryEnsureOptInMarker(workspace, env) {
 }
 
 function spawnInherited(command, args, cwd, env) {
-  const result = spawnSync(command, args, {
+  const spec = getCommandSpawnSpec(command, args, { env });
+  const result = spawnSync(spec.command, spec.args, {
     cwd,
     env,
     stdio: 'inherit',
-    shell: false,
+    shell: spec.shell ?? false,
   });
 
   if (result.error) {

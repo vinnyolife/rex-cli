@@ -104,3 +104,19 @@ test('windows npx falls back to npm exec when npx cli is absent', async () => {
   assert.equal(spec.command, execPath);
   assert.deepEqual(spec.args, [npmCli, 'exec', '--', 'playwright', 'install', 'chromium']);
 });
+
+test('windows codex uses shell execution for cmd-backed cli wrappers', () => {
+  const spec = getCommandSpawnSpec('codex', ['--version'], { platform: 'win32' });
+
+  assert.equal(spec.command, 'codex');
+  assert.deepEqual(spec.args, ['--version']);
+  assert.equal(spec.shell, true);
+});
+
+test('windows claude and gemini also use shell execution', () => {
+  const claudeSpec = getCommandSpawnSpec('claude', ['--version'], { platform: 'win32' });
+  const geminiSpec = getCommandSpawnSpec('gemini', ['--version'], { platform: 'win32' });
+
+  assert.equal(claudeSpec.shell, true);
+  assert.equal(geminiSpec.shell, true);
+});

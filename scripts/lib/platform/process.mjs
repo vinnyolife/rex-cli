@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+const WINDOWS_SHELL_COMMANDS = new Set(['codex', 'claude', 'gemini']);
+
 function splitExecutionOptions(options = {}) {
   const {
     platform = process.platform,
@@ -55,6 +57,24 @@ function getWindowsNodeCli(command, { platform = process.platform, execPath = pr
   return null;
 }
 
+function shouldUseWindowsShellCommand(command, { platform = process.platform } = {}) {
+  if (platform !== 'win32') {
+    return false;
+  }
+
+  const normalized = path.basename(command).toLowerCase();
+  const extension = path.extname(normalized);
+  if (extension === '.cmd' || extension === '.bat') {
+    return true;
+  }
+
+  if (extension.length > 0) {
+    return false;
+  }
+
+  return WINDOWS_SHELL_COMMANDS.has(normalized);
+}
+
 export function getCommandSpawnSpec(command, args = [], options = {}) {
   const { platform, execPath } = splitExecutionOptions(options);
   const windowsNodeCli = getWindowsNodeCli(command, { platform, execPath });
@@ -62,10 +82,15 @@ export function getCommandSpawnSpec(command, args = [], options = {}) {
     return {
       command: windowsNodeCli.command,
       args: [...windowsNodeCli.argsPrefix, ...args],
+      shell: false,
     };
   }
 
-  return { command, args };
+  return {
+    command,
+    args,
+    shell: shouldUseWindowsShellCommand(command, { platform }),
+  };
 }
 
 export function commandExists(name, options = {}) {
@@ -89,6 +114,7 @@ export function captureCommand(command, args = [], options = {}) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     ...spawnOptions,
+    shell: spec.shell ?? spawnOptions.shell ?? false,
   });
 
   return {
@@ -105,6 +131,7 @@ export function runCommand(command, args = [], options = {}) {
   const result = spawnSync(spec.command, spec.args, {
     stdio: 'inherit',
     ...spawnOptions,
+    shell: spec.shell ?? spawnOptions.shell ?? false,
   });
 
   if (result.error) {
