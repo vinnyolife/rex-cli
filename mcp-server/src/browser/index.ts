@@ -79,6 +79,10 @@ export const tools = [
       type: 'object',
       properties: {
         profile: { type: 'string', default: 'default' },
+        mode: { type: 'string', enum: ['hybrid', 'ax'], default: 'hybrid' },
+        includeAx: { type: 'boolean', default: false },
+        axMaxLines: { type: 'number', default: 350 },
+        axVerbose: { type: 'boolean', default: false },
         includeHtml: { type: 'boolean', default: false },
         htmlMaxChars: { type: 'number', default: 1500 },
       },

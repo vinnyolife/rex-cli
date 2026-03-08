@@ -32,7 +32,7 @@ browser_challenge_check {"profile":"default"}
 If human action is required, complete login/challenge manually in the same profile, then continue:
 
 ```text
-browser_snapshot {"profile":"default"}
+browser_snapshot {"profile":"default","includeAx":true}
 ```
 
 ## Evidence

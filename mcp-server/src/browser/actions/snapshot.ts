@@ -83,6 +83,27 @@ export interface HybridLayoutModel {
 export interface SnapshotOptions {
   includeHtml?: boolean;
   htmlMaxChars?: number;
+  mode?: 'hybrid' | 'ax';
+  includeAx?: boolean;
+  axMaxLines?: number;
+  axVerbose?: boolean;
+}
+
+export interface AxSnapshotInteractiveItem {
+  uid: string;
+  role: string;
+  name: string;
+  url?: string;
+  selectorHint?: string;
+}
+
+export interface AxSnapshotModel {
+  mode: 'ax-v1';
+  maxLines: number;
+  truncated: boolean;
+  text: string;
+  interactive: AxSnapshotInteractiveItem[];
+  error?: string;
 }
 
 const REGION_ORDER: RegionName[] = [
@@ -96,6 +117,30 @@ const REGION_ORDER: RegionName[] = [
 
 function clampText(value: string, maxChars: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
+function escapeQuotedValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\s+/g, ' ').trim();
+}
+
+const PLAYWRIGHT_ROLE_SELECTOR_ROLES = new Set([
+  'link',
+  'button',
+  'textbox',
+  'combobox',
+  'checkbox',
+  'radio',
+  'tab',
+  'menuitem',
+  'option',
+]);
+
+function buildPlaywrightRoleSelector(role: string, name: string): string | undefined {
+  if (!PLAYWRIGHT_ROLE_SELECTOR_ROLES.has(role)) return undefined;
+  const trimmed = name.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > 100) return undefined;
+  return `role=${role}[name="${escapeQuotedValue(trimmed)}"]`;
 }
 
 function classifyRegion(box: LayoutBox, viewport: { width: number; height: number }, zIndex: number): RegionName {
@@ -196,7 +241,7 @@ function guessPageType(
 
   const hasEditorControl =
     elements.some((element) => ['textbox', 'textarea'].includes(element.role) || element.tag === 'textarea') &&
-    /(publish|post|draft|compose|write|editor|caption|content)/i.test(lowerText);
+    /(publish|post|draft|compose|write|editor|caption)/i.test(lowerText);
 
   if (hasEditorControl) return 'editor';
   if (hasModal) return 'dialog';
@@ -212,6 +257,10 @@ export function buildHybridLayoutModel(raw: HybridLayoutRawSnapshot): HybridLayo
     const normalized = normalizeBoxToViewport(element, viewport);
     return {
       ...element,
+      x: normalized.x,
+      y: normalized.y,
+      width: normalized.width,
+      height: normalized.height,
       text: clampText(element.text, 120),
       selectorHint: clampText(element.selectorHint, 160),
       region: classifyRegion(normalized.width > 0 && normalized.height > 0 ? normalized : element, viewport, element.zIndex),
@@ -222,6 +271,10 @@ export function buildHybridLayoutModel(raw: HybridLayoutRawSnapshot): HybridLayo
     const normalized = normalizeBoxToViewport(block, viewport);
     return {
       ...block,
+      x: normalized.x,
+      y: normalized.y,
+      width: normalized.width,
+      height: normalized.height,
       text: clampText(block.text, 200),
       region: classifyRegion(normalized.width > 0 && normalized.height > 0 ? normalized : block, viewport, 0),
     };
@@ -286,6 +339,318 @@ export function buildHybridLayoutModel(raw: HybridLayoutRawSnapshot): HybridLayo
       reason: fallbackReasons.length > 0 ? fallbackReasons.join(', ') : 'layout-data-sufficient',
     },
   };
+}
+
+export type CdpAxPropertyValue = {
+  type?: string;
+  value?: unknown;
+};
+
+export type CdpAxProperty = {
+  name: string;
+  value?: CdpAxPropertyValue;
+};
+
+export type CdpAxNode = {
+  nodeId: string;
+  ignored?: boolean;
+  role?: { value?: string };
+  name?: { value?: string };
+  properties?: CdpAxProperty[];
+  childIds?: string[];
+  backendDOMNodeId?: number;
+};
+
+function readAxRole(node: CdpAxNode): string {
+  return String(node.role?.value || '').trim();
+}
+
+function readAxName(node: CdpAxNode): string {
+  return String(node.name?.value || '').replace(/\s+/g, ' ').trim();
+}
+
+function readAxProperty(node: CdpAxNode, names: string[]): unknown {
+  const props = node.properties ?? [];
+  for (const prop of props) {
+    for (const name of names) {
+      if (prop.name === name) return prop.value?.value;
+    }
+  }
+  return undefined;
+}
+
+function formatAxLine(node: CdpAxNode, uid: string, pageUrl: string): string {
+  const role = readAxRole(node) || 'unknown';
+  const name = readAxName(node);
+
+  const parts: string[] = [`uid=${uid}`, role];
+  if (name) parts.push(`"${escapeQuotedValue(name)}"`);
+
+  const urlValue = readAxProperty(node, ['url']);
+  if (typeof urlValue === 'string' && urlValue) {
+    parts.push(`url="${escapeQuotedValue(urlValue)}"`);
+  } else if (role === 'RootWebArea') {
+    parts.push(`url="${escapeQuotedValue(pageUrl)}"`);
+  }
+
+  const level = readAxProperty(node, ['level']);
+  if (typeof level === 'number') {
+    parts.push(`level="${level}"`);
+  }
+
+  const hasPopup = readAxProperty(node, ['hasPopup', 'haspopup']);
+  if (typeof hasPopup === 'string' && hasPopup) {
+    parts.push(`haspopup="${escapeQuotedValue(hasPopup)}"`);
+  }
+
+  const expanded = readAxProperty(node, ['expanded']);
+  if (typeof expanded === 'boolean') {
+    parts.push('expandable');
+    if (expanded) parts.push('expanded');
+  }
+
+  const selected = readAxProperty(node, ['selected']);
+  if (typeof selected === 'boolean') {
+    parts.push('selectable');
+    if (selected) parts.push('selected');
+  }
+
+  return parts.join(' ');
+}
+
+export function buildAxSnapshotFromCdpNodes(
+  title: string,
+  url: string,
+  nodes: CdpAxNode[],
+  options: { maxLines: number; verbose: boolean }
+): AxSnapshotModel {
+  const maxLines = Math.max(0, Math.floor(options.maxLines));
+  if (maxLines === 0) {
+    return {
+      mode: 'ax-v1',
+      maxLines,
+      truncated: false,
+      text: '',
+      interactive: [],
+    };
+  }
+
+  if (nodes.length === 0) {
+    return {
+      mode: 'ax-v1',
+      maxLines,
+      truncated: false,
+      text: '',
+      interactive: [],
+    };
+  }
+
+  const nodeById = new Map<string, CdpAxNode>();
+  for (const node of nodes) {
+    if (node?.nodeId) nodeById.set(node.nodeId, node);
+  }
+
+  const parentById = new Map<string, string>();
+  for (const node of nodes) {
+    for (const childId of node.childIds ?? []) {
+      if (!parentById.has(childId)) parentById.set(childId, node.nodeId);
+    }
+  }
+
+  const root =
+    nodes.find((node) => !node.ignored && readAxRole(node) === 'RootWebArea') ??
+    nodes.find((node) => !node.ignored && !parentById.has(node.nodeId));
+
+  if (!root) {
+    return {
+      mode: 'ax-v1',
+      maxLines,
+      truncated: false,
+      text: '',
+      interactive: [],
+    };
+  }
+
+  const alwaysIncludeRoles = new Set([
+    'RootWebArea',
+    'banner',
+    'navigation',
+    'main',
+    'contentinfo',
+    'form',
+    'region',
+    'dialog',
+    'alertdialog',
+    'heading',
+    'search',
+  ]);
+
+  const interactiveRoles = new Set<string>(PLAYWRIGHT_ROLE_SELECTOR_ROLES);
+
+  const verboseTextRoles = new Set([
+    'paragraph',
+    'image',
+    'list',
+    'listitem',
+    'article',
+    'section',
+    'StaticText',
+  ]);
+
+  const isInteresting = (node: CdpAxNode): boolean => {
+    if (node.ignored) return false;
+    const role = readAxRole(node);
+    if (!role) return false;
+    if (alwaysIncludeRoles.has(role)) return true;
+
+    const focusable = readAxProperty(node, ['focusable']) === true;
+    const urlValue = readAxProperty(node, ['url']);
+    if (focusable || typeof urlValue === 'string') return true;
+    if (interactiveRoles.has(role)) return true;
+
+    if (role === 'StaticText') {
+      if (options.verbose) return true;
+      const parentId = parentById.get(node.nodeId);
+      const parentRole = parentId ? readAxRole(nodeById.get(parentId) ?? { nodeId: parentId }) : '';
+      return Boolean(readAxName(node)) && ['link', 'button', 'heading', 'tab'].includes(parentRole);
+    }
+
+    const name = readAxName(node);
+    if (options.verbose && verboseTextRoles.has(role) && name) return true;
+
+    return false;
+  };
+
+  const interestingIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.ignored) continue;
+    if (isInteresting(node)) interestingIds.add(node.nodeId);
+  }
+
+  const includedIds = new Set<string>();
+  includedIds.add(root.nodeId);
+  for (const id of interestingIds) {
+    let current: string | undefined = id;
+    while (current && !includedIds.has(current)) {
+      includedIds.add(current);
+      current = parentById.get(current);
+    }
+  }
+
+  const lines: string[] = [];
+  const interactive: AxSnapshotInteractiveItem[] = [];
+  let truncated = false;
+
+  const stack: Array<{ id: string; depth: number }> = [{ id: root.nodeId, depth: 0 }];
+  const visited = new Set<string>();
+
+  while (stack.length > 0) {
+    const next = stack.pop()!;
+    if (visited.has(next.id)) continue;
+    visited.add(next.id);
+
+    const node = nodeById.get(next.id);
+    if (!node) continue;
+    if (!includedIds.has(next.id)) continue;
+    const shouldRender = !node.ignored;
+    const childDepth = shouldRender ? next.depth + 1 : next.depth;
+
+    if (shouldRender) {
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+
+      const uid = node.backendDOMNodeId ? `b${node.backendDOMNodeId}` : `n${node.nodeId}`;
+      const indent = '  '.repeat(next.depth);
+      lines.push(`${indent}${formatAxLine(node, uid, url)}`);
+
+      const role = readAxRole(node);
+      if (interactiveRoles.has(role)) {
+        const name = readAxName(node);
+        if (name) {
+          const urlValue = readAxProperty(node, ['url']);
+          interactive.push({
+            uid,
+            role,
+            name: clampText(name, 120),
+            url: typeof urlValue === 'string' ? urlValue : undefined,
+            selectorHint: buildPlaywrightRoleSelector(role, name),
+          });
+        }
+      }
+    }
+
+    const children = node.childIds ?? [];
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      const childId = children[index];
+      if (!includedIds.has(childId)) continue;
+      stack.push({ id: childId, depth: childDepth });
+    }
+  }
+
+  const disambiguationIndex = new Map<string, number>();
+  const totalByKey = new Map<string, number>();
+  for (const item of interactive) {
+    const key = `${item.role}\u0000${item.name}`;
+    totalByKey.set(key, (totalByKey.get(key) ?? 0) + 1);
+  }
+  for (const item of interactive) {
+    if (!item.selectorHint) continue;
+    const key = `${item.role}\u0000${item.name}`;
+    const total = totalByKey.get(key) ?? 1;
+    if (total <= 1) continue;
+    const index = disambiguationIndex.get(key) ?? 0;
+    disambiguationIndex.set(key, index + 1);
+    item.selectorHint = `${item.selectorHint} >> nth=${index}`;
+  }
+
+  const header = `# AX Snapshot (ax-v1)\n# title: ${escapeQuotedValue(title)}\n# url: ${escapeQuotedValue(url)}\n`;
+
+  return {
+    mode: 'ax-v1',
+    maxLines,
+    truncated,
+    text: `${header}${lines.join('\n')}`.trim(),
+    interactive,
+  };
+}
+
+async function collectAxSnapshot(
+  page: Page,
+  title: string,
+  url: string,
+  options: { maxLines: number; verbose: boolean }
+): Promise<AxSnapshotModel> {
+  const maxLines = Math.max(0, Math.floor(options.maxLines));
+  const verbose = Boolean(options.verbose);
+  if (maxLines === 0) {
+    return buildAxSnapshotFromCdpNodes(title, url, [], { maxLines, verbose });
+  }
+
+  const client = await page.context().newCDPSession(page);
+  try {
+    await Promise.all([
+      client.send('Accessibility.enable').catch(() => undefined),
+      client.send('DOM.enable').catch(() => undefined),
+    ]);
+
+    const response = await client.send('Accessibility.getFullAXTree');
+    const nodes = (Array.isArray((response as any)?.nodes) ? (response as any).nodes : []) as CdpAxNode[];
+    const snapshot = buildAxSnapshotFromCdpNodes(title, url, nodes, { maxLines, verbose });
+    return snapshot;
+  } catch (error) {
+    return {
+      mode: 'ax-v1',
+      maxLines,
+      truncated: false,
+      text: '',
+      interactive: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await client.detach().catch(() => undefined);
+  }
 }
 
 async function collectHybridLayoutSnapshot(page: Page, title: string, url: string): Promise<HybridLayoutRawSnapshot> {
@@ -506,15 +871,41 @@ export async function snapshot(profile: string = 'default', options: SnapshotOpt
   const title = await page.title();
   const url = page.url();
   const htmlMaxChars = Math.max(0, options.htmlMaxChars ?? 1500);
+  const mode = options.mode ?? 'hybrid';
+  const includeAx = mode === 'ax' ? true : Boolean(options.includeAx);
+  const axMaxLines = Math.max(0, Math.floor(options.axMaxLines ?? 350));
+  const axVerbose = Boolean(options.axVerbose);
 
-  const [auth, challenge, rawLayout, html] = await Promise.all([
+  const [auth, challenge, rawLayout, axSnapshot, html] = await Promise.all([
     detectAuthRequired(page),
     detectChallengeRequired(page),
-    collectHybridLayoutSnapshot(page, title, url).catch(() => buildFallbackRawSnapshot(title, url)),
+    mode === 'hybrid'
+      ? collectHybridLayoutSnapshot(page, title, url).catch(() => buildFallbackRawSnapshot(title, url))
+      : Promise.resolve(undefined),
+    includeAx
+      ? collectAxSnapshot(page, title, url, { maxLines: axMaxLines, verbose: axVerbose })
+      : Promise.resolve(undefined),
     options.includeHtml ? page.content().then((value) => value.substring(0, htmlMaxChars)) : Promise.resolve(undefined),
   ]);
 
-  const layout = buildHybridLayoutModel(rawLayout);
+  if (mode === 'ax') {
+    return {
+      success: true,
+      title,
+      url,
+      profile,
+      pacingDelayMs,
+      auth,
+      challenge,
+      requiresHumanAction: auth.requiresHumanLogin || challenge.requiresHumanVerification,
+      layoutMode: 'ax-v1',
+      axSnapshot,
+      htmlPreview: html,
+      ...(html ? { html } : {}),
+    };
+  }
+
+  const layout = buildHybridLayoutModel(rawLayout ?? buildFallbackRawSnapshot(title, url));
 
   return {
     success: true,
@@ -532,6 +923,7 @@ export async function snapshot(profile: string = 'default', options: SnapshotOpt
     textBlocks: layout.textBlocks,
     visualHints: layout.visualHints,
     layout,
+    ...(axSnapshot ? { axSnapshot } : {}),
     htmlPreview: html,
     ...(html ? { html } : {}),
   };

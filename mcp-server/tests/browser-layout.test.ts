@@ -73,6 +73,47 @@ test('buildHybridLayoutModel returns compact layout regions for editor-like page
   assert.equal(result.elements.some((element) => element.selectorHint === '#publish'), true);
 });
 
+test('buildHybridLayoutModel does not misclassify generic content pages as editors', () => {
+  const result = buildHybridLayoutModel({
+    title: 'Content page',
+    url: 'https://content.example.com/',
+    viewport: { width: 1280, height: 720 },
+    textSample: 'This content page contains a search box and an inline help section.',
+    stats: {
+      imageCount: 0,
+      canvasCount: 0,
+      modalCount: 0,
+      textNodeCount: 1,
+      interactiveCount: 1,
+    },
+    elements: [
+      {
+        role: 'textbox',
+        tag: 'input',
+        text: 'Search content',
+        selectorHint: 'input.search',
+        clickable: true,
+        x: 20,
+        y: 20,
+        width: 260,
+        height: 36,
+        zIndex: 1,
+      },
+    ],
+    textBlocks: [
+      {
+        text: 'This is a content page.',
+        x: 20,
+        y: 80,
+        width: 520,
+        height: 40,
+      },
+    ],
+  });
+
+  assert.equal(result.pageSummary.pageType, 'content');
+});
+
 test('buildHybridLayoutModel requests visual fallback for canvas-heavy modal pages', () => {
   const result = buildHybridLayoutModel({
     title: 'Verification',
@@ -106,6 +147,57 @@ test('buildHybridLayoutModel requests visual fallback for canvas-heavy modal pag
   assert.equal(result.visualHints.needsVisualFallback, true);
   assert.match(result.visualHints.reason, /canvas|visual|modal/i);
   assert.equal(result.regions.some((region) => region.name === 'modal'), true);
+});
+
+test('buildHybridLayoutModel clamps element bounding boxes to the viewport', () => {
+  const result = buildHybridLayoutModel({
+    title: 'Viewport clamp',
+    url: 'https://ui.example.com/',
+    viewport: { width: 100, height: 100 },
+    textSample: 'Test',
+    stats: {
+      imageCount: 0,
+      canvasCount: 0,
+      modalCount: 0,
+      textNodeCount: 1,
+      interactiveCount: 1,
+    },
+    elements: [
+      {
+        role: 'button',
+        tag: 'button',
+        text: 'Huge button',
+        selectorHint: '#huge',
+        clickable: true,
+        x: -50,
+        y: -40,
+        width: 400,
+        height: 300,
+        zIndex: 1,
+      },
+    ],
+    textBlocks: [
+      {
+        text: 'Oversized text',
+        x: 0,
+        y: 0,
+        width: 600,
+        height: 200,
+      },
+    ],
+  });
+
+  assert.equal(result.elements.length, 1);
+  assert.equal(result.elements[0].x, 0);
+  assert.equal(result.elements[0].y, 0);
+  assert.equal(result.elements[0].width, 100);
+  assert.equal(result.elements[0].height, 100);
+
+  assert.equal(result.textBlocks.length, 1);
+  assert.equal(result.textBlocks[0].x, 0);
+  assert.equal(result.textBlocks[0].y, 0);
+  assert.equal(result.textBlocks[0].width, 100);
+  assert.equal(result.textBlocks[0].height, 100);
 });
 
 test('buildHybridLayoutModel normalizes oversize feed boxes before region bucketing', () => {

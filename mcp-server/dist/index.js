@@ -78,6 +78,10 @@ const toolHandlers = {
     },
     browser_snapshot: async (args) => {
         return await snapshot(args?.profile, {
+            mode: args?.mode,
+            includeAx: args?.includeAx,
+            axMaxLines: args?.axMaxLines,
+            axVerbose: args?.axVerbose,
             includeHtml: args?.includeHtml,
             htmlMaxChars: args?.htmlMaxChars,
         });

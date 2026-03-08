@@ -39,7 +39,7 @@ scripts/doctor-browser-mcp.sh
 ```text
 browser_launch {"profile":"default"}
 browser_navigate {"url":"https://example.com"}
-browser_snapshot {}
+browser_snapshot {"includeAx":true}
 browser_close {}
 ```
 
