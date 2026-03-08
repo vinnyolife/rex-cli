@@ -9,27 +9,62 @@ description: macOS, Linux, Windows를 하나의 절차로 통합하고 OS 탭으
 
 ## 사전 요구사항
 
-- Node.js 18+ 및 `npm`
+- Node.js **20+** (권장: **22 LTS**) 및 `npm`
 - `codex` / `claude` / `gemini` 중 하나
 - 프로젝트 단위 ContextDB를 사용할 대상 git 저장소
 
-## 0) 원커맨드 설치 (권장)
+## 0) 설치 (권장)
+
+이 저장소는 `~/.rexcil/rex-cli`에 설치됩니다. 통합 진입점은 `aios` 입니다:
+
+- `aios` (인자 없음): 전체 화면 TUI 실행
+- `aios doctor|update|privacy ...`: 기존 서브커맨드 유지
+
+### 방법 C: 원라이너 (GitHub Releases)
 
 === "macOS / Linux"
 
     ```bash
-    scripts/setup-all.sh --components all --mode opt-in
+    curl -fsSL https://github.com/rexleimo/rex-cli/releases/latest/download/aios-install.sh | bash
     source ~/.zshrc
+    aios
     ```
 
 === "Windows (PowerShell)"
 
     ```powershell
-    powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components all -Mode opt-in
+    irm https://github.com/rexleimo/rex-cli/releases/latest/download/aios-install.ps1 | iex
     . $PROFILE
+    aios
     ```
 
+### 방법 A: git clone (개발용)
+
+=== "macOS / Linux"
+
+    ```bash
+    git clone https://github.com/rexleimo/rex-cli.git ~/.rexcil/rex-cli
+    cd ~/.rexcil/rex-cli
+    scripts/aios.sh
+    ```
+
+=== "Windows (PowerShell)"
+
+    ```powershell
+    git clone https://github.com/rexleimo/rex-cli.git $HOME\.rexcil\rex-cli
+    cd $HOME\.rexcil\rex-cli
+    powershell -ExecutionPolicy Bypass -File .\scripts\aios.ps1
+    ```
+
+### 방법 B: GitHub Releases 다운로드 (오프라인용)
+
+Releases에서 `rex-cli.tar.gz`(macOS/Linux) 또는 `rex-cli.zip`(Windows)을 내려받아 `~/.rexcil/`에 압축 해제한 뒤,
+`scripts/aios.sh` / `scripts/aios.ps1`를 실행하세요.
+
 구성요소 선택 예시:
+
+팁: 원라이너로 설치했다면 저장소는 `~/.rexcil/rex-cli`에 있습니다.
+해당 디렉터리에서 스크립트를 실행하거나, `aios`를 실행해 TUI에서 **Setup**을 선택하세요.
 
 === "macOS / Linux"
 

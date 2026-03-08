@@ -13,25 +13,57 @@ This page combines macOS, Linux, and Windows setup into one flow. Use the OS tab
 
 ## Prerequisites
 
-- Node.js 18+ and `npm`
+- Node.js **20+** (recommended: **22 LTS**) and `npm`
 - At least one CLI installed: `codex`, `claude`, or `gemini`
 - A git repository where you want project-scoped ContextDB memory
 
-## 0) One-command setup (recommended)
+## 0) Install (recommended)
+
+This repo installs to `~/.rexcil/rex-cli`. The unified entry is `aios`:
+
+- `aios` (no args) opens the interactive full-screen TUI
+- `aios doctor|update|privacy ...` keeps working as before
+
+### Option C: One-liner installer (GitHub Releases)
 
 === "macOS / Linux"
 
     ```bash
-    scripts/setup-all.sh --components all --mode opt-in
+    curl -fsSL https://github.com/rexleimo/rex-cli/releases/latest/download/aios-install.sh | bash
     source ~/.zshrc
+    aios
     ```
 
 === "Windows (PowerShell)"
 
     ```powershell
-    powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components all -Mode opt-in
+    irm https://github.com/rexleimo/rex-cli/releases/latest/download/aios-install.ps1 | iex
     . $PROFILE
+    aios
     ```
+
+### Option A: git clone (dev-friendly)
+
+=== "macOS / Linux"
+
+    ```bash
+    git clone https://github.com/rexleimo/rex-cli.git ~/.rexcil/rex-cli
+    cd ~/.rexcil/rex-cli
+    scripts/aios.sh
+    ```
+
+=== "Windows (PowerShell)"
+
+    ```powershell
+    git clone https://github.com/rexleimo/rex-cli.git $HOME\.rexcil\rex-cli
+    cd $HOME\.rexcil\rex-cli
+    powershell -ExecutionPolicy Bypass -File .\scripts\aios.ps1
+    ```
+
+### Option B: Download from GitHub Releases (offline-friendly)
+
+Download `rex-cli.tar.gz` (macOS/Linux) or `rex-cli.zip` (Windows) from Releases and extract to `~/.rexcil/`.
+Then run `scripts/aios.sh` / `scripts/aios.ps1`.
 
 ### 0.1 Privacy Guard Strict Read (enabled by default)
 
@@ -65,6 +97,9 @@ Optional local model path (Ollama + `qwen3.5:4b`):
     ```
 
 Component selection examples:
+
+Tip: if you installed via the one-liner, the repo lives at `~/.rexcil/rex-cli`.
+Run the scripts from that directory, or just run `aios` and pick **Setup** in the TUI.
 
 === "macOS / Linux"
 

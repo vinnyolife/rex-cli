@@ -164,6 +164,17 @@ function detectRunner(env) {
   }
 
   if (env.ROOTPATH) {
+    const mcpDir = path.join(env.ROOTPATH, 'mcp-server');
+    const nodeModulesDir = path.join(mcpDir, 'node_modules');
+    const binDir = path.join(nodeModulesDir, '.bin');
+    const tsxBin = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
+    const tsxPath = path.join(binDir, tsxBin);
+    if (!existsSync(tsxPath)) {
+      return null;
+    }
+  }
+
+  if (env.ROOTPATH) {
     const candidate = path.join(env.ROOTPATH, 'scripts', 'ctx-agent.mjs');
     if (existsSync(candidate)) {
       return { command: 'node', args: [candidate] };
@@ -274,7 +285,7 @@ function main(argv = process.argv.slice(2)) {
   let markerCreated = false;
   let markerCreateError = '';
 
-  if (!blockedSubcommand && workspace && mode === 'opt-in') {
+  if (!blockedSubcommand && runner && workspace && mode === 'opt-in') {
     const markerResult = tryEnsureOptInMarker(workspace, env);
     markerCreated = markerResult.created;
     markerCreateError = markerResult.error;

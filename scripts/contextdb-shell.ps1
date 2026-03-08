@@ -187,7 +187,17 @@ function aios {
         }
       }
     }
-    "" { }
+    "" {
+      $script = Join-Path $env:ROOTPATH "scripts/aios.ps1"
+      if (-not (Test-Path -LiteralPath $script)) {
+        Write-Host "[warn] missing TUI entry script: $script"
+        $global:LASTEXITCODE = 1
+        return
+      }
+      & $script
+      $global:LASTEXITCODE = $LASTEXITCODE
+      return
+    }
     "-h" { }
     "--help" { }
     "help" { }
@@ -196,6 +206,8 @@ function aios {
     }
   }
 
-  Write-Host "Usage: aios <doctor|update|privacy> [args]"
+  Write-Host "Usage:"
+  Write-Host "  aios                     # interactive TUI"
+  Write-Host "  aios <doctor|update|privacy> [args]"
   $global:LASTEXITCODE = 0
 }

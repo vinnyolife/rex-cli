@@ -17,35 +17,37 @@ Key links:
 - Case Library: `https://cli.rexai.top/case-library/`
 - Friend sites: `https://os.rexai.top` / `https://rexai.top` / `https://tool.rexai.top`
 
-30-second setup (macOS / Linux):
+30-second install (recommended, GitHub Releases):
+
+```bash
+curl -fsSL https://github.com/rexleimo/rex-cli/releases/latest/download/aios-install.sh | bash
+source ~/.zshrc
+aios
+```
+
+30-second install (Windows PowerShell):
+
+```powershell
+irm https://github.com/rexleimo/rex-cli/releases/latest/download/aios-install.ps1 | iex
+. $PROFILE
+aios
+```
+
+Alternative: git clone (dev-friendly):
+
+macOS / Linux:
 
 ```bash
 git clone https://github.com/rexleimo/rex-cli.git
 cd rex-cli
-scripts/setup-all.sh --components all --mode opt-in
-source ~/.zshrc
-codex
-```
-
-Interactive setup (TUI):
-
-```bash
 scripts/aios.sh
 ```
 
-30-second setup (Windows PowerShell):
+Windows PowerShell:
 
 ```powershell
 git clone https://github.com/rexleimo/rex-cli.git
 cd rex-cli
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components all -Mode opt-in
-. $PROFILE
-codex
-```
-
-Interactive setup (TUI):
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\aios.ps1
 ```
 

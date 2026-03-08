@@ -170,13 +170,25 @@ aios() {
           ;;
       esac
       ;;
-    ""|-h|--help|help)
-      echo "Usage: aios <doctor|update|privacy> [args]"
+    "")
+      local script="$rootpath/scripts/aios.sh"
+      if [[ -x "$script" ]]; then
+        "$script"
+        return $?
+      fi
+      echo "[warn] missing TUI entry script: $script"
+      echo "Usage: aios [doctor|update|privacy] [args]"
+      return 1
+      ;;
+    -h|--help|help)
+      echo "Usage:"
+      echo "  aios                     # interactive TUI"
+      echo "  aios <doctor|update|privacy> [args]"
       return 0
       ;;
     *)
       echo "[warn] unknown aios subcommand: $sub"
-      echo "Usage: aios <doctor|update|privacy> [args]"
+      echo "Usage: aios [doctor|update|privacy] [args]"
       return 1
       ;;
   esac
