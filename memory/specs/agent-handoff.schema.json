@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rex-ai-boot/agent-handoff.schema.json",
+  "title": "Agent Handoff",
+  "type": "object",
+  "required": ["fromRole", "toRole", "taskTitle", "contextSummary"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ready", "blocked", "needs-input", "completed"]
+    },
+    "fromRole": {
+      "type": "string",
+      "minLength": 1
+    },
+    "toRole": {
+      "type": "string",
+      "minLength": 1
+    },
+    "taskTitle": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contextSummary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "filesTouched": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "openQuestions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

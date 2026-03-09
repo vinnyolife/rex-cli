@@ -15,6 +15,7 @@ import {
   searchEvents,
   writeCheckpoint,
 } from '../src/contextdb/core.js';
+import { timelineCheckpointRows } from '../src/contextdb/sqlite.js';
 
 async function makeWorkspace(): Promise<string> {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ctxdb-'));
@@ -72,6 +73,74 @@ test('contextdb cli supports index:rebuild', async () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const payload = JSON.parse((result.stdout || '{}').trim()) as { ok?: boolean };
   assert.equal(payload.ok, true);
+});
+
+test('contextdb cli checkpoint accepts telemetry flags', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'checkpoint cli telemetry',
+  });
+
+  const result = spawnSync(
+    'npx',
+    [
+      'tsx',
+      'src/contextdb/cli.ts',
+      'checkpoint',
+      '--workspace',
+      workspace,
+      '--session',
+      session.sessionId,
+      '--summary',
+      'CLI telemetry checkpoint',
+      '--verify-result',
+      'failed',
+      '--verify-evidence',
+      'quality-gate quick',
+      '--retry-count',
+      '3',
+      '--failure-category',
+      'timeout',
+      '--elapsed-ms',
+      '987',
+      '--cost-input-tokens',
+      '120',
+      '--cost-output-tokens',
+      '80',
+      '--cost-usd',
+      '0.45',
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse((result.stdout || '{}').trim()) as {
+    telemetry?: {
+      verification?: { result?: string; evidence?: string };
+      retryCount?: number;
+      failureCategory?: string;
+      elapsedMs?: number;
+      cost?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; usd?: number };
+    };
+  };
+  assert.deepEqual(payload.telemetry, {
+    verification: { result: 'failed', evidence: 'quality-gate quick' },
+    retryCount: 3,
+    failureCategory: 'timeout',
+    elapsedMs: 987,
+    cost: {
+      inputTokens: 120,
+      outputTokens: 80,
+      totalTokens: 200,
+      usd: 0.45,
+    },
+  });
 });
 
 test('createSession writes metadata and index record', async () => {
@@ -175,6 +244,95 @@ test('appendEvent and writeCheckpoint persist l2/l1 context', async () => {
   assert.equal(eventLines.length, 2);
   assert.equal(checkpointLines.length, 1);
   assert.match(summaryRaw, /Auth gate is present/);
+});
+
+test('writeCheckpoint normalizes telemetry and mirrors it to sidecar indexes', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'Capture checkpoint telemetry',
+  });
+
+  await writeCheckpoint({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    summary: 'Telemetry checkpoint.',
+    status: 'running',
+    telemetry: {
+      verification: { result: 'passed', evidence: 'quality-gate quick' },
+      retryCount: 2.9,
+      failureCategory: ' Timeout ',
+      elapsedMs: 1543.8,
+      cost: {
+        inputTokens: 120,
+        outputTokens: 30,
+        usd: 0.42,
+      },
+    },
+  });
+
+  const checkpointsPath = path.join(
+    workspace,
+    'memory',
+    'context-db',
+    'sessions',
+    session.sessionId,
+    'l1-checkpoints.jsonl'
+  );
+  const summaryPath = path.join(
+    workspace,
+    'memory',
+    'context-db',
+    'sessions',
+    session.sessionId,
+    'l0-summary.md'
+  );
+  const sqlitePath = path.join(workspace, 'memory', 'context-db', 'index', 'context.db');
+
+  const [checkpointsRaw, summaryRaw] = await Promise.all([
+    fs.readFile(checkpointsPath, 'utf8'),
+    fs.readFile(summaryPath, 'utf8'),
+  ]);
+
+  const checkpoint = JSON.parse(checkpointsRaw.trim()) as {
+    telemetry?: {
+      verification?: { result?: string; evidence?: string };
+      retryCount?: number;
+      failureCategory?: string;
+      elapsedMs?: number;
+      cost?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; usd?: number };
+    };
+  };
+  assert.deepEqual(checkpoint.telemetry, {
+    verification: { result: 'passed', evidence: 'quality-gate quick' },
+    retryCount: 2,
+    failureCategory: 'timeout',
+    elapsedMs: 1543,
+    cost: {
+      inputTokens: 120,
+      outputTokens: 30,
+      totalTokens: 150,
+      usd: 0.42,
+    },
+  });
+  assert.match(summaryRaw, /## Telemetry/);
+  assert.match(summaryRaw, /Verification: passed \(quality-gate quick\)/);
+  assert.match(summaryRaw, /Retry Count: 2/);
+  assert.match(summaryRaw, /Elapsed: 1543 ms/);
+
+  const checkpointRows = timelineCheckpointRows(sqlitePath, { sessionId: session.sessionId, limit: 5 });
+  assert.equal(checkpointRows.length, 1);
+  assert.deepEqual(checkpointRows[0].telemetry, checkpoint.telemetry);
+
+  const packet = await buildContextPacket({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    eventLimit: 5,
+  });
+  assert.match(packet.markdown, /Telemetry:/);
+  assert.match(packet.markdown, /Failure Category: timeout/);
 });
 
 test('buildContextPacket composes markdown for agent handoff', async () => {

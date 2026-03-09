@@ -1,0 +1,815 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
+const SESSION_STATUS_NAMES = ['running', 'blocked', 'done'];
+const VERIFICATION_RESULT_NAMES = ['unknown', 'passed', 'failed', 'partial'];
+const RECOMMENDATION_KIND_ORDER = ['fix', 'observe', 'promote'];
+const RECOMMENDATION_KIND_BASE_PRIORITY = {
+  fix: 300,
+  observe: 200,
+  promote: 100,
+};
+const RECOMMENDATION_SECTION_LABELS = {
+  fix: 'Fix',
+  observe: 'Observe',
+  promote: 'Promote',
+};
+const ORCHESTRATION_DISPATCH_EVENT_KIND = 'orchestration.dispatch-run';
+
+function getQualityGateFixCommand() {
+  return 'node scripts/aios.mjs quality-gate pre-pr';
+}
+
+function getVerificationCommand() {
+  return 'node scripts/aios.mjs quality-gate full';
+}
+
+function getQualityGatePromoteCommand() {
+  return 'node scripts/aios.mjs quality-gate pre-pr';
+}
+
+function getDoctorCommand() {
+  return 'node scripts/aios.mjs doctor';
+}
+
+function getDispatchReplayCommand(sessionId) {
+  return `node scripts/aios.mjs orchestrate --session ${sessionId} --dispatch local --execute dry-run --format json`;
+}
+
+function buildOrchestrateCommand(blueprint, taskTitle, contextSummary = '') {
+  const args = ['node scripts/aios.mjs', 'orchestrate', blueprint, '--task', JSON.stringify(taskTitle)];
+  if (String(contextSummary || '').trim()) {
+    args.push('--context', JSON.stringify(String(contextSummary).trim()));
+  }
+  return args.join(' ');
+}
+
+function inferPromotionBlueprint(summary) {
+  const context = [
+    summary.session.goal,
+    summary.session.project,
+    ...summary.signals.failures.top.map((item) => item.category),
+  ].join(' ').toLowerCase();
+
+  if (/security|auth|login|permission|secret|token|privacy|compliance|audit|risk/.test(context)) {
+    return 'security';
+  }
+  if (/refactor|cleanup|rename|restructure|simplify|dedupe|extract|tidy/.test(context)) {
+    return 'refactor';
+  }
+  if (/bug|fix|issue|incident|error|regression|flaky|crash|repair|defect/.test(context)) {
+    return 'bugfix';
+  }
+  return 'feature';
+}
+
+function buildPromotionContext(summary, blueprint) {
+  return `learn-eval promotion candidate for ${blueprint}; passRate=${summary.signals.verification.passRate}; retries=${summary.signals.retry.average}`;
+}
+
+function createRecommendation({
+  kind,
+  targetType,
+  targetId,
+  title,
+  reason,
+  evidence,
+  nextCommand,
+  nextArtifact,
+  priority = 0,
+}) {
+  return {
+    kind,
+    targetType,
+    targetId,
+    title,
+    reason,
+    evidence,
+    priority: RECOMMENDATION_KIND_BASE_PRIORITY[kind] + Math.max(0, Math.floor(priority)),
+    ...(nextCommand ? { nextCommand } : {}),
+    ...(nextArtifact ? { nextArtifact } : {}),
+  };
+}
+
+const FAILURE_CATEGORY_ACTIONS = {
+  auth: {
+    targetType: 'gate',
+    targetId: 'gate.auth-preflight',
+    title: 'auth preflight gate',
+    reason: 'Auth-related failures are recurring; add a reusable login/session-validity check before execution.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  timeout: {
+    targetType: 'gate',
+    targetId: 'gate.timeout-budget',
+    title: 'timeout budget gate',
+    reason: 'Timeouts are recurring; add wait-budget checks or split long actions before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  network: {
+    targetType: 'gate',
+    targetId: 'gate.retry-backoff',
+    title: 'network retry/backoff gate',
+    reason: 'Network failures are recurring; standardize retry/backoff and transient-error handling.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  permission: {
+    targetType: 'gate',
+    targetId: 'gate.human-approval',
+    title: 'human approval gate',
+    reason: 'Permission-related failures suggest the workflow needs a clear human approval or access check.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'rate-limit': {
+    targetType: 'gate',
+    targetId: 'gate.rate-limit-pacing',
+    title: 'rate-limit pacing gate',
+    reason: 'Rate limits are recurring; add pacing and cooldown controls before retries.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'quality-build': {
+    targetType: 'gate',
+    targetId: 'gate.quality-build',
+    title: 'quality build gate',
+    reason: 'Build failures are recurring inside the local quality gate; repair the build before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'quality-types': {
+    targetType: 'gate',
+    targetId: 'gate.quality-types',
+    title: 'quality types gate',
+    reason: 'Typecheck failures are recurring inside the local quality gate; fix type errors before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'quality-scripts': {
+    targetType: 'gate',
+    targetId: 'gate.quality-scripts',
+    title: 'quality scripts gate',
+    reason: 'Script test failures are recurring inside the local quality gate; stabilize script coverage before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'quality-logs': {
+    targetType: 'gate',
+    targetId: 'gate.quality-log-audit',
+    title: 'quality log audit gate',
+    reason: 'The local quality gate is failing on stdout log audit; remove accidental debug logs or tighten the allowlist for intentional CLI output.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'quality-security': {
+    targetType: 'gate',
+    targetId: 'gate.quality-security',
+    title: 'quality security gate',
+    reason: 'Security config failures are recurring inside the local quality gate; repair the security checklist before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 40,
+  },
+  'quality-git': {
+    targetType: 'gate',
+    targetId: 'gate.quality-git',
+    title: 'quality git gate',
+    reason: 'Git state checks are failing inside the local quality gate; repair repository health before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 35,
+  },
+  'quality-multi': {
+    targetType: 'gate',
+    targetId: 'gate.quality-triage',
+    title: 'quality triage gate',
+    reason: 'Multiple quality-gate checks are failing together; triage the failing checks before dispatch.',
+    nextCommand: getQualityGateFixCommand(),
+    priority: 35,
+  },
+  tool: {
+    targetType: 'runbook',
+    targetId: 'runbook.tool-repair',
+    title: 'tooling repair runbook',
+    reason: 'Generic tool failures are recurring; capture the recovery path in a reusable runbook.',
+    nextCommand: getDoctorCommand(),
+    priority: 40,
+  },
+  'merge-gate-blocked': {
+    targetType: 'runbook',
+    targetId: 'runbook.dispatch-merge-triage',
+    title: 'dispatch merge triage runbook',
+    reason: 'Dry-run orchestration is blocking at the merge gate; resolve ownership or blocked handoff issues before enabling a real runtime.',
+    nextCommand: getDoctorCommand(),
+    priority: 45,
+  },
+  default: {
+    targetType: 'runbook',
+    targetId: 'runbook.failure-triage',
+    title: 'failure triage runbook',
+    reason: 'Failures are recurring; document a short triage path before promoting the workflow.',
+    nextCommand: getDoctorCommand(),
+    priority: 40,
+  },
+};
+
+function getSessionsRoot(rootDir) {
+  return path.join(rootDir, 'memory', 'context-db', 'sessions');
+}
+
+async function readJson(filePath) {
+  return JSON.parse(await fs.readFile(filePath, 'utf8'));
+}
+
+async function readJsonLines(filePath) {
+  const raw = await fs.readFile(filePath, 'utf8');
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+async function readJsonOptional(filePath) {
+  try {
+    return await readJson(filePath);
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readJsonLinesOptional(filePath) {
+  try {
+    return await readJsonLines(filePath);
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function parseDispatchArtifactPathFromEvidence(value) {
+  const match = /artifact=([^;]+)/.exec(String(value || ''));
+  const artifactPath = match ? match[1].trim() : null;
+  return artifactPath && isDispatchArtifactPath(artifactPath) ? artifactPath : null;
+}
+
+function parseDispatchEventIdFromEvidence(value) {
+  const match = /event=([^;]+)/.exec(String(value || ''));
+  return match ? match[1].trim() : null;
+}
+
+function isDispatchArtifactPath(value) {
+  return /(?:^|\/)artifacts\/dispatch-run-.*\.json$/i.test(String(value || '').trim());
+}
+
+async function collectDispatchEvidence(rootDir, sessionId, checkpoints = [], events = []) {
+  const candidates = new Map();
+
+  for (const checkpoint of checkpoints) {
+    const artifactPath = (Array.isArray(checkpoint.artifacts) ? checkpoint.artifacts : []).find((item) => isDispatchArtifactPath(item))
+      || parseDispatchArtifactPathFromEvidence(checkpoint.telemetry?.verification?.evidence);
+    if (!artifactPath) continue;
+
+    candidates.set(artifactPath, {
+      artifactPath,
+      checkpointSeq: checkpoint.seq,
+      checkpointTs: checkpoint.ts,
+      eventId: parseDispatchEventIdFromEvidence(checkpoint.telemetry?.verification?.evidence),
+    });
+  }
+
+  for (const event of events) {
+    if (event.kind !== ORCHESTRATION_DISPATCH_EVENT_KIND) continue;
+    const artifactPath = (Array.isArray(event.refs) ? event.refs : []).find((item) => isDispatchArtifactPath(item));
+    if (!artifactPath) continue;
+
+    const existing = candidates.get(artifactPath) || {};
+    candidates.set(artifactPath, {
+      ...existing,
+      artifactPath,
+      eventId: existing.eventId || `${sessionId}#${event.seq}`,
+      eventTs: event.ts,
+      eventText: event.text,
+    });
+  }
+
+  const records = [];
+  for (const candidate of candidates.values()) {
+    const artifact = await readJsonOptional(path.join(rootDir, candidate.artifactPath));
+    const dispatchRun = artifact?.dispatchRun;
+    const jobRuns = Array.isArray(dispatchRun?.jobRuns) ? dispatchRun.jobRuns : [];
+    const blockedJobs = jobRuns.filter((jobRun) => jobRun.status === 'blocked').length;
+    records.push({
+      artifactPath: candidate.artifactPath,
+      eventId: candidate.eventId || null,
+      checkpointSeq: Number.isFinite(candidate.checkpointSeq) ? candidate.checkpointSeq : null,
+      ts: String(artifact?.persistedAt || candidate.eventTs || candidate.checkpointTs || ''),
+      ok: dispatchRun?.ok === true,
+      blockedJobs,
+      jobCount: jobRuns.length,
+      executors: Array.isArray(dispatchRun?.executorRegistry) ? [...dispatchRun.executorRegistry] : [],
+      finalOutputs: Array.isArray(dispatchRun?.finalOutputs) ? dispatchRun.finalOutputs.length : 0,
+    });
+  }
+
+  records.sort((left, right) => String(right.ts || '').localeCompare(String(left.ts || '')));
+  return records;
+}
+
+function safeAverage(total, count) {
+  return count > 0 ? total / count : 0;
+}
+
+function formatNumber(value, digits = 1) {
+  return Number.isFinite(value) ? Number(value.toFixed(digits)) : 0;
+}
+
+function createCountRecord(keys) {
+  return Object.fromEntries(keys.map((key) => [key, 0]));
+}
+
+function normalizeFailureCategory(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function formatCost(cost) {
+  const parts = [];
+  if (cost.inputTokens > 0) parts.push(`inputTokens=${cost.inputTokens}`);
+  if (cost.outputTokens > 0) parts.push(`outputTokens=${cost.outputTokens}`);
+  if (cost.totalTokens > 0) parts.push(`totalTokens=${cost.totalTokens}`);
+  if (cost.usd > 0) parts.push(`usd=${formatNumber(cost.usd, 3)}`);
+  return parts.length > 0 ? parts.join(' ') : '(none)';
+}
+
+function getEvidenceStrength(item) {
+  const matches = String(item?.evidence || '').match(/-?\d+(?:\.\d+)?/g);
+  return matches
+    ? matches.reduce((total, value) => total + Number(value), 0)
+    : 0;
+}
+
+function sortRecommendations(items) {
+  return [...items].sort((left, right) => {
+    if (right.priority !== left.priority) {
+      return right.priority - left.priority;
+    }
+
+    const evidenceDelta = getEvidenceStrength(right) - getEvidenceStrength(left);
+    if (evidenceDelta !== 0) {
+      return evidenceDelta;
+    }
+
+    const targetDelta = String(left.targetId || '').localeCompare(String(right.targetId || ''));
+    if (targetDelta !== 0) {
+      return targetDelta;
+    }
+
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function finalizeRecommendations(items) {
+  const all = sortRecommendations(items);
+  return {
+    all,
+    fix: all.filter((item) => item.kind === 'fix'),
+    observe: all.filter((item) => item.kind === 'observe'),
+    promote: all.filter((item) => item.kind === 'promote'),
+  };
+}
+
+function formatRecommendations(items) {
+  return items.length > 0
+    ? items.map((item) => {
+      const nextSteps = [];
+      if (item.nextCommand) nextSteps.push(`Next: ${item.nextCommand}`);
+      if (item.nextArtifact) nextSteps.push(`Artifact: ${item.nextArtifact}`);
+      const suffix = nextSteps.length > 0 ? ` ${nextSteps.join(' ')}` : '';
+      return `- [${item.targetId}] ${item.title}: ${item.reason} (${item.evidence})${suffix}`;
+    }).join('\n')
+    : '- (none)';
+}
+
+async function findLatestSessionMeta(rootDir) {
+  const sessionsRoot = getSessionsRoot(rootDir);
+  let entries = [];
+  try {
+    entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
+  } catch (error) {
+    const code = error && typeof error === 'object' ? error.code : undefined;
+    if (code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+
+  const metas = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const metaPath = path.join(sessionsRoot, entry.name, 'meta.json');
+    try {
+      const meta = await readJson(metaPath);
+      metas.push(meta);
+    } catch {
+      // ignore malformed sessions and keep scanning
+    }
+  }
+
+  metas.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  return metas[0] ?? null;
+}
+
+async function loadSessionArtifacts(rootDir, sessionId) {
+  const sessionDir = path.join(getSessionsRoot(rootDir), sessionId);
+  const metaPath = path.join(sessionDir, 'meta.json');
+  const checkpointsPath = path.join(sessionDir, 'l1-checkpoints.jsonl');
+  const eventsPath = path.join(sessionDir, 'l2-events.jsonl');
+  const [meta, checkpoints, events] = await Promise.all([
+    readJson(metaPath),
+    readJsonLines(checkpointsPath),
+    readJsonLinesOptional(eventsPath),
+  ]);
+  return { meta, checkpoints, events };
+}
+
+function buildRecommendations(summary) {
+  const recommendations = [];
+
+  if (summary.sample.analyzedCheckpoints === 0) {
+    recommendations.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: 'sample.no-checkpoints',
+      title: 'no checkpoints yet',
+      reason: 'There are no checkpoints to evaluate for this session.',
+      evidence: 'analyzed=0',
+      priority: 50,
+    }));
+    return finalizeRecommendations(recommendations);
+  }
+
+  if (summary.sample.telemetryCheckpoints === 0) {
+    recommendations.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: 'sample.telemetry-missing',
+      title: 'telemetry missing',
+      reason: 'Recent checkpoints have no structured telemetry yet.',
+      evidence: `checkpoints=${summary.sample.analyzedCheckpoints} telemetry=0`,
+      priority: 40,
+    }));
+    return finalizeRecommendations(recommendations);
+  }
+
+  if (summary.sample.telemetryCheckpoints < 3) {
+    recommendations.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: 'sample.insufficient-sample',
+      title: 'insufficient sample',
+      reason: 'Keep collecting telemetry before promoting this workflow.',
+      evidence: `telemetry=${summary.sample.telemetryCheckpoints}`,
+      priority: 30,
+    }));
+  }
+
+  if (summary.signals.verification.knownCount === 0 || summary.signals.verification.unknownRate >= 0.5) {
+    recommendations.push(createRecommendation({
+      kind: 'fix',
+      targetType: 'gate',
+      targetId: 'gate.verification-results',
+      title: 'wire real verification results',
+      reason: 'Most checkpoints are still unknown, so learn-eval cannot trust the outcome signal yet.',
+      evidence: `unknown=${summary.signals.verification.counts.unknown}/${summary.sample.analyzedCheckpoints}`,
+      nextCommand: getVerificationCommand(),
+      priority: 50,
+    }));
+  }
+
+  const dominantFailure = summary.signals.failures.top[0];
+  if (dominantFailure && (summary.signals.verification.counts.failed > 0 || summary.status.counts.blocked > 0)) {
+    if (dominantFailure.category === 'merge-gate-blocked') {
+      recommendations.push(createRecommendation({
+        kind: 'fix',
+        targetType: 'runbook',
+        targetId: 'runbook.dispatch-merge-triage',
+        title: 'dispatch merge triage runbook',
+        reason: 'Dry-run orchestration is blocking at the merge gate; resolve ownership or blocked handoff issues before enabling a real runtime.',
+        evidence: `${dominantFailure.category}=${dominantFailure.count} blockedRuns=${summary.signals.dispatch.blockedRuns} blockedJobs=${summary.signals.dispatch.blockedJobs}`,
+        nextCommand: getDispatchReplayCommand(summary.session.sessionId),
+        nextArtifact: summary.signals.dispatch.latestArtifactPath || undefined,
+        priority: 45,
+      }));
+    } else {
+      const action = FAILURE_CATEGORY_ACTIONS[dominantFailure.category] ?? FAILURE_CATEGORY_ACTIONS.default;
+      recommendations.push(createRecommendation({
+        kind: 'fix',
+        targetType: action.targetType,
+        targetId: action.targetId,
+        title: action.title,
+        reason: action.reason,
+        evidence: `${dominantFailure.category}=${dominantFailure.count}`,
+        nextCommand: action.nextCommand,
+        priority: action.priority,
+      }));
+    }
+  } else if (summary.status.counts.blocked > 0) {
+    recommendations.push(createRecommendation({
+      kind: 'fix',
+      targetType: 'gate',
+      targetId: 'gate.blocked-triage',
+      title: 'blocked-path triage gate',
+      reason: 'Blocked checkpoints exist without a clear dominant failure category; add a preflight gate or runbook.',
+      evidence: `blocked=${summary.status.counts.blocked}`,
+      nextCommand: getQualityGateFixCommand(),
+      priority: 30,
+    }));
+  }
+
+  if (summary.signals.retry.average >= 2 || summary.signals.retry.max >= 3) {
+    recommendations.push(createRecommendation({
+      kind: 'fix',
+      targetType: 'runbook',
+      targetId: 'runbook.retry-budget-policy',
+      title: 'retry budget policy',
+      reason: 'Retries are trending high; add retry limits and a standard escalation path.',
+      evidence: `avg=${summary.signals.retry.average} max=${summary.signals.retry.max}`,
+      nextCommand: getDoctorCommand(),
+      priority: 20,
+    }));
+  }
+
+  if (
+    summary.sample.telemetryCheckpoints >= 3
+    && summary.signals.verification.knownCount >= 3
+    && summary.signals.verification.passRate >= 0.8
+    && summary.signals.verification.counts.failed === 0
+    && summary.signals.verification.counts.partial === 0
+    && summary.status.counts.blocked === 0
+    && summary.signals.retry.average <= 1
+  ) {
+    const blueprint = inferPromotionBlueprint(summary);
+    recommendations.push(createRecommendation({
+      kind: 'promote',
+      targetType: 'blueprint',
+      targetId: `blueprint.${blueprint}`,
+      title: 'promote workflow blueprint',
+      reason: 'This flow is stable enough to capture as a reusable subagent blueprint.',
+      evidence: `passRate=${summary.signals.verification.passRate} retries=${summary.signals.retry.average}`,
+      nextCommand: buildOrchestrateCommand(blueprint, summary.session.goal, buildPromotionContext(summary, blueprint)),
+      priority: 20,
+    }));
+    recommendations.push(createRecommendation({
+      kind: 'promote',
+      targetType: 'checklist',
+      targetId: 'checklist.verification-standard',
+      title: 'promote verification checklist',
+      reason: 'Verification is consistent enough to standardize into a reusable quality gate checklist.',
+      evidence: `known=${summary.signals.verification.knownCount} passed=${summary.signals.verification.counts.passed}`,
+      nextCommand: getQualityGatePromoteCommand(),
+      priority: 10,
+    }));
+  }
+
+  if (summary.signals.dispatch.runs > 0 && summary.signals.dispatch.blockedRuns === 0) {
+    recommendations.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: 'sample.dispatch-evidence-present',
+      title: 'dispatch evidence present',
+      reason: 'Dry-run orchestration evidence is flowing into ContextDB; keep collecting runs before enabling a real runtime.',
+      evidence: `runs=${summary.signals.dispatch.runs} executors=${summary.signals.dispatch.executorUsage.map((item) => `${item.executor}=${item.count}`).join(',') || 'none'}`,
+      nextArtifact: summary.signals.dispatch.latestArtifactPath || undefined,
+      priority: 15,
+    }));
+  }
+
+  if (summary.signals.elapsed.average >= 120000 && summary.sample.telemetryCheckpoints >= 3) {
+    recommendations.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: 'sample.latency-watch',
+      title: 'slow-path watch',
+      reason: 'The workflow is succeeding but remains slow; keep tracking elapsed time before tightening budgets.',
+      evidence: `avgElapsedMs=${summary.signals.elapsed.average}`,
+      priority: 20,
+    }));
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: 'sample.no-strong-signal',
+      title: 'no strong signal yet',
+      reason: 'Current telemetry does not yet justify promotion or corrective action.',
+      evidence: `telemetry=${summary.sample.telemetryCheckpoints}`,
+      priority: 10,
+    }));
+  }
+
+  return finalizeRecommendations(recommendations);
+}
+
+export async function buildLearnEvalReport(rawOptions = {}, { rootDir } = {}) {
+  const sessionMeta = rawOptions.sessionId
+    ? { sessionId: rawOptions.sessionId }
+    : await findLatestSessionMeta(rootDir);
+
+  if (!sessionMeta?.sessionId) {
+    throw new Error(`No ContextDB sessions found under ${getSessionsRoot(rootDir)}`);
+  }
+
+  const { meta, checkpoints, events } = await loadSessionArtifacts(rootDir, sessionMeta.sessionId);
+  const limit = Number.isFinite(rawOptions.limit) ? Math.max(1, Math.floor(rawOptions.limit)) : 10;
+  const selected = checkpoints.slice(Math.max(0, checkpoints.length - limit));
+  const dispatchEvidence = await collectDispatchEvidence(rootDir, sessionMeta.sessionId, selected, events);
+
+  const statusCounts = createCountRecord(SESSION_STATUS_NAMES);
+  const verificationCounts = createCountRecord(VERIFICATION_RESULT_NAMES);
+  const failureCounts = new Map();
+  const cost = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    usd: 0,
+  };
+
+  let telemetryCheckpoints = 0;
+  let knownVerificationCount = 0;
+  let retryTotal = 0;
+  let retryMax = 0;
+  let elapsedTotal = 0;
+  let elapsedCount = 0;
+  let elapsedMax = 0;
+
+  for (const checkpoint of selected) {
+    const status = SESSION_STATUS_NAMES.includes(checkpoint.status) ? checkpoint.status : 'running';
+    statusCounts[status] += 1;
+
+    const telemetry = checkpoint.telemetry;
+    const verificationResult = VERIFICATION_RESULT_NAMES.includes(telemetry?.verification?.result)
+      ? telemetry.verification.result
+      : 'unknown';
+    verificationCounts[verificationResult] += 1;
+
+    if (!telemetry) {
+      continue;
+    }
+
+    telemetryCheckpoints += 1;
+    if (verificationResult !== 'unknown') {
+      knownVerificationCount += 1;
+    }
+
+    const retryCount = Number.isFinite(telemetry.retryCount) ? Math.max(0, Math.floor(telemetry.retryCount)) : 0;
+    retryTotal += retryCount;
+    retryMax = Math.max(retryMax, retryCount);
+
+    if (Number.isFinite(telemetry.elapsedMs) && telemetry.elapsedMs >= 0) {
+      const elapsedMs = Math.floor(telemetry.elapsedMs);
+      elapsedTotal += elapsedMs;
+      elapsedCount += 1;
+      elapsedMax = Math.max(elapsedMax, elapsedMs);
+    }
+
+    const failureCategory = normalizeFailureCategory(telemetry.failureCategory);
+    if (failureCategory) {
+      failureCounts.set(failureCategory, (failureCounts.get(failureCategory) ?? 0) + 1);
+    }
+
+    if (Number.isFinite(telemetry.cost?.inputTokens)) cost.inputTokens += Math.max(0, Math.floor(telemetry.cost.inputTokens));
+    if (Number.isFinite(telemetry.cost?.outputTokens)) cost.outputTokens += Math.max(0, Math.floor(telemetry.cost.outputTokens));
+    if (Number.isFinite(telemetry.cost?.totalTokens)) cost.totalTokens += Math.max(0, Math.floor(telemetry.cost.totalTokens));
+    if (Number.isFinite(telemetry.cost?.usd)) cost.usd += Math.max(0, Number(telemetry.cost.usd));
+  }
+
+  if (cost.totalTokens === 0 && (cost.inputTokens > 0 || cost.outputTokens > 0)) {
+    cost.totalTokens = cost.inputTokens + cost.outputTokens;
+  }
+
+  const failureTop = Array.from(failureCounts.entries())
+    .map(([category, count]) => ({ category, count }))
+    .sort((left, right) => right.count - left.count || left.category.localeCompare(right.category));
+
+  const verificationKnownDenominator = Math.max(knownVerificationCount, 1);
+  const verificationSampleDenominator = Math.max(selected.length, 1);
+  const dispatchExecutorCounts = new Map();
+  let dispatchBlockedJobs = 0;
+
+  for (const item of dispatchEvidence) {
+    dispatchBlockedJobs += item.blockedJobs;
+    for (const executor of item.executors) {
+      dispatchExecutorCounts.set(executor, (dispatchExecutorCounts.get(executor) ?? 0) + 1);
+    }
+  }
+
+  const summary = {
+    session: {
+      sessionId: meta.sessionId,
+      agent: meta.agent,
+      project: meta.project,
+      goal: meta.goal,
+      updatedAt: meta.updatedAt,
+    },
+    sample: {
+      totalCheckpoints: checkpoints.length,
+      analyzedCheckpoints: selected.length,
+      telemetryCheckpoints,
+      limit,
+    },
+    status: {
+      counts: statusCounts,
+    },
+    signals: {
+      verification: {
+        counts: verificationCounts,
+        knownCount: knownVerificationCount,
+        passRate: formatNumber(verificationCounts.passed / verificationKnownDenominator, 2),
+        unknownRate: formatNumber(verificationCounts.unknown / verificationSampleDenominator, 2),
+      },
+      retry: {
+        total: retryTotal,
+        average: formatNumber(safeAverage(retryTotal, telemetryCheckpoints), 2),
+        max: retryMax,
+      },
+      elapsed: {
+        average: formatNumber(safeAverage(elapsedTotal, elapsedCount), 0),
+        max: elapsedMax,
+      },
+      failures: {
+        top: failureTop,
+      },
+      cost: {
+        inputTokens: cost.inputTokens,
+        outputTokens: cost.outputTokens,
+        totalTokens: cost.totalTokens,
+        usd: formatNumber(cost.usd, 4),
+      },
+      dispatch: {
+        runs: dispatchEvidence.length,
+        successfulRuns: dispatchEvidence.filter((item) => item.ok).length,
+        blockedRuns: dispatchEvidence.filter((item) => item.ok === false).length,
+        blockedJobs: dispatchBlockedJobs,
+        executorUsage: Array.from(dispatchExecutorCounts.entries())
+          .map(([executor, count]) => ({ executor, count }))
+          .sort((left, right) => right.count - left.count || left.executor.localeCompare(right.executor)),
+        latestArtifactPath: dispatchEvidence[0]?.artifactPath || null,
+        latestEventId: dispatchEvidence[0]?.eventId || null,
+      },
+    },
+  };
+
+  return {
+    ...summary,
+    recommendations: buildRecommendations(summary),
+  };
+}
+
+export function renderLearnEvalReport(report) {
+  const failureSummary = report.signals.failures.top.length > 0
+    ? report.signals.failures.top.map((item) => `${item.category}=${item.count}`).join(', ')
+    : '(none)';
+  const dispatchExecutors = report.signals.dispatch.executorUsage.length > 0
+    ? report.signals.dispatch.executorUsage.map((item) => `${item.executor}=${item.count}`).join(', ')
+    : '(none)';
+
+  const sections = RECOMMENDATION_KIND_ORDER.flatMap((kind) => [
+    `${RECOMMENDATION_SECTION_LABELS[kind]}:`,
+    formatRecommendations(report.recommendations[kind] || []),
+    '',
+  ]);
+
+  return [
+    'AIOS LEARN-EVAL',
+    '---------------',
+    `Session: ${report.session.sessionId}`,
+    `Agent: ${report.session.agent}`,
+    `Project: ${report.session.project}`,
+    `Goal: ${report.session.goal}`,
+    `Updated: ${report.session.updatedAt}`,
+    '',
+    'Sample:',
+    `- analyzed=${report.sample.analyzedCheckpoints} total=${report.sample.totalCheckpoints} telemetry=${report.sample.telemetryCheckpoints} limit=${report.sample.limit}`,
+    '',
+    'Signals:',
+    `- status running=${report.status.counts.running} blocked=${report.status.counts.blocked} done=${report.status.counts.done}`,
+    `- verification passed=${report.signals.verification.counts.passed} failed=${report.signals.verification.counts.failed} partial=${report.signals.verification.counts.partial} unknown=${report.signals.verification.counts.unknown}`,
+    `- passRate=${report.signals.verification.passRate} unknownRate=${report.signals.verification.unknownRate}`,
+    `- retries avg=${report.signals.retry.average} total=${report.signals.retry.total} max=${report.signals.retry.max}`,
+    `- elapsed avgMs=${report.signals.elapsed.average} maxMs=${report.signals.elapsed.max}`,
+    `- failures ${failureSummary}`,
+    `- cost ${formatCost(report.signals.cost)}`,
+    `- dispatch runs=${report.signals.dispatch.runs} ok=${report.signals.dispatch.successfulRuns} blocked=${report.signals.dispatch.blockedRuns} blockedJobs=${report.signals.dispatch.blockedJobs} executors=${dispatchExecutors}`,
+    ...(report.signals.dispatch.latestArtifactPath ? [`- dispatch latestArtifact=${report.signals.dispatch.latestArtifactPath}`] : []),
+    '',
+    ...sections,
+  ].join('\n');
+}

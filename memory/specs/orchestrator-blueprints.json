@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "roles": {
+    "planner": {
+      "responsibility": "Clarify scope, risks, dependencies, and execution order before code changes.",
+      "ownership": "Plans, scope boundaries, and work breakdown."
+    },
+    "implementer": {
+      "responsibility": "Own code changes inside the agreed file scope and report concrete results.",
+      "ownership": "Production code, tests, and local verification for owned files."
+    },
+    "reviewer": {
+      "responsibility": "Review correctness, regressions, maintainability, and test coverage.",
+      "ownership": "Findings only; does not own source edits in the orchestration contract."
+    },
+    "security-reviewer": {
+      "responsibility": "Review auth, data handling, secrets, injection risks, and unsafe automation.",
+      "ownership": "Security findings only; does not own source edits in the orchestration contract."
+    }
+  },
+  "blueprints": {
+    "feature": ["planner", "implementer", "reviewer", "security-reviewer"],
+    "bugfix": ["planner", "implementer", "reviewer"],
+    "refactor": ["planner", "implementer", "reviewer"],
+    "security": ["security-reviewer", "planner", "implementer", "reviewer"]
+  },
+  "mergeGate": {
+    "blockStatuses": ["blocked", "needs-input"],
+    "conflictRule": "overlapping file ownership blocks parallel merge",
+    "mergeRule": "merge findings and recommendations only when ownership is clean"
+  }
+}

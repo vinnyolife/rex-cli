@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "executors": {
+    "local-phase": {
+      "label": "Local Phase Executor",
+      "description": "Local-only dry-run executor for orchestration phases that emits synthetic handoff payloads.",
+      "requiresModel": false,
+      "executionModes": ["dry-run"],
+      "jobTypes": ["phase"],
+      "supportedRoles": ["planner", "implementer", "reviewer", "security-reviewer"],
+      "outputTypes": ["handoff"],
+      "concurrencyMode": "parallel-safe",
+      "ownershipMode": "handoff-only"
+    },
+    "local-merge-gate": {
+      "label": "Local Merge Gate Executor",
+      "description": "Local-only dry-run executor for merge-gate validation across parallel handoffs.",
+      "requiresModel": false,
+      "executionModes": ["dry-run"],
+      "jobTypes": ["merge-gate"],
+      "supportedRoles": ["merge-gate"],
+      "outputTypes": ["merged-handoff"],
+      "concurrencyMode": "serial-only",
+      "ownershipMode": "merge-only"
+    }
+  }
+}

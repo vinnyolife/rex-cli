@@ -143,6 +143,33 @@ async function main() {
   if (parsed.command === 'doctor') {
     const { runDoctor } = await import('./lib/lifecycle/doctor.mjs');
     await runDoctor(parsed.options, { rootDir });
+    return;
+  }
+
+  if (parsed.command === 'quality-gate') {
+    const { runQualityGate } = await import('./lib/lifecycle/quality-gate.mjs');
+    const result = await runQualityGate(parsed.options, { rootDir });
+    if (result.exitCode !== 0) {
+      process.exitCode = result.exitCode;
+    }
+    return;
+  }
+
+  if (parsed.command === 'orchestrate') {
+    const { runOrchestrate } = await import('./lib/lifecycle/orchestrate.mjs');
+    const result = await runOrchestrate(parsed.options, { rootDir });
+    if (result.exitCode !== 0) {
+      process.exitCode = result.exitCode;
+    }
+    return;
+  }
+
+  if (parsed.command === 'learn-eval') {
+    const { runLearnEval } = await import('./lib/lifecycle/learn-eval.mjs');
+    const result = await runLearnEval(parsed.options, { rootDir });
+    if (result.exitCode !== 0) {
+      process.exitCode = result.exitCode;
+    }
   }
 }
 

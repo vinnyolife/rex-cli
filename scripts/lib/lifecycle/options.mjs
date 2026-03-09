@@ -1,6 +1,15 @@
+import { HARNESS_PROFILE_NAMES, normalizeHarnessProfile } from '../harness/profile.mjs';
+
 export const COMPONENT_NAMES = ['browser', 'shell', 'skills', 'superpowers'];
 export const WRAP_MODES = ['all', 'repo-only', 'opt-in', 'off'];
 export const CLIENT_NAMES = ['all', 'codex', 'claude', 'gemini', 'opencode'];
+export const QUALITY_GATE_MODES = ['quick', 'full', 'pre-pr'];
+export const ORCHESTRATOR_FORMAT_NAMES = ['text', 'json'];
+export const ORCHESTRATOR_BLUEPRINT_NAMES = ['feature', 'bugfix', 'refactor', 'security'];
+export const ORCHESTRATOR_DISPATCH_MODE_NAMES = ['none', 'local'];
+export const ORCHESTRATOR_EXECUTION_MODE_NAMES = ['none', 'dry-run'];
+export const ORCHESTRATOR_PREFLIGHT_MODE_NAMES = ['none', 'auto'];
+export const LEARN_EVAL_FORMAT_NAMES = ['text', 'json'];
 
 export function normalizeWrapMode(raw = 'opt-in') {
   const value = String(raw || 'opt-in').trim().toLowerCase();
@@ -17,6 +26,48 @@ export function normalizeClient(raw = 'all') {
   }
   return value;
 }
+
+export function normalizeQualityGateMode(raw = 'full') {
+  const value = String(raw || 'full').trim().toLowerCase();
+  if (!QUALITY_GATE_MODES.includes(value)) {
+    throw new Error(`quality-gate mode must be one of: ${QUALITY_GATE_MODES.join(', ')}`);
+  }
+  return value;
+}
+
+export function normalizeLearnEvalFormat(raw = 'text') {
+  const value = String(raw || 'text').trim().toLowerCase();
+  if (!LEARN_EVAL_FORMAT_NAMES.includes(value)) {
+    throw new Error(`learn-eval format must be one of: ${LEARN_EVAL_FORMAT_NAMES.join(', ')}`);
+  }
+  return value;
+}
+
+export function normalizeOrchestrateDispatchMode(raw = 'none') {
+  const value = String(raw || 'none').trim().toLowerCase();
+  if (!ORCHESTRATOR_DISPATCH_MODE_NAMES.includes(value)) {
+    throw new Error(`orchestrate dispatch mode must be one of: ${ORCHESTRATOR_DISPATCH_MODE_NAMES.join(', ')}`);
+  }
+  return value;
+}
+
+export function normalizeOrchestrateExecutionMode(raw = 'none') {
+  const value = String(raw || 'none').trim().toLowerCase();
+  if (!ORCHESTRATOR_EXECUTION_MODE_NAMES.includes(value)) {
+    throw new Error(`orchestrate execution mode must be one of: ${ORCHESTRATOR_EXECUTION_MODE_NAMES.join(', ')}`);
+  }
+  return value;
+}
+
+export function normalizeOrchestratePreflightMode(raw = 'none') {
+  const value = String(raw || 'none').trim().toLowerCase();
+  if (!ORCHESTRATOR_PREFLIGHT_MODE_NAMES.includes(value)) {
+    throw new Error(`orchestrate preflight mode must be one of: ${ORCHESTRATOR_PREFLIGHT_MODE_NAMES.join(', ')}`);
+  }
+  return value;
+}
+
+export { HARNESS_PROFILE_NAMES, normalizeHarnessProfile };
 
 export function normalizeComponents(raw, fallback = COMPONENT_NAMES) {
   if (Array.isArray(raw)) {
@@ -85,5 +136,38 @@ export function createDefaultDoctorOptions() {
   return {
     strict: false,
     globalSecurity: false,
+    profile: 'standard',
+  };
+}
+
+export function createDefaultQualityGateOptions() {
+  return {
+    mode: 'full',
+    profile: 'standard',
+    globalSecurity: false,
+    sessionId: '',
+  };
+}
+
+export function createDefaultOrchestrateOptions() {
+  return {
+    blueprint: '',
+    taskTitle: '',
+    contextSummary: '',
+    sessionId: '',
+    limit: 10,
+    recommendationId: '',
+    dispatchMode: 'none',
+    executionMode: 'none',
+    preflightMode: 'none',
+    format: 'text',
+  };
+}
+
+export function createDefaultLearnEvalOptions() {
+  return {
+    sessionId: '',
+    limit: 10,
+    format: 'text',
   };
 }

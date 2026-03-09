@@ -1,12 +1,22 @@
 import {
   createDefaultDoctorOptions,
+  createDefaultLearnEvalOptions,
+  createDefaultOrchestrateOptions,
+  createDefaultQualityGateOptions,
   createDefaultSetupOptions,
   createDefaultUninstallOptions,
   createDefaultUpdateOptions,
   normalizeClient,
   normalizeComponents,
+  normalizeHarnessProfile,
+  normalizeLearnEvalFormat,
+  normalizeOrchestrateDispatchMode,
+  normalizeOrchestrateExecutionMode,
+  normalizeOrchestratePreflightMode,
+  normalizeQualityGateMode,
   normalizeWrapMode,
 } from '../lifecycle/options.mjs';
+import { normalizeOrchestratorBlueprint, normalizeOrchestratorFormat } from '../harness/orchestrator.mjs';
 
 const INTERNAL_TARGETS = new Set(['shell', 'skills', 'superpowers', 'browser', 'privacy']);
 const PRIVACY_MODES = new Set(['regex', 'ollama', 'hybrid']);
@@ -15,6 +25,14 @@ function takeValue(argv, index, flag) {
   const value = argv[index + 1];
   if (!value || value.startsWith('-')) {
     throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+function parsePositiveInteger(raw, flag) {
+  const value = Number.parseInt(String(raw || '').trim(), 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} must be a positive integer`);
   }
   return value;
 }
@@ -101,44 +119,19 @@ function parseInternalArgs(argv) {
   };
 }
 
-export function parseArgs(argv = []) {
-  if (argv.length === 0) {
-    return {
-      mode: 'interactive',
-      help: false,
-      command: 'tui',
-      options: {},
-    };
-  }
+function getCommandDefaults(command) {
+  if (command === 'setup') return createDefaultSetupOptions();
+  if (command === 'update') return createDefaultUpdateOptions();
+  if (command === 'uninstall') return createDefaultUninstallOptions();
+  if (command === 'doctor') return createDefaultDoctorOptions();
+  if (command === 'quality-gate') return createDefaultQualityGateOptions();
+  if (command === 'orchestrate') return createDefaultOrchestrateOptions();
+  return createDefaultLearnEvalOptions();
+}
 
-  const first = String(argv[0] || '').trim().toLowerCase();
-  if (first === '-h' || first === '--help' || first === 'help') {
-    return {
-      mode: 'help',
-      help: true,
-      command: 'root',
-      options: {},
-    };
-  }
-
-  if (first === 'internal') {
-    return parseInternalArgs(argv.slice(1));
-  }
-
-  const command = first === 'verify' ? 'doctor' : first;
-  if (!['setup', 'update', 'uninstall', 'doctor'].includes(command)) {
-    throw new Error(`Unknown command: ${argv[0]}`);
-  }
-
+function parseTopLevelArgs(command, argv) {
   const rest = argv.slice(1);
-  const defaults = command === 'setup'
-    ? createDefaultSetupOptions()
-    : command === 'update'
-      ? createDefaultUpdateOptions()
-      : command === 'uninstall'
-        ? createDefaultUninstallOptions()
-        : createDefaultDoctorOptions();
-
+  const defaults = getCommandDefaults(command);
   const options = { ...defaults };
   let help = false;
 
@@ -147,6 +140,16 @@ export function parseArgs(argv = []) {
     if (arg === '--') continue;
     if (arg === '-h' || arg === '--help') {
       help = true;
+      continue;
+    }
+
+    if (command === 'quality-gate' && !arg.startsWith('-') && index === 0) {
+      options.mode = normalizeQualityGateMode(arg);
+      continue;
+    }
+
+    if (command === 'orchestrate' && !arg.startsWith('-') && index === 0) {
+      options.blueprint = normalizeOrchestratorBlueprint(arg);
       continue;
     }
 
@@ -178,6 +181,72 @@ export function parseArgs(argv = []) {
       case '--global-security':
         options.globalSecurity = true;
         break;
+      case '--profile':
+        options.profile = normalizeHarnessProfile(takeValue(rest, index, '--profile'));
+        index += 1;
+        break;
+      case '--task':
+        options.taskTitle = takeValue(rest, index, '--task');
+        index += 1;
+        break;
+      case '--context':
+        options.contextSummary = takeValue(rest, index, '--context');
+        index += 1;
+        break;
+      case '--session':
+        if (command !== 'learn-eval' && command !== 'orchestrate' && command !== 'quality-gate') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.sessionId = takeValue(rest, index, '--session');
+        index += 1;
+        break;
+      case '--limit':
+        if (command !== 'learn-eval' && command !== 'orchestrate') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.limit = parsePositiveInteger(takeValue(rest, index, '--limit'), '--limit');
+        index += 1;
+        break;
+      case '--recommendation':
+        if (command !== 'orchestrate') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.recommendationId = takeValue(rest, index, '--recommendation');
+        index += 1;
+        break;
+      case '--dispatch':
+        if (command !== 'orchestrate') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.dispatchMode = normalizeOrchestrateDispatchMode(takeValue(rest, index, '--dispatch'));
+        index += 1;
+        break;
+      case '--execute':
+        if (command !== 'orchestrate') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.executionMode = normalizeOrchestrateExecutionMode(takeValue(rest, index, '--execute'));
+        index += 1;
+        break;
+      case '--preflight':
+        if (command !== 'orchestrate') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.preflightMode = normalizeOrchestratePreflightMode(takeValue(rest, index, '--preflight'));
+        index += 1;
+        break;
+      case '--format': {
+        const value = takeValue(rest, index, '--format');
+        if (command === 'orchestrate') {
+          options.format = normalizeOrchestratorFormat(value);
+        } else if (command === 'learn-eval') {
+          options.format = normalizeLearnEvalFormat(value);
+        } else {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        index += 1;
+        break;
+      }
       default:
         throw new Error(`Unknown option: ${arg}`);
     }
@@ -189,4 +258,41 @@ export function parseArgs(argv = []) {
     command,
     options,
   };
+}
+
+export function parseArgs(argv = []) {
+  if (argv.length === 0) {
+    return {
+      mode: 'interactive',
+      help: false,
+      command: 'tui',
+      options: {},
+    };
+  }
+
+  const first = String(argv[0] || '').trim().toLowerCase();
+  if (first === '-h' || first === '--help' || first === 'help') {
+    return {
+      mode: 'help',
+      help: true,
+      command: 'root',
+      options: {},
+    };
+  }
+
+  if (first === 'internal') {
+    return parseInternalArgs(argv.slice(1));
+  }
+
+  const command = first === 'verify'
+    ? 'doctor'
+    : first === 'quality' || first === 'quality-gate'
+      ? 'quality-gate'
+      : first;
+
+  if (!['setup', 'update', 'uninstall', 'doctor', 'quality-gate', 'orchestrate', 'learn-eval'].includes(command)) {
+    throw new Error(`Unknown command: ${argv[0]}`);
+  }
+
+  return parseTopLevelArgs(command, argv);
 }

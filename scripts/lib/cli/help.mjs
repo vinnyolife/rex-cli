@@ -6,16 +6,23 @@ Usage:
   node scripts/aios.mjs <command> [options]
 
 Commands:
-  setup       Install AIOS integrations
-  update      Update AIOS integrations
-  uninstall   Remove selected AIOS integrations
-  doctor      Verify AIOS installation and repo health
+  setup         Install AIOS integrations
+  update        Update AIOS integrations
+  uninstall     Remove selected AIOS integrations
+  doctor        Verify AIOS installation and repo health
+  quality-gate  Run repo quality checks with harness profiles
+  orchestrate   Preview reusable subagent workflow blueprints
+  learn-eval    Turn checkpoint telemetry into operator recommendations
 
 Examples:
   node scripts/aios.mjs setup --components all --mode opt-in --client all
   node scripts/aios.mjs update --components shell,skills --skip-doctor
   node scripts/aios.mjs uninstall --components shell,skills
-  node scripts/aios.mjs doctor --strict
+  node scripts/aios.mjs doctor --strict --profile standard
+  node scripts/aios.mjs quality-gate pre-pr --profile strict
+  node scripts/aios.mjs orchestrate feature --task "Ship orchestrator blueprints"
+  node scripts/aios.mjs orchestrate --session codex-cli-20260303T080437-065e16c0 --dispatch local --execute dry-run --format json
+  node scripts/aios.mjs learn-eval --limit 5
 `;
 }
 
@@ -61,6 +68,44 @@ Options:
 Options:
   --strict
   --global-security
+  --profile <minimal|standard|strict>
+  -h, --help
+`;
+    case 'quality-gate':
+      return `Usage:
+  node scripts/aios.mjs quality-gate [quick|full|pre-pr] [options]
+
+Options:
+  --profile <minimal|standard|strict>
+  --global-security
+  --session <id>
+  -h, --help
+`;
+    case 'orchestrate':
+      return `Usage:
+  node scripts/aios.mjs orchestrate [feature|bugfix|refactor|security] [options]
+  node scripts/aios.mjs orchestrate --session <id> [options]
+
+Options:
+  --task <title>
+  --context <summary>
+  --session <id>                 Load structured learn-eval recommendations for this session
+  --limit <n>                   Number of checkpoints to inspect when loading learn-eval
+  --recommendation <targetId>   Pin a specific learn-eval recommendation to the overlay
+  --dispatch <none|local>       Build a non-executing local dispatch skeleton
+  --execute <none|dry-run>      Simulate local dispatch execution without model calls
+  --preflight <none|auto>       Run supported local gate/runbook actions before final DAG selection
+  --format <text|json>
+  -h, --help
+`;
+    case 'learn-eval':
+      return `Usage:
+  node scripts/aios.mjs learn-eval [options]
+
+Options:
+  --session <id>
+  --limit <n>
+  --format <text|json>
   -h, --help
 `;
     default:

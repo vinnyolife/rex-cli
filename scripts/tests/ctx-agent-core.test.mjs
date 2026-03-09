@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isBetterSqlite3AbiMismatch, shouldAutoRebuildNative } from '../ctx-agent-core.mjs';
+import { classifyOneShotFailure, isBetterSqlite3AbiMismatch, shouldAutoRebuildNative } from '../ctx-agent-core.mjs';
 
 test('detects better-sqlite3 Node ABI mismatch errors', () => {
   const detail = [
@@ -33,4 +33,12 @@ test('auto-rebuild env accepts explicit on values', () => {
   assert.equal(shouldAutoRebuildNative({ CTXDB_AUTO_REBUILD_NATIVE: '1' }), true);
   assert.equal(shouldAutoRebuildNative({ CTXDB_AUTO_REBUILD_NATIVE: 'true' }), true);
   assert.equal(shouldAutoRebuildNative({ CTXDB_AUTO_REBUILD_NATIVE: 'on' }), true);
+});
+
+test('classifyOneShotFailure recognizes timeout-like failures', () => {
+  assert.equal(classifyOneShotFailure('Request timed out after 30s'), 'timeout');
+});
+
+test('classifyOneShotFailure falls back to tool for generic failures', () => {
+  assert.equal(classifyOneShotFailure('Unhandled exit=1'), 'tool');
 });

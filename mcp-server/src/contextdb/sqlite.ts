@@ -1,6 +1,7 @@
 import { existsSync, unlinkSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import type { CheckpointCost, CheckpointTelemetry, VerificationResult } from './core.js';
 
 export interface SqliteSessionRow {
   sessionId: string;
@@ -40,6 +41,7 @@ export interface SqliteCheckpointRow {
   summary: string;
   nextActions: string[];
   artifacts: string[];
+  telemetry?: CheckpointTelemetry;
 }
 
 export interface SqliteSearchInput {
@@ -86,6 +88,12 @@ interface CheckpointSelectRow {
   summary: string;
   next_actions_json: string;
   artifacts_json: string;
+  verification_result: string | null;
+  retry_count: number | null;
+  failure_category: string | null;
+  elapsed_ms: number | null;
+  cost_json: string | null;
+  telemetry_json: string | null;
 }
 
 const dbConnections = new Map<string, Database.Database>();
@@ -103,6 +111,40 @@ function parseJsonStringArray(raw: string): string[] {
   } catch {
     return [];
   }
+}
+function parseJsonObject<T>(raw?: string | null): T | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    return parsed as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCheckpointTelemetry(row: CheckpointSelectRow): CheckpointTelemetry | undefined {
+  const parsed = parseJsonObject<CheckpointTelemetry>(row.telemetry_json);
+  if (parsed) return parsed;
+
+  const cost = parseJsonObject<CheckpointCost>(row.cost_json);
+  const telemetry: CheckpointTelemetry = {};
+  if (row.verification_result) {
+    telemetry.verification = { result: row.verification_result as VerificationResult };
+  }
+  if (typeof row.retry_count === 'number' && Number.isFinite(row.retry_count) && row.retry_count >= 0) {
+    telemetry.retryCount = row.retry_count;
+  }
+  if (row.failure_category) {
+    telemetry.failureCategory = row.failure_category;
+  }
+  if (typeof row.elapsed_ms === 'number' && Number.isFinite(row.elapsed_ms) && row.elapsed_ms >= 0) {
+    telemetry.elapsedMs = row.elapsed_ms;
+  }
+  if (cost) {
+    telemetry.cost = cost;
+  }
+  return Object.keys(telemetry).length > 0 ? telemetry : undefined;
 }
 
 function getConnection(dbPath: string): Database.Database {
@@ -126,6 +168,23 @@ function closeConnection(dbPath: string): void {
     cached.close();
   } finally {
     dbConnections.delete(dbPath);
+  }
+}
+function ensureCheckpointTelemetryColumns(db: Database.Database): void {
+  const tableInfo = db.prepare('PRAGMA table_info(checkpoints);').all() as Array<{ name: string }>;
+  const columns = new Set(tableInfo.map((row) => row.name));
+  const migrations: Array<[string, string]> = [
+    ['verification_result', 'ALTER TABLE checkpoints ADD COLUMN verification_result TEXT;'],
+    ['retry_count', 'ALTER TABLE checkpoints ADD COLUMN retry_count INTEGER;'],
+    ['failure_category', 'ALTER TABLE checkpoints ADD COLUMN failure_category TEXT;'],
+    ['elapsed_ms', 'ALTER TABLE checkpoints ADD COLUMN elapsed_ms INTEGER;'],
+    ['cost_json', 'ALTER TABLE checkpoints ADD COLUMN cost_json TEXT;'],
+    ['telemetry_json', 'ALTER TABLE checkpoints ADD COLUMN telemetry_json TEXT;'],
+  ];
+
+  for (const [column, statement] of migrations) {
+    if (columns.has(column)) continue;
+    db.exec(statement);
   }
 }
 
@@ -173,6 +232,12 @@ export function ensureSqliteSidecar(dbPath: string): void {
       summary TEXT NOT NULL,
       next_actions_json TEXT NOT NULL,
       artifacts_json TEXT NOT NULL,
+      verification_result TEXT,
+      retry_count INTEGER,
+      failure_category TEXT,
+      elapsed_ms INTEGER,
+      cost_json TEXT,
+      telemetry_json TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       UNIQUE(session_id, seq)
     );
@@ -190,6 +255,7 @@ export function ensureSqliteSidecar(dbPath: string): void {
     CREATE INDEX IF NOT EXISTS idx_checkpoints_session_ts
       ON checkpoints (session_id, ts_epoch DESC);
   `);
+  ensureCheckpointTelemetryColumns(db);
 }
 
 export function recreateSqliteSidecar(dbPath: string): void {
@@ -272,9 +338,11 @@ export function upsertCheckpointRow(dbPath: string, row: SqliteCheckpointRow): v
   const db = getConnection(dbPath);
   db.prepare(`
     INSERT INTO checkpoints (
-      checkpoint_id, session_id, seq, ts, ts_epoch, project, agent, status, summary, next_actions_json, artifacts_json
+      checkpoint_id, session_id, seq, ts, ts_epoch, project, agent, status, summary, next_actions_json, artifacts_json,
+      verification_result, retry_count, failure_category, elapsed_ms, cost_json, telemetry_json
     ) VALUES (
-      @checkpoint_id, @session_id, @seq, @ts, @ts_epoch, @project, @agent, @status, @summary, @next_actions_json, @artifacts_json
+      @checkpoint_id, @session_id, @seq, @ts, @ts_epoch, @project, @agent, @status, @summary, @next_actions_json, @artifacts_json,
+      @verification_result, @retry_count, @failure_category, @elapsed_ms, @cost_json, @telemetry_json
     )
     ON CONFLICT(checkpoint_id) DO UPDATE SET
       ts=excluded.ts,
@@ -284,7 +352,13 @@ export function upsertCheckpointRow(dbPath: string, row: SqliteCheckpointRow): v
       status=excluded.status,
       summary=excluded.summary,
       next_actions_json=excluded.next_actions_json,
-      artifacts_json=excluded.artifacts_json;
+      artifacts_json=excluded.artifacts_json,
+      verification_result=excluded.verification_result,
+      retry_count=excluded.retry_count,
+      failure_category=excluded.failure_category,
+      elapsed_ms=excluded.elapsed_ms,
+      cost_json=excluded.cost_json,
+      telemetry_json=excluded.telemetry_json;
   `).run({
     checkpoint_id: row.checkpointId,
     session_id: row.sessionId,
@@ -297,6 +371,12 @@ export function upsertCheckpointRow(dbPath: string, row: SqliteCheckpointRow): v
     summary: row.summary,
     next_actions_json: JSON.stringify(row.nextActions),
     artifacts_json: JSON.stringify(row.artifacts),
+    verification_result: row.telemetry?.verification?.result ?? null,
+    retry_count: row.telemetry?.retryCount ?? null,
+    failure_category: row.telemetry?.failureCategory ?? null,
+    elapsed_ms: row.telemetry?.elapsedMs ?? null,
+    cost_json: row.telemetry?.cost ? JSON.stringify(row.telemetry.cost) : null,
+    telemetry_json: row.telemetry ? JSON.stringify(row.telemetry) : null,
   });
 }
 
@@ -419,7 +499,8 @@ export function timelineCheckpointRows(dbPath: string, input: SqliteTimelineInpu
 
   const rows = db.prepare(`
     SELECT
-      checkpoint_id, session_id, seq, ts, ts_epoch, project, agent, status, summary, next_actions_json, artifacts_json
+      checkpoint_id, session_id, seq, ts, ts_epoch, project, agent, status, summary, next_actions_json, artifacts_json,
+      verification_result, retry_count, failure_category, elapsed_ms, cost_json, telemetry_json
     FROM checkpoints
     ${where}
     ORDER BY ts_epoch DESC
@@ -438,6 +519,7 @@ export function timelineCheckpointRows(dbPath: string, input: SqliteTimelineInpu
     summary: row.summary,
     nextActions: parseJsonStringArray(row.next_actions_json),
     artifacts: parseJsonStringArray(row.artifacts_json),
+    telemetry: parseCheckpointTelemetry(row),
   }));
 }
 

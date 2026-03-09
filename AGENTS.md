@@ -84,6 +84,7 @@ For substantial user requests, use this route by default:
    - 2+ independent problem domains: use `superpowers:dispatching-parallel-agents`.
    - Shared-state or coupled changes: execute sequentially.
    - If real subagents are unavailable in the current runtime, emulate dispatch by splitting domain tasks explicitly and running only safe independent reads/checks in parallel.
+   - For repeated multi-agent deliveries, prefer the reusable blueprints in `memory/specs/orchestrator-blueprints.json` and the shared handoff schema before merging parallel outputs.
 5. Finish with `superpowers:verification-before-completion`; do not claim success without checkpoint + artifact evidence.
 
 For long tasks, announce the chosen route in the first progress update.

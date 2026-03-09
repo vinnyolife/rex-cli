@@ -1,0 +1,225 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { runContextDbCli } from '../lib/contextdb-cli.mjs';
+import { parseArgs } from '../lib/cli/parse-args.mjs';
+import {
+  getDisabledGateIds,
+  isHarnessGateEnabled,
+  normalizeHarnessProfile,
+} from '../lib/harness/profile.mjs';
+import { renderHandoffMarkdown, validateHandoffPayload } from '../lib/harness/handoff.mjs';
+import { planDoctor } from '../lib/lifecycle/doctor.mjs';
+import { planQualityGate, runQualityGate } from '../lib/lifecycle/quality-gate.mjs';
+
+async function makeRootDir() {
+  return await mkdtemp(path.join(os.tmpdir(), 'aios-quality-gate-'));
+}
+
+function createSession(rootDir, sessionId = 'quality-session') {
+  return runContextDbCli([
+    'session:new',
+    '--workspace',
+    rootDir,
+    '--agent',
+    'codex-cli',
+    '--project',
+    'rex-ai-boot',
+    '--goal',
+    'Verify quality gate telemetry',
+    '--session-id',
+    sessionId,
+  ]);
+}
+
+test('normalizeHarnessProfile accepts known profiles', () => {
+  assert.equal(normalizeHarnessProfile('minimal'), 'minimal');
+  assert.equal(normalizeHarnessProfile('standard'), 'standard');
+  assert.equal(normalizeHarnessProfile('strict'), 'strict');
+});
+
+test('getDisabledGateIds parses comma separated gate ids', () => {
+  const gates = getDisabledGateIds({ AIOS_DISABLED_GATES: 'doctor:browser, quality:logs ' });
+  assert.equal(gates.has('doctor:browser'), true);
+  assert.equal(gates.has('quality:logs'), true);
+});
+
+test('isHarnessGateEnabled respects profile and disabled gates', () => {
+  const disabledGates = new Set(['doctor:browser']);
+  assert.equal(isHarnessGateEnabled('doctor:browser', { profile: 'standard', disabledGates }), false);
+  assert.equal(isHarnessGateEnabled('doctor:mcp-build', { profile: 'minimal', profiles: ['standard', 'strict'] }), false);
+  assert.equal(isHarnessGateEnabled('doctor:mcp-build', { profile: 'strict', profiles: ['standard', 'strict'] }), true);
+});
+
+test('parseArgs accepts doctor profile', () => {
+  const result = parseArgs(['doctor', '--strict', '--profile', 'minimal']);
+  assert.equal(result.command, 'doctor');
+  assert.equal(result.options.strict, true);
+  assert.equal(result.options.profile, 'minimal');
+});
+
+test('parseArgs accepts quality-gate command', () => {
+  const result = parseArgs(['quality-gate', 'pre-pr', '--profile', 'strict']);
+  assert.equal(result.command, 'quality-gate');
+  assert.equal(result.options.mode, 'pre-pr');
+  assert.equal(result.options.profile, 'strict');
+});
+
+test('parseArgs accepts quality-gate session', () => {
+  const result = parseArgs(['quality-gate', 'full', '--session', 'session-123']);
+  assert.equal(result.command, 'quality-gate');
+  assert.equal(result.options.sessionId, 'session-123');
+});
+
+test('planDoctor keeps profile out of preview when standard', () => {
+  const plan = planDoctor({ strict: true });
+  assert.match(plan.preview, /doctor --strict/);
+  assert.doesNotMatch(plan.preview, /--profile/);
+});
+
+test('planQualityGate prints mode and profile', () => {
+  const plan = planQualityGate({ mode: 'pre-pr', profile: 'strict' });
+  assert.equal(plan.command, 'quality-gate');
+  assert.match(plan.preview, /quality-gate pre-pr --profile strict/);
+});
+
+test('planQualityGate includes session when provided', () => {
+  const plan = planQualityGate({ mode: 'full', sessionId: 'session-123' });
+  assert.match(plan.preview, /quality-gate full --session session-123/);
+});
+
+test('runQualityGate log audit excludes cli entrypoints and tests', async () => {
+  const rootDir = await makeRootDir();
+  await mkdir(path.join(rootDir, 'scripts', 'lib', 'lifecycle'), { recursive: true });
+  await mkdir(path.join(rootDir, 'scripts', 'tests'), { recursive: true });
+  await mkdir(path.join(rootDir, 'mcp-server', 'src', 'contextdb'), { recursive: true });
+
+  await writeFile(path.join(rootDir, 'scripts', 'lib', 'bad.mjs'), "console.log('bad runtime log');\n", 'utf8');
+  await writeFile(path.join(rootDir, 'scripts', 'tests', 'fixture.test.mjs'), "console.log('fixture log');\n", 'utf8');
+  await writeFile(path.join(rootDir, 'scripts', 'contextdb-shell-bridge.mjs'), "console.log('bridge output');\n", 'utf8');
+  await writeFile(path.join(rootDir, 'scripts', 'ctx-agent-core.mjs'), "console.log('agent output');\n", 'utf8');
+  await writeFile(path.join(rootDir, 'scripts', 'doctor-bootstrap-task.mjs'), "console.log('doctor output');\n", 'utf8');
+  await writeFile(path.join(rootDir, 'scripts', 'lib', 'lifecycle', 'quality-gate.mjs'), "const PATTERN = 'console.log';\n", 'utf8');
+  await writeFile(path.join(rootDir, 'mcp-server', 'src', 'contextdb', 'cli.ts'), "console.log('cli output');\n", 'utf8');
+
+  const report = await runQualityGate(
+    { mode: 'full' },
+    {
+      rootDir,
+      io: { log() {} },
+      env: {
+        AIOS_DISABLED_GATES: 'quality:build,quality:types,quality:scripts,quality:git',
+      },
+    }
+  );
+
+  const logsResult = report.results.find((item) => item.label === 'Logs');
+  assert.equal(logsResult?.status, 'FAIL');
+  assert.equal(logsResult?.detail, '1 console.log hits');
+  assert.deepEqual(report.failedChecks, ['Logs']);
+  assert.equal(report.failureCategory, 'quality-logs');
+});
+
+test('runQualityGate persists verification checkpoint when session is provided', async () => {
+  const rootDir = await makeRootDir();
+  createSession(rootDir, 'quality-session');
+
+  const report = await runQualityGate(
+    { mode: 'full', sessionId: 'quality-session' },
+    {
+      rootDir,
+      io: { log() {} },
+      checkRunner(command, args) {
+        if (command === 'npm' && args[0] === 'run' && ['build', 'typecheck', 'test:scripts'].includes(args[1])) {
+          return { status: 0, stdout: `${args[1]} ok\n`, stderr: '' };
+        }
+        if (command === 'rg') {
+          return { status: 1, stdout: '', stderr: '' };
+        }
+        if (command === 'git') {
+          return { status: 0, stdout: '', stderr: '' };
+        }
+        throw new Error(`Unexpected command: ${command} ${args.join(' ')}`);
+      },
+    }
+  );
+
+  assert.equal(report.ok, true);
+  assert.equal(report.verificationEvidence?.persisted, true);
+  assert.match(report.verificationEvidence?.artifactPath ?? '', /quality-gate-/);
+
+  const checkpointsPath = path.join(rootDir, 'memory', 'context-db', 'sessions', 'quality-session', 'l1-checkpoints.jsonl');
+  const checkpointsRaw = await readFile(checkpointsPath, 'utf8');
+  const checkpoints = checkpointsRaw.trim().split(/\n+/).map((line) => JSON.parse(line));
+  const latest = checkpoints.at(-1);
+
+  assert.equal(latest.status, 'done');
+  assert.equal(latest.telemetry.verification.result, 'passed');
+  assert.match(latest.telemetry.verification.evidence, /mode=full/);
+  assert.equal(Array.isArray(latest.artifacts), true);
+  assert.equal(latest.artifacts.length, 1);
+});
+
+test('runQualityGate persists quality-specific failure category when session is provided', async () => {
+  const rootDir = await makeRootDir();
+  createSession(rootDir, 'quality-logs-session');
+
+  const report = await runQualityGate(
+    { mode: 'full', sessionId: 'quality-logs-session' },
+    {
+      rootDir,
+      io: { log() {} },
+      env: {
+        AIOS_DISABLED_GATES: 'quality:build,quality:types,quality:scripts,quality:git',
+      },
+      checkRunner(command) {
+        if (command === 'rg') {
+          return { status: 0, stdout: 'scripts/lib/bad.mjs:1:console.log(\'bad\')\n', stderr: '' };
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+    }
+  );
+
+  assert.equal(report.ok, false);
+  assert.equal(report.failureCategory, 'quality-logs');
+  assert.deepEqual(report.failedChecks, ['Logs']);
+
+  const checkpointsPath = path.join(rootDir, 'memory', 'context-db', 'sessions', 'quality-logs-session', 'l1-checkpoints.jsonl');
+  const checkpointsRaw = await readFile(checkpointsPath, 'utf8');
+  const checkpoints = checkpointsRaw.trim().split(/\n+/).map((line) => JSON.parse(line));
+  const latest = checkpoints.at(-1);
+
+  assert.equal(latest.status, 'blocked');
+  assert.equal(latest.telemetry.verification.result, 'failed');
+  assert.equal(latest.telemetry.failureCategory, 'quality-logs');
+});
+
+test('validateHandoffPayload rejects missing required fields', () => {
+  const result = validateHandoffPayload({ fromRole: 'planner' });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors, [
+    'toRole is required',
+    'taskTitle is required',
+    'contextSummary is required',
+  ]);
+});
+
+test('renderHandoffMarkdown renders the shared schema', () => {
+  const markdown = renderHandoffMarkdown({
+    fromRole: 'planner',
+    toRole: 'reviewer',
+    taskTitle: 'Implement harness profiles',
+    contextSummary: 'Profiles and quality gate landed; review integration risks.',
+    findings: ['doctor now supports --profile'],
+    filesTouched: ['scripts/lib/harness/profile.mjs'],
+    recommendations: ['run quality-gate pre-pr'],
+  });
+
+  assert.match(markdown, /## HANDOFF: planner -> reviewer/);
+  assert.match(markdown, /\*\*Task:\*\* Implement harness profiles/);
+  assert.match(markdown, /- doctor now supports --profile/);
+});

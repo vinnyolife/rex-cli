@@ -94,6 +94,16 @@ export function isBetterSqlite3AbiMismatch(detail) {
     || normalized.includes('compiled against a different node.js version');
   return mentionsAddon && mentionsAbi;
 }
+export function classifyOneShotFailure(detail) {
+  if (!detail) return undefined;
+  const normalized = String(detail).toLowerCase();
+  if (normalized.includes('timeout') || normalized.includes('timed out')) return 'timeout';
+  if (normalized.includes('rate limit') || normalized.includes('too many requests')) return 'rate-limit';
+  if (normalized.includes('auth') || normalized.includes('login')) return 'auth';
+  if (normalized.includes('network') || normalized.includes('enotfound') || normalized.includes('econn')) return 'network';
+  if (normalized.includes('permission') || normalized.includes('denied')) return 'permission';
+  return 'tool';
+}
 
 function resolveWorkspaceRoot(cwd) {
   const git = runCommand('git', ['-C', cwd, 'rev-parse', '--show-toplevel']);
@@ -369,14 +379,16 @@ export async function runCtxAgent(argv = process.argv.slice(2)) {
     let responseStatus = opts.checkpointStatus;
     let output = '';
     let exitCode = 0;
-
+    const startedAt = Date.now();
     if (opts.dryRun) {
-      output = `[dry-run] ${opts.agent} would execute prompt with context packet: ${packAbs}\nPrompt: ${opts.prompt}`;
+      output = `[dry-run] ${opts.agent} would execute prompt with context packet: ${packAbs}
+Prompt: ${opts.prompt}`;
     } else {
       const result = runOneShotAgent(opts.agent, contextText, opts.prompt, opts.extraArgs);
       output = result.output;
       exitCode = result.exitCode;
     }
+    const elapsedMs = Date.now() - startedAt;
 
     process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
 
@@ -402,13 +414,20 @@ export async function runCtxAgent(argv = process.argv.slice(2)) {
       const nextActions = responseStatus === 'blocked'
         ? 'Inspect error output|Retry with adjusted prompt'
         : 'Review response|Continue with next prompt';
-
-      ctx(opts.workspaceRoot, 'checkpoint', [
+      const failureCategory = responseStatus === 'blocked' ? classifyOneShotFailure(output) : undefined;
+      const checkpointArgs = [
         '--session', opts.sessionId,
         '--summary', summary,
         '--status', responseStatus,
         '--next', nextActions,
-      ]);
+        '--verify-result', 'unknown',
+        '--retry-count', '0',
+        '--elapsed-ms', String(elapsedMs),
+      ];
+      if (failureCategory) {
+        checkpointArgs.push('--failure-category', failureCategory);
+      }
+      ctx(opts.workspaceRoot, 'checkpoint', checkpointArgs);
     }
 
     ctx(opts.workspaceRoot, 'context:pack', ['--session', opts.sessionId, '--limit', opts.eventLimit, '--out', packPath]);

@@ -25,7 +25,7 @@ function usage(): string {
     '  contextdb session:new --agent <name> --project <name> --goal <text> [--tags a,b]',
     '  contextdb session:latest --agent <name> [--project <name>]',
     '  contextdb event:add --session <id> --role <user|assistant|tool|system> --text <text> [--kind <kind>] [--refs a,b]',
-    '  contextdb checkpoint --session <id> --summary <text> [--status running|blocked|done] [--next a|b] [--artifacts a|b]',
+    '  contextdb checkpoint --session <id> --summary <text> [--status running|blocked|done] [--next a|b] [--artifacts a|b] [--verify-result unknown|passed|failed|partial] [--retry-count n] [--failure-category <label>] [--elapsed-ms n] [--cost-usd n]',
     '  contextdb context:pack --session <id> [--limit 30] [--token-budget 1200] [--kinds prompt,response,error] [--refs a,b] [--no-dedupe] [--out memory/context-db/exports/<id>.md] [--stdout]',
     '  contextdb search [--query <text>] [--project <name>] [--session <id>] [--role <role>] [--kinds a,b] [--refs a,b] [--limit 20] [--semantic]',
     '  contextdb timeline [--project <name> | --session <id>] [--limit 50]',
@@ -73,6 +73,19 @@ function getOptionalCsv(options: Options, key: string, separator: string = ','):
     .split(separator)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+function getOptionalNumber(options: Options, key: string): number | undefined {
+  const value = options[key];
+  if (typeof value !== 'string') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+const VERIFICATION_RESULTS = new Set(['unknown', 'passed', 'failed', 'partial']);
+
+function getOptionalVerificationResult(options: Options, key: string): 'unknown' | 'passed' | 'failed' | 'partial' | undefined {
+  const value = options[key];
+  if (typeof value !== 'string' || !VERIFICATION_RESULTS.has(value)) return undefined;
+  return value as 'unknown' | 'passed' | 'failed' | 'partial';
 }
 
 function getWorkspace(options: Options): string {
@@ -144,6 +157,23 @@ async function main(): Promise<void> {
         status: typeof options.status === 'string' ? (options.status as 'running' | 'blocked' | 'done') : undefined,
         nextActions: getOptionalCsv(options, 'next', '|'),
         artifacts: getOptionalCsv(options, 'artifacts', '|'),
+        telemetry: {
+          verification: getOptionalVerificationResult(options, 'verify-result') || typeof options['verify-evidence'] === "string"
+            ? {
+              result: getOptionalVerificationResult(options, 'verify-result') ?? 'unknown',
+              ...(typeof options['verify-evidence'] === "string" ? { evidence: options['verify-evidence'] } : {}),
+            }
+            : undefined,
+          retryCount: getOptionalNumber(options, 'retry-count'),
+          failureCategory: typeof options['failure-category'] === 'string' ? options['failure-category'] : undefined,
+          elapsedMs: getOptionalNumber(options, 'elapsed-ms'),
+          cost: {
+            inputTokens: getOptionalNumber(options, 'cost-input-tokens'),
+            outputTokens: getOptionalNumber(options, 'cost-output-tokens'),
+            totalTokens: getOptionalNumber(options, 'cost-total-tokens'),
+            usd: getOptionalNumber(options, 'cost-usd'),
+          },
+        },
       });
       console.log(JSON.stringify(checkpoint, null, 2));
       return;

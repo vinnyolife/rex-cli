@@ -18,6 +18,27 @@ import { semanticRerank } from './semantic.js';
 
 export type SessionStatus = 'running' | 'blocked' | 'done';
 export type EventRole = 'system' | 'user' | 'assistant' | 'tool';
+export type VerificationResult = 'unknown' | 'passed' | 'failed' | 'partial';
+
+export interface CheckpointVerification {
+  result: VerificationResult;
+  evidence?: string;
+}
+
+export interface CheckpointCost {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  usd?: number;
+}
+
+export interface CheckpointTelemetry {
+  verification?: CheckpointVerification;
+  retryCount?: number;
+  failureCategory?: string;
+  elapsedMs?: number;
+  cost?: CheckpointCost;
+}
 
 export interface SessionMeta {
   schemaVersion: 1;
@@ -47,6 +68,7 @@ export interface Checkpoint {
   summary: string;
   nextActions: string[];
   artifacts: string[];
+  telemetry?: CheckpointTelemetry;
 }
 
 interface SessionPaths {
@@ -96,6 +118,7 @@ export interface IndexedCheckpoint {
   summary: string;
   nextActions: string[];
   artifacts: string[];
+  telemetry?: CheckpointTelemetry;
 }
 
 export interface TimelineEntry {
@@ -156,6 +179,105 @@ function sanitizeInline(text: string): string {
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN_ESTIMATE);
+}
+function isVerificationResult(value: string): value is VerificationResult {
+  return value === 'unknown' || value === 'passed' || value === 'failed' || value === 'partial';
+}
+
+function normalizeTextValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const normalized = Math.floor(value);
+  return normalized >= 0 ? normalized : undefined;
+}
+
+function normalizeNonNegativeNumber(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return value >= 0 ? value : undefined;
+}
+
+function normalizeCheckpointCost(cost?: CheckpointCost): CheckpointCost | undefined {
+  if (!cost) return undefined;
+
+  const inputTokens = normalizeNonNegativeInteger(cost.inputTokens);
+  const outputTokens = normalizeNonNegativeInteger(cost.outputTokens);
+  const explicitTotalTokens = normalizeNonNegativeInteger(cost.totalTokens);
+  const totalTokens = explicitTotalTokens ?? (
+    inputTokens !== undefined || outputTokens !== undefined
+      ? (inputTokens ?? 0) + (outputTokens ?? 0)
+      : undefined
+  );
+  const usd = normalizeNonNegativeNumber(cost.usd);
+
+  const normalized: CheckpointCost = {};
+  if (inputTokens !== undefined) normalized.inputTokens = inputTokens;
+  if (outputTokens !== undefined) normalized.outputTokens = outputTokens;
+  if (totalTokens !== undefined) normalized.totalTokens = totalTokens;
+  if (usd !== undefined) normalized.usd = usd;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeCheckpointTelemetry(telemetry?: CheckpointTelemetry): CheckpointTelemetry | undefined {
+  if (!telemetry) return undefined;
+
+  const verificationResult = normalizeTextValue(telemetry.verification?.result);
+  const verificationEvidence = normalizeTextValue(telemetry.verification?.evidence);
+  const verification = verificationResult && isVerificationResult(verificationResult)
+    ? {
+      result: verificationResult,
+      ...(verificationEvidence ? { evidence: verificationEvidence } : {}),
+    }
+    : undefined;
+  const retryCount = normalizeNonNegativeInteger(telemetry.retryCount);
+  const failureCategory = normalizeTextValue(telemetry.failureCategory)?.toLowerCase();
+  const elapsedMs = normalizeNonNegativeInteger(telemetry.elapsedMs);
+  const cost = normalizeCheckpointCost(telemetry.cost);
+
+  const normalized: CheckpointTelemetry = {};
+  if (verification) normalized.verification = verification;
+  if (retryCount !== undefined) normalized.retryCount = retryCount;
+  if (failureCategory) normalized.failureCategory = failureCategory;
+  if (elapsedMs !== undefined) normalized.elapsedMs = elapsedMs;
+  if (cost) normalized.cost = cost;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function formatCheckpointTelemetryLines(telemetry?: CheckpointTelemetry): string[] {
+  const normalized = normalizeCheckpointTelemetry(telemetry);
+  if (!normalized) return ['- (none)'];
+
+  const lines: string[] = [];
+  if (normalized.verification) {
+    const evidence = normalized.verification.evidence ? ` (${normalized.verification.evidence})` : '';
+    lines.push(`- Verification: ${normalized.verification.result}${evidence}`);
+  }
+  if (normalized.retryCount !== undefined) {
+    lines.push(`- Retry Count: ${normalized.retryCount}`);
+  }
+  if (normalized.failureCategory) {
+    lines.push(`- Failure Category: ${normalized.failureCategory}`);
+  }
+  if (normalized.elapsedMs !== undefined) {
+    lines.push(`- Elapsed: ${normalized.elapsedMs} ms`);
+  }
+  if (normalized.cost) {
+    const costParts: string[] = [];
+    if (normalized.cost.inputTokens !== undefined) costParts.push(`inputTokens=${normalized.cost.inputTokens}`);
+    if (normalized.cost.outputTokens !== undefined) costParts.push(`outputTokens=${normalized.cost.outputTokens}`);
+    if (normalized.cost.totalTokens !== undefined) costParts.push(`totalTokens=${normalized.cost.totalTokens}`);
+    if (normalized.cost.usd !== undefined) costParts.push(`usd=${normalized.cost.usd}`);
+    if (costParts.length > 0) {
+      lines.push(`- Cost: ${costParts.join(' ' )}`);
+    }
+  }
+  return lines.length > 0 ? lines : ['- (none)'];
 }
 
 function eventSignature(event: Pick<ContextEvent, 'role' | 'kind' | 'text' | 'refs'>): string {
@@ -320,6 +442,7 @@ function formatSummaryMarkdown(meta: SessionMeta, checkpoint: Checkpoint): strin
   const nextActions = checkpoint.nextActions.length > 0
     ? checkpoint.nextActions.map((item) => `- ${item}`).join('\n')
     : '- (none)';
+  const telemetry = formatCheckpointTelemetryLines(checkpoint.telemetry).join('\n');
   const artifacts = checkpoint.artifacts.length > 0
     ? checkpoint.artifacts.map((item) => `- ${item}`).join('\n')
     : '- (none)';
@@ -338,6 +461,9 @@ function formatSummaryMarkdown(meta: SessionMeta, checkpoint: Checkpoint): strin
     '',
     '## Next Actions',
     nextActions,
+    '',
+    '## Telemetry',
+    telemetry,
     '',
     '## Artifacts',
     artifacts,
@@ -559,6 +685,7 @@ export interface WriteCheckpointInput {
   status?: SessionStatus;
   nextActions?: string[];
   artifacts?: string[];
+  telemetry?: CheckpointTelemetry;
 }
 
 export async function writeCheckpoint(input: WriteCheckpointInput): Promise<Checkpoint> {
@@ -582,6 +709,7 @@ export async function writeCheckpoint(input: WriteCheckpointInput): Promise<Chec
       summary: input.summary,
       nextActions: input.nextActions ?? [],
       artifacts: input.artifacts ?? [],
+      telemetry: normalizeCheckpointTelemetry(input.telemetry),
     };
 
     await appendJsonLine(paths.checkpoints, checkpoint);
@@ -609,6 +737,7 @@ export async function writeCheckpoint(input: WriteCheckpointInput): Promise<Chec
       summary: checkpoint.summary,
       nextActions: checkpoint.nextActions,
       artifacts: checkpoint.artifacts,
+      telemetry: checkpoint.telemetry,
     };
     await appendJsonLine(getCheckpointsIndexPath(input.workspaceRoot), indexed);
     try {
@@ -758,6 +887,9 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
       ...(latestCheckpoint.nextActions.length > 0
         ? latestCheckpoint.nextActions.map((item) => `- ${item}`)
         : ['- (none)']),
+      '',
+      'Telemetry:',
+      ...formatCheckpointTelemetryLines(latestCheckpoint.telemetry),
       '',
       'Artifacts:',
       ...(latestCheckpoint.artifacts.length > 0
@@ -988,6 +1120,7 @@ export async function rebuildContextIndex(workspaceRoot: string): Promise<Rebuil
         summary: checkpoint.summary,
         nextActions: checkpoint.nextActions ?? [],
         artifacts: checkpoint.artifacts ?? [],
+        telemetry: normalizeCheckpointTelemetry(checkpoint.telemetry),
       };
       upsertCheckpointRow(dbPath, indexed);
       checkpoints += 1;
