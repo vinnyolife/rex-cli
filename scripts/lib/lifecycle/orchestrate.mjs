@@ -22,6 +22,7 @@ import {
 const DEFAULT_PREFLIGHT_ADAPTERS = {
   qualityGate: runQualityGate,
   doctor: runDoctor,
+  orchestrate: runOrchestrate,
 };
 
 function normalizePositiveInteger(rawValue, fallback) {
@@ -109,6 +110,18 @@ function createBufferedIo() {
   };
 }
 
+function isSupportedPreflightOrchestrateAction(options = {}) {
+  return options.dispatchMode === 'local' && options.executionMode === 'dry-run';
+}
+
+function buildPreflightOrchestrateOptions(options = {}, sessionId = '') {
+  const nestedOptions = sessionId && !options.sessionId
+    ? { ...options, sessionId }
+    : { ...options };
+  nestedOptions.preflightMode = 'none';
+  return nestedOptions;
+}
+
 async function runPreflightAction(item, { rootDir, env, sessionId, preflightAdapters }) {
   if (item.type !== 'command') {
     return {
@@ -173,6 +186,41 @@ async function runPreflightAction(item, { rootDir, env, sessionId, preflightAdap
         runner: 'doctor',
         summary: buffered.lines.at(-1) || 'doctor completed',
         exitCode: Number.isFinite(result?.exitCode) ? result.exitCode : (result?.ok === true ? 0 : 1),
+      };
+    }
+
+    if (parsed.command === 'orchestrate') {
+      if (!isSupportedPreflightOrchestrateAction(parsed.options)) {
+        return {
+          type: item.type,
+          sourceId: item.sourceId || null,
+          action: item.action,
+          status: 'skipped',
+          runner: 'unsupported',
+          summary: 'unsupported orchestrate action: only local dry-run is executable in preflight',
+          exitCode: null,
+        };
+      }
+
+      const orchestrateOptions = buildPreflightOrchestrateOptions(parsed.options, sessionId);
+      const orchestrateRunner = preflightAdapters.orchestrate || runOrchestrate;
+      const result = await orchestrateRunner(orchestrateOptions, {
+        rootDir,
+        io: buffered.io,
+        env,
+        preflightAdapters,
+      });
+      const dispatchOk = result?.report?.dispatchRun?.ok === true;
+      const jobCount = Array.isArray(result?.report?.dispatchRun?.jobRuns) ? result.report.dispatchRun.jobRuns.length : 0;
+      process.exitCode = priorExitCode;
+      return {
+        type: item.type,
+        sourceId: item.sourceId || null,
+        action: item.action,
+        status: dispatchOk ? 'passed' : 'failed',
+        runner: 'orchestrate',
+        summary: dispatchOk ? 'orchestrate dry-run ready jobs=' + String(jobCount) : 'orchestrate dry-run blocked jobs=' + String(jobCount),
+        exitCode: dispatchOk ? 0 : (Number.isFinite(result?.exitCode) ? result.exitCode : 1),
       };
     }
   } finally {
@@ -336,7 +384,7 @@ export async function runOrchestrate(
   let effectiveLearnEvalReport = learnEvalReport;
   if (
     options.sessionId
-    && dispatchPreflight?.results?.some((item) => item.runner === 'quality-gate' && item.status !== 'skipped')
+    && dispatchPreflight?.results?.some((item) => (item.runner === 'quality-gate' || item.runner === 'orchestrate') && item.status !== 'skipped')
   ) {
     effectiveLearnEvalReport = await buildLearnEvalReport(
       { sessionId: options.sessionId, limit: options.limit },

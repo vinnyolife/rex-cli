@@ -30,13 +30,15 @@ This slice does not:
 
 ## Supported Preflight Actions
 
-First slice supports only command actions that map cleanly to local lifecycle functions:
+First slice supports only command actions that map cleanly to local lifecycle functions or the local dispatch dry-run runner:
 
 - `node scripts/aios.mjs quality-gate ...`
 - `node scripts/aios.mjs doctor ...`
+- `node scripts/aios.mjs orchestrate --dispatch local --execute dry-run ...`
 
-Unsupported commands are recorded as `SKIP` with a reason.
+Other `orchestrate` commands are recorded as `SKIP` with a reason so preflight does not auto-run blueprint planning.
 Artifact actions are also recorded as `SKIP`.
+Nested dry-run orchestrate actions always run with `--preflight none` to avoid recursive preflight loops.
 
 ## Effective Policy Rules
 

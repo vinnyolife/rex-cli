@@ -65,6 +65,10 @@ When `orchestrate` is called with `--dispatch local --execute dry-run`:
 
 This gives AIOS a concrete execution contract before any real subagent runtime is attached.
 
+## Dispatch Preflight Integration
+
+When `orchestrate` is called with `--preflight auto`, AIOS may execute supported local runbooks before final DAG selection. The current slice can preflight `quality-gate`, `doctor`, and `orchestrate --dispatch local --execute dry-run` actions. Blueprint-planning `orchestrate` commands remain hints only and are recorded as skipped. Nested dry-run replays force `preflight=none` so the preflight stage does not recurse into itself.
+
 ## Local Executor Registry
 
 The local executor registry defines which executors are available for dry-run orchestration and what each one can handle. In the current slice:

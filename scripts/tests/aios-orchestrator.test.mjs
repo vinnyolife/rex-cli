@@ -847,7 +847,7 @@ test('runOrchestrate preflight refreshes learn-eval from session-scoped verifica
   assert.equal(report.effectiveDispatchPolicy.status, 'caution');
 });
 
-test('runOrchestrate preflight records unsupported actions as skipped', async () => {
+test('runOrchestrate preflight executes supported local orchestrate dry-run actions', async () => {
   const rootDir = await makeRootDir();
   const dispatch = await writeDispatchEvidence(rootDir, 'preflight-blocked', { ok: false, blockedJobs: 1 });
   await writeSession(
@@ -872,16 +872,186 @@ test('runOrchestrate preflight records unsupported actions as skipped', async ()
     ]
   );
 
+  const calls = [];
   const logs = [];
   await runOrchestrate(
     { sessionId: 'preflight-blocked', dispatchMode: 'local', preflightMode: 'auto', format: 'json' },
+    {
+      rootDir,
+      io: { log: (line) => logs.push(line) },
+      preflightAdapters: {
+        qualityGate: async () => ({ ok: true, exitCode: 0, mode: 'full', results: [] }),
+        doctor: async () => ({ ok: true, exitCode: 0 }),
+        orchestrate: async (options) => {
+          calls.push(options);
+          return {
+            exitCode: 0,
+            report: {
+              dispatchRun: {
+                ok: true,
+                jobRuns: [
+                  { jobId: 'phase.plan', status: 'simulated' },
+                  { jobId: 'merge.final-checks', status: 'simulated' },
+                ],
+              },
+            },
+          };
+        },
+      },
+    }
+  );
+  const report = JSON.parse(logs.join('\n'));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].sessionId, 'preflight-blocked');
+  assert.equal(calls[0].dispatchMode, 'local');
+  assert.equal(calls[0].executionMode, 'dry-run');
+  assert.equal(calls[0].preflightMode, 'none');
+  assert.equal(report.dispatchPreflight.results.some((item) => item.sourceId === 'runbook.dispatch-merge-triage' && item.status === 'passed' && item.runner === 'orchestrate'), true);
+  assert.equal(report.effectiveDispatchPolicy.blockerIds.includes('runbook.dispatch-merge-triage'), false);
+  assert.equal(report.dispatchPlan.jobs.some((job) => job.jobType === 'merge-gate'), true);
+});
+
+test('runOrchestrate preflight skips non-local-dry-run orchestrate actions', async () => {
+  const rootDir = await makeRootDir();
+  await writeSession(
+    rootDir,
+    'preflight-promote',
+    { updatedAt: '2026-03-09T05:20:00.000Z', goal: 'Ship orchestrator blueprints' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T05:00:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 1',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate quick' },
+          retryCount: 0,
+          elapsedMs: 1000,
+        },
+      },
+      {
+        seq: 2,
+        ts: '2026-03-09T05:05:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 2',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate quick' },
+          retryCount: 1,
+          elapsedMs: 1100,
+        },
+      },
+      {
+        seq: 3,
+        ts: '2026-03-09T05:10:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 3',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate quick' },
+          retryCount: 0,
+          elapsedMs: 1000,
+        },
+      },
+    ]
+  );
+
+  const calls = [];
+  const logs = [];
+  await runOrchestrate(
+    { sessionId: 'preflight-promote', preflightMode: 'auto', format: 'json' },
+    {
+      rootDir,
+      io: { log: (line) => logs.push(line) },
+      preflightAdapters: {
+        qualityGate: async (options) => ({ ok: true, exitCode: 0, mode: options.mode, results: [] }),
+        doctor: async () => ({ ok: true, exitCode: 0 }),
+        orchestrate: async (options) => {
+          calls.push(options);
+          return {
+            exitCode: 0,
+            report: {
+              dispatchRun: {
+                ok: true,
+                jobRuns: [],
+              },
+            },
+          };
+        },
+      },
+    }
+  );
+  const report = JSON.parse(logs.join('\n'));
+
+  assert.equal(calls.length, 0);
+  assert.equal(report.dispatchPreflight.results.some((item) => item.sourceId === 'blueprint.feature' && item.status === 'skipped' && item.runner === 'unsupported'), true);
+  assert.equal(report.dispatchPreflight.results.some((item) => item.sourceId === 'checklist.verification-standard' && item.status === 'passed' && item.runner === 'quality-gate'), true);
+});
+
+test('runOrchestrate preflight still records artifact-only actions as skipped', async () => {
+  const rootDir = await makeRootDir();
+  const dispatch = await writeDispatchEvidence(rootDir, 'preflight-artifact', { ok: true, blockedJobs: 0 });
+  await writeSession(
+    rootDir,
+    'preflight-artifact',
+    { updatedAt: '2026-03-09T03:45:00.000Z', goal: 'Observe dispatch evidence' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T03:00:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 1',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 900,
+        },
+      },
+      {
+        seq: 2,
+        ts: '2026-03-09T03:05:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 2',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 950,
+        },
+      },
+      {
+        seq: 3,
+        ts: '2026-03-09T03:10:00.000Z',
+        status: 'running',
+        summary: 'Recorded dry-run evidence',
+        nextActions: [],
+        artifacts: [dispatch.artifactPath],
+        telemetry: {
+          verification: { result: 'partial', evidence: `event=${dispatch.eventId}; artifact=${dispatch.artifactPath}` },
+          retryCount: 0,
+          elapsedMs: 50,
+        },
+      },
+    ]
+  );
+
+  const logs = [];
+  await runOrchestrate(
+    { sessionId: 'preflight-artifact', dispatchMode: 'local', preflightMode: 'auto', format: 'json' },
     { rootDir, io: { log: (line) => logs.push(line) } }
   );
   const report = JSON.parse(logs.join('\n'));
 
-  assert.equal(report.dispatchPreflight.results.some((item) => item.sourceId === 'runbook.dispatch-merge-triage' && item.status === 'skipped'), true);
-  assert.equal(report.effectiveDispatchPolicy.blockerIds.includes('runbook.dispatch-merge-triage'), true);
-  assert.equal(report.dispatchPlan.jobs.some((job) => job.jobType === 'merge-gate'), false);
+  assert.equal(report.dispatchPreflight.results.some((item) => item.type === 'artifact' && item.sourceId === 'sample.dispatch-evidence-present' && item.status === 'skipped'), true);
+  assert.equal(report.effectiveDispatchPolicy.status, 'ready');
 });
 
 test('runOrchestrate derives blocked dispatch policy from learn-eval and dispatch evidence', async () => {
