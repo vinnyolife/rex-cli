@@ -2,6 +2,7 @@ import runtimeSpec from '../../../memory/specs/orchestrator-runtimes.json' with 
 import { executeLocalDispatchPlan } from './orchestrator.mjs';
 
 export const LOCAL_DRY_RUN_RUNTIME = 'local-dry-run';
+export const SUBAGENT_RUNTIME = 'subagent-runtime';
 
 const DISPATCH_RUNTIME_CATALOG = Object.freeze(
   Object.fromEntries(
@@ -70,6 +71,9 @@ export function selectDispatchRuntime({ executionMode = 'none' } = {}) {
   if (mode === 'dry-run') {
     return LOCAL_DRY_RUN_RUNTIME;
   }
+  if (mode === 'live') {
+    return SUBAGENT_RUNTIME;
+  }
   throw new Error(`No dispatch runtime available for execution mode: ${mode}`);
 }
 
@@ -78,16 +82,33 @@ export function createDispatchRuntimeRegistry({ executeDryRunPlan = executeLocal
     throw new Error('createDispatchRuntimeRegistry requires executeDryRunPlan');
   }
 
-  const localDryRun = getDispatchRuntime(LOCAL_DRY_RUN_RUNTIME);
-  return {
-    [LOCAL_DRY_RUN_RUNTIME]: {
-      ...localDryRun,
-      execute({ plan, dispatchPlan, dispatchPolicy, io, env } = {}) {
-        const result = executeDryRunPlan(plan, dispatchPlan, { dispatchPolicy, io, env });
-        return normalizeDispatchRuntimeResult(result, localDryRun, 'dry-run');
+  const registry = {};
+
+  for (const runtime of listDispatchRuntimes()) {
+    if (runtime.id === LOCAL_DRY_RUN_RUNTIME) {
+      registry[LOCAL_DRY_RUN_RUNTIME] = {
+        ...runtime,
+        execute({ plan, dispatchPlan, dispatchPolicy, io, env } = {}) {
+          const result = executeDryRunPlan(plan, dispatchPlan, { dispatchPolicy, io, env });
+          return normalizeDispatchRuntimeResult(result, runtime, 'dry-run');
+        },
+      };
+      continue;
+    }
+
+    registry[runtime.id] = {
+      ...runtime,
+      execute() {
+        throw new Error(`Dispatch runtime ${runtime.id} is not implemented yet.`);
       },
-    },
-  };
+    };
+  }
+
+  if (!registry[LOCAL_DRY_RUN_RUNTIME]) {
+    throw new Error(`Runtime manifest missing required runtime: ${LOCAL_DRY_RUN_RUNTIME}`);
+  }
+
+  return registry;
 }
 
 export function resolveDispatchRuntime({ runtimeId = '', executionMode = 'none' } = {}, registry = {}) {

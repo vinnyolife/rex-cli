@@ -215,6 +215,8 @@ test('dispatch runtime manifest spec defines the local dry-run runtime', async (
   assert.equal(runtimeSpec.default.schemaVersion, 1);
   assert.equal(typeof runtimeSpec.default.runtimes['local-dry-run']?.label, 'string');
   assert.equal(runtimeSpec.default.runtimes['local-dry-run']?.requiresModel, false);
+  assert.equal(runtimeSpec.default.runtimes['subagent-runtime']?.requiresModel, true);
+  assert.equal(runtimeSpec.default.runtimes['subagent-runtime']?.executionModes?.includes('live'), true);
 });
 
 test('dispatch runtime registry lists the local dry-run runtime', async () => {
@@ -238,12 +240,31 @@ test('dispatch runtime registry selects local dry-run for dry-run execution', as
   assert.equal(runtimes.selectDispatchRuntime({ executionMode: 'dry-run' }), 'local-dry-run');
 });
 
+test('dispatch runtime registry selects the subagent runtime for live execution', async () => {
+  const runtimes = await importDispatchRuntimes();
+  assert.ok(runtimes, 'expected runtime registry module');
+
+  assert.equal(runtimes.selectDispatchRuntime({ executionMode: 'live' }), 'subagent-runtime');
+});
+
 test('dispatch runtime registry rejects unknown runtime ids and unsupported modes', async () => {
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
 
   assert.throws(() => runtimes.getDispatchRuntime('missing-runtime'), /Unknown dispatch runtime/i);
   assert.throws(() => runtimes.selectDispatchRuntime({ executionMode: 'none' }), /No dispatch runtime available/i);
+});
+
+test('dispatch runtime registry exposes the subagent runtime adapter contract as a stub', async () => {
+  const runtimes = await importDispatchRuntimes();
+  assert.ok(runtimes, 'expected runtime registry module');
+
+  const registry = runtimes.createDispatchRuntimeRegistry({ executeDryRunPlan: () => ({ mode: 'dry-run', ok: true, jobRuns: [] }) });
+  const runtime = runtimes.resolveDispatchRuntime({ runtimeId: 'subagent-runtime', executionMode: 'live' }, registry);
+
+  assert.equal(runtime.requiresModel, true);
+  assert.equal(runtime.manifestVersion, 1);
+  assert.throws(() => runtime.execute({ plan: { phases: [] } }), /not implemented/i);
 });
 
 test('dispatch runtime registry keeps blocked workflow results as structured runtime output', async () => {

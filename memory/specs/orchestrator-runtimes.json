@@ -6,6 +6,12 @@
       "description": "Executes a dispatch plan locally without invoking any model runtime.",
       "requiresModel": false,
       "executionModes": ["dry-run"]
+    },
+    "subagent-runtime": {
+      "label": "Subagent Runtime (Stub)",
+      "description": "Placeholder runtime adapter for future real subagent execution. This entry is a stub and does not execute any models yet.",
+      "requiresModel": true,
+      "executionModes": ["live"]
     }
   }
 }

@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-03-10
+
+- feat(aios): add subagent runtime stub adapter
+
 ## [0.13.0] - 2026-03-10
 
 - feat(aios): externalize runtime manifest spec
