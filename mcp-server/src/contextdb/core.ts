@@ -159,11 +159,17 @@ function toEpoch(ts: string): number {
   return Number.isFinite(epoch) ? epoch : 0;
 }
 
-function normalizeRefs(refs: string[]): string[] {
+function normalizeRefs(refs: unknown): string[] {
+  const items = Array.isArray(refs)
+    ? refs
+    : typeof refs === 'string'
+      ? [refs]
+      : [];
+
   return Array.from(
     new Set(
-      refs
-        .map((ref) => ref.trim())
+      items
+        .map((ref) => (typeof ref === 'string' ? ref.trim() : ''))
         .filter((ref) => ref.length > 0)
     )
   ).sort();
@@ -824,7 +830,7 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
     filteredEvents = filteredEvents.filter((event) => kindFilters.has(event.kind));
   }
   if (refFilters.size > 0) {
-    filteredEvents = filteredEvents.filter((event) => (event.refs ?? []).some((ref) => refFilters.has(ref)));
+    filteredEvents = filteredEvents.filter((event) => normalizeRefs(event.refs).some((ref) => refFilters.has(ref)));
   }
 
   if (input.dedupeEvents !== false) {
@@ -904,7 +910,8 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
     ? selectedEvents
       .map((item, index) => {
         const eventId = item.seq ? `${input.sessionId}#${item.seq}` : `${input.sessionId}#?`;
-        const refsLabel = (item.refs && item.refs.length > 0) ? ` refs=[${item.refs.join(', ')}]` : '';
+        const refs = normalizeRefs(item.refs);
+        const refsLabel = refs.length > 0 ? ` refs=[${refs.join(', ')}]` : '';
         return `${index + 1}. [${item.ts}] (${eventId}) ${item.role}/${item.kind}${refsLabel}: ${sanitizeInline(item.text)}`;
       })
       .join('\n')

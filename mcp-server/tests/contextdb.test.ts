@@ -406,6 +406,45 @@ test('buildContextPacket tolerates legacy events missing text', async () => {
   assert.match(packet.markdown, /user\/prompt/);
 });
 
+test('buildContextPacket tolerates legacy events with non-array refs', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'Legacy refs regression test',
+  });
+
+  const eventsPath = path.join(
+    workspace,
+    'memory',
+    'context-db',
+    'sessions',
+    session.sessionId,
+    'l2-events.jsonl'
+  );
+
+  // Simulate a legacy/corrupt event line where "refs" is a string.
+  await fs.appendFile(eventsPath, `${JSON.stringify({
+    ts: '2026-03-10T00:00:00.000Z',
+    role: 'user',
+    kind: 'prompt',
+    text: 'Legacy refs payload',
+    refs: 'core.ts',
+  })}\n`);
+
+  const packet = await buildContextPacket({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    eventLimit: 5,
+    refs: ['core.ts'],
+  });
+
+  assert.match(packet.markdown, /Event Filters: kinds=\(all\) refs=core\.ts/);
+  assert.match(packet.markdown, /Legacy refs payload/);
+  assert.match(packet.markdown, /refs=\[core\.ts\]/);
+});
+
 test('appendEvent deduplicates rapid duplicate events', async () => {
   const workspace = await makeWorkspace();
   const session = await createSession({
