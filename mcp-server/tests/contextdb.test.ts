@@ -369,6 +369,43 @@ test('buildContextPacket composes markdown for agent handoff', async () => {
   assert.match(packet.markdown, /Analyze OpenViking/);
 });
 
+test('buildContextPacket tolerates legacy events missing text', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'Legacy event regression test',
+  });
+
+  const eventsPath = path.join(
+    workspace,
+    'memory',
+    'context-db',
+    'sessions',
+    session.sessionId,
+    'l2-events.jsonl'
+  );
+
+  // Simulate a legacy/corrupt event line where "text" is missing entirely.
+  await fs.appendFile(eventsPath, `${JSON.stringify({
+    ts: '2026-03-10T00:00:00.000Z',
+    role: 'user',
+    kind: 'prompt',
+    refs: [],
+  })}\n`);
+
+  const packet = await buildContextPacket({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    eventLimit: 5,
+  });
+
+  assert.match(packet.markdown, /Recent Events/);
+  assert.match(packet.markdown, new RegExp(`${session.sessionId}#\\?`));
+  assert.match(packet.markdown, /user\/prompt/);
+});
+
 test('appendEvent deduplicates rapid duplicate events', async () => {
   const workspace = await makeWorkspace();
   const session = await createSession({

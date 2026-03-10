@@ -173,8 +173,10 @@ function hashText(text: string): string {
   return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-function sanitizeInline(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+function sanitizeInline(text: unknown): string {
+  // ContextDB event logs may contain legacy or malformed records. Keep packet
+  // generation resilient by treating non-string text as empty/printable text.
+  return String(text ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function estimateTokens(text: string): number {
