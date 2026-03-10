@@ -196,6 +196,7 @@ Properties:
 
 This is intentionally narrow.
 The purpose of the slice is to freeze the boundary, not to introduce additional runtime choices yet.
+Future runtime metadata can move into a declarative spec without changing the runtime contract.
 
 ## Dispatch Plan Rules
 

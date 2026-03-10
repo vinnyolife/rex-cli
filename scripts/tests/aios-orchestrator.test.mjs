@@ -29,6 +29,14 @@ async function importDispatchRuntimes() {
   }
 }
 
+async function importDispatchRuntimeSpec() {
+  try {
+    return await import('../../memory/specs/orchestrator-runtimes.json', { with: { type: 'json' } });
+  } catch {
+    return null;
+  }
+}
+
 async function makeRootDir() {
   return await fs.mkdtemp(path.join(os.tmpdir(), 'aios-orchestrator-'));
 }
@@ -200,6 +208,15 @@ test('selectLocalDispatchExecutor resolves supported local job types', () => {
   assert.equal(selectLocalDispatchExecutor({ jobType: 'merge-gate' }), 'local-merge-gate');
 });
 
+test('dispatch runtime manifest spec defines the local dry-run runtime', async () => {
+  const runtimeSpec = await importDispatchRuntimeSpec();
+  assert.ok(runtimeSpec, 'expected runtime manifest spec');
+
+  assert.equal(runtimeSpec.default.schemaVersion, 1);
+  assert.equal(typeof runtimeSpec.default.runtimes['local-dry-run']?.label, 'string');
+  assert.equal(runtimeSpec.default.runtimes['local-dry-run']?.requiresModel, false);
+});
+
 test('dispatch runtime registry lists the local dry-run runtime', async () => {
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
@@ -209,6 +226,7 @@ test('dispatch runtime registry lists the local dry-run runtime', async () => {
 
   assert.equal(all.some((item) => item.id === 'local-dry-run'), true);
   assert.equal(runtime.id, 'local-dry-run');
+  assert.equal(runtime.manifestVersion, 1);
   assert.equal(runtime.requiresModel, false);
   assert.deepEqual(runtime.executionModes, ['dry-run']);
 });

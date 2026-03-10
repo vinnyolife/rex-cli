@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-03-10
+
+- feat(aios): externalize runtime manifest spec
+
 ## [0.12.0] - 2026-03-10
 
 - feat(aios): add runtime adapter boundary

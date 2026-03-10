@@ -1,16 +1,23 @@
+import runtimeSpec from '../../../memory/specs/orchestrator-runtimes.json' with { type: 'json' };
 import { executeLocalDispatchPlan } from './orchestrator.mjs';
 
 export const LOCAL_DRY_RUN_RUNTIME = 'local-dry-run';
 
-const DISPATCH_RUNTIME_CATALOG = Object.freeze({
-  [LOCAL_DRY_RUN_RUNTIME]: Object.freeze({
-    id: LOCAL_DRY_RUN_RUNTIME,
-    label: 'Local Dry Run Runtime',
-    description: 'Executes a dispatch plan locally without invoking any model runtime.',
-    requiresModel: false,
-    executionModes: Object.freeze(['dry-run']),
-  }),
-});
+const DISPATCH_RUNTIME_CATALOG = Object.freeze(
+  Object.fromEntries(
+    Object.entries(runtimeSpec.runtimes || {}).map(([id, definition]) => [
+      id,
+      Object.freeze({
+        id,
+        manifestVersion: runtimeSpec.schemaVersion || 1,
+        label: String(definition.label || id),
+        description: String(definition.description || ''),
+        requiresModel: definition.requiresModel === true,
+        executionModes: Object.freeze(Array.isArray(definition.executionModes) ? [...definition.executionModes] : []),
+      }),
+    ])
+  )
+);
 
 function cloneDispatchRuntime(definition) {
   return {
@@ -36,7 +43,9 @@ export function normalizeDispatchRuntimeResult(result, runtime, executionMode) {
     ...result,
     runtime: {
       id: runtime.id,
+      manifestVersion: runtime.manifestVersion,
       label: runtime.label,
+      description: runtime.description,
       requiresModel: runtime.requiresModel,
       executionMode,
     },

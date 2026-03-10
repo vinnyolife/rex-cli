@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "runtimes": {
+    "local-dry-run": {
+      "label": "Local Dry Run Runtime",
+      "description": "Executes a dispatch plan locally without invoking any model runtime.",
+      "requiresModel": false,
+      "executionModes": ["dry-run"]
+    }
+  }
+}

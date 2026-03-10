@@ -170,7 +170,9 @@ function normalizeDispatchRuntime(rawRuntime) {
 
   return {
     id: String(rawRuntime.id || '').trim(),
+    manifestVersion: Number.isFinite(rawRuntime.manifestVersion) ? rawRuntime.manifestVersion : null,
     label: String(rawRuntime.label || '').trim(),
+    description: String(rawRuntime.description || '').trim(),
     requiresModel: rawRuntime.requiresModel === true,
     executionMode: rawRuntime.executionMode ? String(rawRuntime.executionMode) : null,
   };
