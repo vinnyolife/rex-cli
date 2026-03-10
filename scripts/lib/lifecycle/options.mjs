@@ -7,7 +7,7 @@ export const QUALITY_GATE_MODES = ['quick', 'full', 'pre-pr'];
 export const ORCHESTRATOR_FORMAT_NAMES = ['text', 'json'];
 export const ORCHESTRATOR_BLUEPRINT_NAMES = ['feature', 'bugfix', 'refactor', 'security'];
 export const ORCHESTRATOR_DISPATCH_MODE_NAMES = ['none', 'local'];
-export const ORCHESTRATOR_EXECUTION_MODE_NAMES = ['none', 'dry-run'];
+export const ORCHESTRATOR_EXECUTION_MODE_NAMES = ['none', 'dry-run', 'live'];
 export const ORCHESTRATOR_PREFLIGHT_MODE_NAMES = ['none', 'auto'];
 export const LEARN_EVAL_FORMAT_NAMES = ['text', 'json'];
 

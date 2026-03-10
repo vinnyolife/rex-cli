@@ -783,6 +783,7 @@ export function buildDispatchPolicy({ learnEvalReport = null, learnEvalOverlay =
     || currentBlockedJobs > 0;
   const sessionId = String(learnEvalReport?.session?.sessionId || learnEvalOverlay?.sourceSessionId || '').trim();
   const policyFixRecommendations = [...fixRecommendations];
+  const dispatchRuntimeUnavailable = dispatchRun?.ok === false && !blockedMergePath;
 
   if (blockedMergePath && !policyFixRecommendations.some((item) => item?.targetId === 'runbook.dispatch-merge-triage')) {
     policyFixRecommendations.push({
@@ -792,6 +793,16 @@ export function buildDispatchPolicy({ learnEvalReport = null, learnEvalOverlay =
         ? `node scripts/aios.mjs orchestrate --session ${sessionId} --dispatch local --execute dry-run --format json`
         : 'node scripts/aios.mjs doctor',
       nextArtifact: dispatchSignals.latestArtifactPath || undefined,
+    });
+  }
+
+  if (dispatchRuntimeUnavailable && !policyFixRecommendations.some((item) => item?.targetId === 'runbook.dispatch-runtime-unavailable')) {
+    policyFixRecommendations.push({
+      kind: 'fix',
+      targetId: 'runbook.dispatch-runtime-unavailable',
+      nextCommand: sessionId
+        ? `node scripts/aios.mjs orchestrate --session ${sessionId} --dispatch local --execute dry-run --format json`
+        : 'node scripts/aios.mjs orchestrate --dispatch local --execute dry-run --format json',
     });
   }
 
@@ -813,6 +824,9 @@ export function buildDispatchPolicy({ learnEvalReport = null, learnEvalOverlay =
 
   if (blockedMergePath) {
     notes.push('Observed merge-gate blockage suggests serial triage before parallel execution.');
+  }
+  if (dispatchRuntimeUnavailable) {
+    notes.push(`Dispatch runtime execution is blocked: ${String(dispatchRun?.error || '').trim() || 'runtime returned ok=false'}.`);
   }
 
   return normalizeDispatchPolicy({
@@ -952,6 +966,10 @@ function formatDispatchRun(dispatchRun) {
     lines.push(`- executors=${dispatchRun.executorRegistry.join(', ')}`);
   }
 
+  if (dispatchRun.error) {
+    lines.push(`- error=${dispatchRun.error}`);
+  }
+
   lines.push(...dispatchRun.jobRuns.map((jobRun) => `- [${jobRun.status}] ${jobRun.jobId} output=${jobRun.output?.outputType || 'unknown'}`), '');
 
   return lines;
@@ -967,6 +985,12 @@ function formatDispatchEvidence(dispatchEvidence) {
     `- persisted=${dispatchEvidence.persisted ? 'true' : 'false'}`,
   ];
 
+  if (dispatchEvidence.mode) {
+    lines.push(`- mode=${dispatchEvidence.mode}`);
+  }
+  if (dispatchEvidence.reason) {
+    lines.push(`- reason=${dispatchEvidence.reason}`);
+  }
   if (dispatchEvidence.artifactPath) {
     lines.push(`- artifact=${dispatchEvidence.artifactPath}`);
   }

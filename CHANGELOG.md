@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-03-10
+
+- feat(aios): gate live orchestrate execution behind AIOS_EXECUTE_LIVE
+
 ## [0.14.0] - 2026-03-10
 
 - feat(aios): add subagent runtime stub adapter

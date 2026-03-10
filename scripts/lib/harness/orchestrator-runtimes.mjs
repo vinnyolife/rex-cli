@@ -3,6 +3,7 @@ import { executeLocalDispatchPlan } from './orchestrator.mjs';
 
 export const LOCAL_DRY_RUN_RUNTIME = 'local-dry-run';
 export const SUBAGENT_RUNTIME = 'subagent-runtime';
+export const LIVE_EXECUTION_ENV = 'AIOS_EXECUTE_LIVE';
 
 const DISPATCH_RUNTIME_CATALOG = Object.freeze(
   Object.fromEntries(
@@ -25,6 +26,11 @@ function cloneDispatchRuntime(definition) {
     ...definition,
     executionModes: [...definition.executionModes],
   };
+}
+
+function isLiveExecutionEnabled(env = process.env) {
+  const raw = String(env?.[LIVE_EXECUTION_ENV] || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
 export function normalizeDispatchRuntimeResult(result, runtime, executionMode) {
@@ -98,8 +104,22 @@ export function createDispatchRuntimeRegistry({ executeDryRunPlan = executeLocal
 
     registry[runtime.id] = {
       ...runtime,
-      execute() {
-        throw new Error(`Dispatch runtime ${runtime.id} is not implemented yet.`);
+      execute({ env } = {}) {
+        const mode = runtime.executionModes[0] || 'live';
+        const gated = runtime.id === SUBAGENT_RUNTIME && !isLiveExecutionEnabled(env);
+        const message = gated
+          ? `Live execution is disabled by default. Set ${LIVE_EXECUTION_ENV}=1 to opt in.`
+          : `Dispatch runtime ${runtime.id} is not implemented yet.`;
+
+        return {
+          mode,
+          ok: false,
+          error: message,
+          executorRegistry: [],
+          executorDetails: [],
+          jobRuns: [],
+          finalOutputs: [],
+        };
       },
     };
   }

@@ -93,7 +93,7 @@ Options:
   --limit <n>                   Number of checkpoints to inspect when loading learn-eval
   --recommendation <targetId>   Pin a specific learn-eval recommendation to the overlay
   --dispatch <none|local>       Build a non-executing local dispatch skeleton
-  --execute <none|dry-run>      Simulate local dispatch execution without model calls
+  --execute <none|dry-run|live> Execute dispatch through the selected runtime (live is opt-in via AIOS_EXECUTE_LIVE=1)
   --preflight <none|auto>       Run supported local gate/runbook actions before final DAG selection
   --format <text|json>
   -h, --help

@@ -64,11 +64,17 @@ async function writeArtifact(absPath, payload) {
 }
 
 export async function persistDispatchEvidence({ rootDir, sessionId, report, elapsedMs } = {}) {
-  if (!sessionId) {
-    return { persisted: false, reason: 'session-required' };
-  }
   if (!report?.dispatchRun) {
     return { persisted: false, reason: 'dispatch-run-missing' };
+  }
+
+  const mode = String(report.dispatchRun.mode || '').trim() || null;
+  if (mode && mode !== 'dry-run') {
+    return { persisted: false, reason: 'mode-unsupported', mode };
+  }
+
+  if (!sessionId) {
+    return { persisted: false, reason: 'session-required', mode: 'contextdb' };
   }
 
   const stamp = formatArtifactTimestamp();

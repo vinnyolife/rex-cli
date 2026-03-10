@@ -183,6 +183,13 @@ test('parseArgs accepts local dry-run execute mode for orchestrate', () => {
   assert.equal(result.options.executionMode, 'dry-run');
 });
 
+test('parseArgs accepts local live execute mode for orchestrate', () => {
+  const result = parseArgs(['orchestrate', 'feature', '--dispatch', 'local', '--execute', 'live']);
+  assert.equal(result.command, 'orchestrate');
+  assert.equal(result.options.dispatchMode, 'local');
+  assert.equal(result.options.executionMode, 'live');
+});
+
 test('parseArgs accepts orchestrate preflight mode', () => {
   const result = parseArgs(['orchestrate', 'feature', '--dispatch', 'local', '--preflight', 'auto']);
   assert.equal(result.command, 'orchestrate');
@@ -264,7 +271,12 @@ test('dispatch runtime registry exposes the subagent runtime adapter contract as
 
   assert.equal(runtime.requiresModel, true);
   assert.equal(runtime.manifestVersion, 1);
-  assert.throws(() => runtime.execute({ plan: { phases: [] } }), /not implemented/i);
+
+  const result = runtime.execute({ plan: { phases: [] }, dispatchPlan: { jobs: [] }, dispatchPolicy: null, env: {} });
+  assert.equal(result.mode, 'live');
+  assert.equal(result.ok, false);
+  assert.equal(Array.isArray(result.jobRuns), true);
+  assert.match(String(result.error || ''), /AIOS_EXECUTE_LIVE/i);
 });
 
 test('dispatch runtime registry keeps blocked workflow results as structured runtime output', async () => {
@@ -485,6 +497,11 @@ test('planOrchestrate includes dry-run execute mode in preview', () => {
   assert.match(plan.preview, /--execute dry-run/);
 });
 
+test('planOrchestrate includes live execute mode in preview', () => {
+  const plan = planOrchestrate({ sessionId: 'security-stable', dispatchMode: 'local', executionMode: 'live' });
+  assert.match(plan.preview, /--execute live/);
+});
+
 test('runOrchestrate resolves blueprint and context from learn-eval overlay', async () => {
   const rootDir = await makeRootDir();
   await writeSession(
@@ -639,6 +656,56 @@ test('runOrchestrate throws when the selected dispatch runtime returns invalid o
     ),
     /jobRuns/
   );
+});
+
+test('runOrchestrate blocks live execution by default without persisting evidence', async () => {
+  const rootDir = await makeRootDir();
+  await writeSession(
+    rootDir,
+    'live-session',
+    { updatedAt: '2026-03-09T02:30:00.000Z', goal: 'Validate live gate behavior' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T02:00:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 1',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 1200,
+        },
+      },
+    ]
+  );
+
+  const logs = [];
+  await runOrchestrate(
+    { sessionId: 'live-session', dispatchMode: 'local', executionMode: 'live', format: 'json' },
+    { rootDir, env: {}, io: { log: (line) => logs.push(line) } }
+  );
+  const report = JSON.parse(logs.join('\n'));
+
+  assert.equal(report.dispatchRun.mode, 'live');
+  assert.equal(report.dispatchRun.runtime?.id, 'subagent-runtime');
+  assert.equal(report.dispatchRun.ok, false);
+  assert.match(String(report.dispatchRun.error || ''), /AIOS_EXECUTE_LIVE/i);
+
+  assert.equal(report.effectiveDispatchPolicy.status, 'blocked');
+  assert.equal(report.effectiveDispatchPolicy.blockerIds.includes('runbook.dispatch-runtime-unavailable'), true);
+  assert.equal(report.effectiveDispatchPolicy.requiredActions.some((item) => /--dispatch local --execute dry-run/.test(item.action)), true);
+
+  assert.equal(report.dispatchEvidence.persisted, false);
+  assert.equal(report.dispatchEvidence.reason, 'mode-unsupported');
+
+  await assert.rejects(
+    () => fs.access(path.join(rootDir, 'memory', 'context-db', 'sessions', 'live-session', 'artifacts')),
+    /ENOENT/
+  );
+  const eventsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'live-session', 'l2-events.jsonl'), 'utf8');
+  assert.equal(eventsRaw.trim(), '');
 });
 
 test('runOrchestrate adds a dry-run dispatch run without invoking models', async () => {
@@ -1394,6 +1461,24 @@ test('renderOrchestrationReport includes local dry-run execution summary', () =>
   assert.match(report, /merged-handoff/);
 });
 
+test('renderOrchestrationReport includes dispatch run errors when present', () => {
+  const report = renderOrchestrationReport({
+    blueprint: 'feature',
+    taskTitle: 'Ship blueprints',
+    dispatchRun: {
+      mode: 'live',
+      ok: false,
+      error: 'Live execution is disabled by default.',
+      executorRegistry: [],
+      executorDetails: [],
+      jobRuns: [],
+      finalOutputs: [],
+    },
+  });
+  assert.match(report, /Local Dispatch Run:/);
+  assert.match(report, /error=Live execution is disabled by default\./);
+});
+
 test('renderOrchestrationReport includes dispatch evidence summary', () => {
   const report = renderOrchestrationReport({
     blueprint: 'feature',
@@ -1408,6 +1493,20 @@ test('renderOrchestrationReport includes dispatch evidence summary', () => {
   assert.match(report, /Dispatch Evidence:/);
   assert.match(report, /security-stable#1/);
   assert.match(report, /dispatch-run-20260309T030000Z\.json/);
+});
+
+test('renderOrchestrationReport includes dispatch evidence reasons when present', () => {
+  const report = renderOrchestrationReport({
+    blueprint: 'feature',
+    taskTitle: 'Ship blueprints',
+    dispatchEvidence: {
+      persisted: false,
+      reason: 'mode-unsupported',
+      mode: 'live',
+    },
+  });
+  assert.match(report, /Dispatch Evidence:/);
+  assert.match(report, /reason=mode-unsupported/);
 });
 
 test('renderOrchestrationReport includes local dispatch skeleton summary', () => {
