@@ -822,6 +822,12 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
   ]);
 
   const latestCheckpoint = checkpoints[checkpoints.length - 1] ?? null;
+  const checkpointNextActions = latestCheckpoint && Array.isArray(latestCheckpoint.nextActions)
+    ? latestCheckpoint.nextActions
+    : [];
+  const checkpointArtifacts = latestCheckpoint && Array.isArray(latestCheckpoint.artifacts)
+    ? latestCheckpoint.artifacts
+    : [];
   const kindFilters = new Set((input.kinds ?? []).map((kind) => kind.trim()).filter((kind) => kind.length > 0));
   const refFilters = new Set(normalizeRefs(input.refs ?? []));
 
@@ -892,16 +898,16 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
       `- Sequence: ${latestCheckpoint.seq ?? '(legacy)'}`,
       '',
       'Next Actions:',
-      ...(latestCheckpoint.nextActions.length > 0
-        ? latestCheckpoint.nextActions.map((item) => `- ${item}`)
+      ...(checkpointNextActions.length > 0
+        ? checkpointNextActions.map((item) => `- ${item}`)
         : ['- (none)']),
       '',
       'Telemetry:',
       ...formatCheckpointTelemetryLines(latestCheckpoint.telemetry),
       '',
       'Artifacts:',
-      ...(latestCheckpoint.artifacts.length > 0
-        ? latestCheckpoint.artifacts.map((item) => `- ${item}`)
+      ...(checkpointArtifacts.length > 0
+        ? checkpointArtifacts.map((item) => `- ${item}`)
         : ['- (none)']),
     ].join('\n')
     : 'No checkpoint yet.';

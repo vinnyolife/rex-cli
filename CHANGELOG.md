@@ -7,7 +7,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 ## [Unreleased]
 
 - feat(aios): wire orchestrator agents into lifecycle components
-- fix(contextdb): tolerate legacy events with missing text/refs in context packs
+- fix(contextdb): tolerate legacy context records (missing text/refs/actions) in context packs
 
 ## [0.16.0] - 2026-03-10
 

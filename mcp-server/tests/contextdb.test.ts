@@ -445,6 +445,43 @@ test('buildContextPacket tolerates legacy events with non-array refs', async () 
   assert.match(packet.markdown, /refs=\[core\.ts\]/);
 });
 
+test('buildContextPacket tolerates legacy checkpoints missing action/artifact arrays', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'Legacy checkpoint regression test',
+  });
+
+  const checkpointsPath = path.join(
+    workspace,
+    'memory',
+    'context-db',
+    'sessions',
+    session.sessionId,
+    'l1-checkpoints.jsonl'
+  );
+
+  // Simulate a legacy/corrupt checkpoint line where "nextActions" and "artifacts" are missing.
+  await fs.appendFile(checkpointsPath, `${JSON.stringify({
+    ts: '2026-03-10T00:00:00.000Z',
+    status: 'running',
+    summary: 'Legacy checkpoint',
+  })}\n`);
+
+  const packet = await buildContextPacket({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    eventLimit: 5,
+  });
+
+  assert.match(packet.markdown, /## L1 Snapshot/);
+  assert.match(packet.markdown, /Next Actions:/);
+  assert.match(packet.markdown, /Artifacts:/);
+  assert.match(packet.markdown, /- \(none\)/);
+});
+
 test('appendEvent deduplicates rapid duplicate events', async () => {
   const workspace = await makeWorkspace();
   const session = await createSession({
