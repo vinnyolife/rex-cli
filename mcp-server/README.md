@@ -91,6 +91,7 @@ Then restart your client and smoke test:
 - `browser_navigate` `{ url, profile?, newTab? }`
 - `browser_click` `{ selector, profile?, double? }`
 - `browser_type` `{ selector, text, profile? }`
+- `browser_set_input_files` `{ selector, files, profile? }`
 - `browser_snapshot` `{ profile?, includeHtml?, htmlMaxChars? }`
 - `browser_auth_check` `{ profile? }`
 - `browser_challenge_check` `{ profile? }`

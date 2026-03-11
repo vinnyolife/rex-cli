@@ -5,7 +5,7 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, isInitializeRequest, } from '@modelcontextprotocol/sdk/types.js';
-import { tools as playwrightTools, browserLauncher, navigate, click, type, snapshot, screenshot, authCheck, challengeCheck, } from './browser/index.js';
+import { tools as playwrightTools, browserLauncher, navigate, click, type, setInputFiles, snapshot, screenshot, authCheck, challengeCheck, } from './browser/index.js';
 // 工具处理器映射
 const toolHandlers = {
     browser_launch: async (args) => {
@@ -40,6 +40,15 @@ const toolHandlers = {
         if (typeof text !== 'string')
             throw new Error('browser_type requires text');
         return await type(selector, text, profile);
+    },
+    browser_set_input_files: async (args) => {
+        const { selector, files, profile } = args ?? {};
+        if (!selector)
+            throw new Error('browser_set_input_files requires selector');
+        if (!Array.isArray(files) || files.length === 0) {
+            throw new Error('browser_set_input_files requires a non-empty files array');
+        }
+        return await setInputFiles(selector, files, profile);
     },
     browser_snapshot: async (args) => {
         return await snapshot(args?.profile, {

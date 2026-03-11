@@ -4,6 +4,7 @@ import { browserLauncher } from './launcher.js';
 import { navigate } from './actions/navigate.js';
 import { click } from './actions/click.js';
 import { type } from './actions/type.js';
+import { setInputFiles } from './actions/set-input-files.js';
 import { snapshot } from './actions/snapshot.js';
 import { screenshot } from './actions/screenshot.js';
 import { authCheck } from './actions/auth-check.js';
@@ -15,6 +16,7 @@ export {
   navigate,
   click,
   type,
+  setInputFiles,
   snapshot,
   screenshot,
   authCheck,
@@ -70,6 +72,22 @@ export const tools = [
         text: { type: 'string' },
         profile: { type: 'string', default: 'default' },
       },
+    },
+  },
+  {
+    name: 'browser_set_input_files',
+    description: 'Set files on a file input element',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string' },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        profile: { type: 'string', default: 'default' },
+      },
+      required: ['selector', 'files'],
     },
   },
   {

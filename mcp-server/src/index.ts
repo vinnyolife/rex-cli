@@ -15,6 +15,7 @@ import {
   navigate,
   click,
   type,
+  setInputFiles,
   snapshot,
   screenshot,
   authCheck,
@@ -51,6 +52,14 @@ const toolHandlers: Record<string, (args: any) => Promise<any>> = {
     if (!selector) throw new Error('browser_type requires selector');
     if (typeof text !== 'string') throw new Error('browser_type requires text');
     return await type(selector, text, profile);
+  },
+  browser_set_input_files: async (args) => {
+    const { selector, files, profile } = args ?? {};
+    if (!selector) throw new Error('browser_set_input_files requires selector');
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new Error('browser_set_input_files requires a non-empty files array');
+    }
+    return await setInputFiles(selector, files, profile);
   },
   browser_snapshot: async (args) => {
     return await snapshot(args?.profile, {
