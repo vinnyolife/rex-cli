@@ -201,6 +201,98 @@ export function spawnCommand(command, args = [], options = {}) {
   });
 }
 
+export function spawnCommandWithInput(command, args = [], options = {}) {
+  const { timeoutMs, input = '', ...rest } = options || {};
+  const { spawnOptions } = splitExecutionOptions(rest);
+  const spec = getCommandSpawnSpec(command, args, rest);
+
+  return new Promise((resolve) => {
+    const child = spawn(spec.command, spec.args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...spawnOptions,
+      shell: spec.shell ?? spawnOptions.shell ?? false,
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let settled = false;
+    let timer = null;
+
+    if (child.stdout) {
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk);
+      });
+    }
+
+    if (child.stderr) {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk);
+      });
+    }
+
+    const finalize = (payload) => {
+      if (settled) return;
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      resolve(payload);
+    };
+
+    if (child.stdin) {
+      child.stdin.on('error', () => {
+        // Ignore stdin pipe errors (e.g., EPIPE when the child exits early).
+      });
+      try {
+        child.stdin.setDefaultEncoding('utf8');
+      } catch {
+        // ignore encoding errors
+      }
+      try {
+        child.stdin.end(String(input || ''));
+      } catch {
+        // ignore stdin write errors
+      }
+    }
+
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill();
+        } catch {
+          // ignore kill errors
+        }
+      }, Math.floor(timeoutMs));
+    }
+
+    child.on('error', (error) => {
+      finalize({
+        status: 1,
+        stdout,
+        stderr,
+        error,
+        timedOut,
+      });
+    });
+
+    child.on('close', (code) => {
+      finalize({
+        status: typeof code === 'number' ? code : 1,
+        stdout,
+        stderr,
+        error: null,
+        timedOut,
+      });
+    });
+  });
+}
+
 export function runCommand(command, args = [], options = {}) {
   const { spawnOptions } = splitExecutionOptions(options);
   const spec = getCommandSpawnSpec(command, args, options);

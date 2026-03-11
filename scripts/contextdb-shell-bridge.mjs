@@ -8,6 +8,9 @@ const BLOCKED_SUBCOMMANDS = {
   codex: new Set([
     'exec', 'review', 'login', 'logout', 'mcp', 'mcp-server', 'app-server', 'app',
     'completion', 'sandbox', 'debug', 'apply', 'resume', 'fork', 'cloud', 'features',
+    // Forward-compat: Codex CLI v0.113+ introduces plugin workflows; v0.114+ adds an experimental hooks engine.
+    // These subcommands are operational/admin flows and should never be wrapped by ContextDB.
+    'plugin', 'hooks',
     'help', '-h', '--help', '-V', '--version',
   ]),
   claude: new Set([

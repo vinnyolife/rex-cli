@@ -1,10 +1,11 @@
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import agentSpec from '../../../memory/specs/orchestrator-agents.json' with { type: 'json' };
 import { runContextDbCli } from '../contextdb-cli.mjs';
-import { spawnCommand, commandExists } from '../platform/process.mjs';
+import { spawnCommand, spawnCommandWithInput, commandExists } from '../platform/process.mjs';
 import { normalizeHandoffPayload, validateHandoffPayload } from './handoff.mjs';
 import { normalizeOrchestratorAgentSpec } from './orchestrator-agents.mjs';
 import { mergeParallelHandoffs } from './orchestrator.mjs';
@@ -22,6 +23,8 @@ const CLIENT_COMMAND = {
   'gemini-cli': 'gemini',
 };
 
+const CODEX_OUTPUT_SCHEMA_REL = path.join('memory', 'specs', 'agent-handoff.schema.json');
+
 function normalizeText(value) {
   return String(value ?? '').trim();
 }
@@ -29,6 +32,11 @@ function normalizeText(value) {
 function resolveRepoRoot() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, '..', '..', '..', '..');
+}
+
+function safeFileSlug(value) {
+  const text = normalizeText(value).toLowerCase();
+  return text.replace(/[^a-z0-9._-]+/g, '_').slice(0, 120) || 'job';
 }
 
 function parsePositiveInt(raw, fallback) {
@@ -206,7 +214,16 @@ function resolveAgentForJob(job, spec) {
   return spec.agents[agentId] || null;
 }
 
-async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env }) {
+function isUnsupportedCodexFlagError(text, flags = []) {
+  const normalized = String(text || '').toLowerCase();
+  if (!normalized) return false;
+  if (!/(unexpected argument|unknown option|unrecognized option|found argument|invalid option)/i.test(text)) {
+    return false;
+  }
+  return flags.some((flag) => normalized.includes(String(flag).toLowerCase()));
+}
+
+async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env, cwd = null, codexOutput = null }) {
   const command = CLIENT_COMMAND[clientId];
   if (!command) {
     return { exitCode: 1, stdout: '', stderr: '', error: `Unsupported subagent client: ${clientId}` };
@@ -233,10 +250,71 @@ async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env }
     const fullPrompt = systemText
       ? `${systemText}\n\n## New User Request\n${promptText}`
       : promptText;
-    args = ['exec', fullPrompt];
+
+    const structuredFlags = [];
+    if (codexOutput?.schemaPath) {
+      structuredFlags.push('--output-schema', codexOutput.schemaPath);
+    }
+    if (codexOutput?.lastMessagePath) {
+      structuredFlags.push('--output-last-message', codexOutput.lastMessagePath);
+    }
+    if (codexOutput?.color) {
+      structuredFlags.push('--color', codexOutput.color);
+    }
+
+    if (structuredFlags.length > 0) {
+      args = ['exec', ...structuredFlags, '-'];
+      const result = await spawnCommandWithInput(command, args, { env, timeoutMs, cwd: cwd || undefined, input: fullPrompt });
+      const combinedStdout = String(result.stdout || '');
+      const combinedStderr = String(result.stderr || '');
+      const exitCode = Number.isFinite(result.status) ? result.status : 1;
+
+      if (result.error) {
+        return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: result.error.message || String(result.error) };
+      }
+
+      if (result.timedOut) {
+        return { exitCode: exitCode || 124, stdout: combinedStdout, stderr: combinedStderr, error: `Timed out after ${timeoutMs} ms` };
+      }
+
+      if (exitCode !== 0) {
+        const combined = `${combinedStdout}\n${combinedStderr}`.trim();
+        const flagNames = ['--output-schema', '--output-last-message', '--color'];
+        if (isUnsupportedCodexFlagError(combined, flagNames)) {
+          const fallback = await spawnCommandWithInput(command, ['exec', '-'], { env, timeoutMs, cwd: cwd || undefined, input: fullPrompt });
+          const fallbackStdout = String(fallback.stdout || '');
+          const fallbackStderr = String(fallback.stderr || '');
+          const fallbackExit = Number.isFinite(fallback.status) ? fallback.status : 1;
+          if (fallback.error) {
+            return { exitCode: fallbackExit, stdout: fallbackStdout, stderr: fallbackStderr, error: fallback.error.message || String(fallback.error) };
+          }
+          if (fallback.timedOut) {
+            return { exitCode: fallbackExit || 124, stdout: fallbackStdout, stderr: fallbackStderr, error: `Timed out after ${timeoutMs} ms` };
+          }
+          return { exitCode: fallbackExit, stdout: fallbackStdout, stderr: fallbackStderr, error: '' };
+        }
+      }
+
+      return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: '' };
+    }
+
+    args = ['exec', '-'];
+    const result = await spawnCommandWithInput(command, args, { env, timeoutMs, cwd: cwd || undefined, input: fullPrompt });
+    const combinedStdout = String(result.stdout || '');
+    const combinedStderr = String(result.stderr || '');
+    const exitCode = Number.isFinite(result.status) ? result.status : 1;
+
+    if (result.error) {
+      return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: result.error.message || String(result.error) };
+    }
+    if (result.timedOut) {
+      return { exitCode: exitCode || 124, stdout: combinedStdout, stderr: combinedStderr, error: `Timed out after ${timeoutMs} ms` };
+    }
+
+    return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: '' };
   }
 
-  const result = await spawnCommand(command, args, { env, timeoutMs });
+  const result = await spawnCommand(command, args, { env, timeoutMs, cwd: cwd || undefined });
   const combinedStdout = String(result.stdout || '');
   const combinedStderr = String(result.stderr || '');
   const exitCode = Number.isFinite(result.status) ? result.status : 1;
@@ -271,16 +349,52 @@ function buildBlockedJobRun(plan, job, dependencyRuns, { executorLabel, reason }
   };
 }
 
-async function executePhaseJob(plan, job, phase, dependencyRuns, { clientId, contextText, timeoutMs, env, io, agentSpecNormalized, executorLabel }) {
+async function executePhaseJob(plan, job, phase, dependencyRuns, {
+  clientId,
+  contextText,
+  timeoutMs,
+  env,
+  io,
+  agentSpecNormalized,
+  executorLabel,
+  dispatchPolicy,
+  rootDir,
+  codexTempDir,
+}) {
   const agent = resolveAgentForJob(job, agentSpecNormalized);
   const systemPrompt = buildSystemPrompt({ agent, contextText, plan, job, phase });
   const userPrompt = buildUserPrompt({ plan, job, phase, dependencyRuns });
 
+  const codexOutput = clientId === 'codex-cli' && codexTempDir && rootDir
+    ? {
+      schemaPath: path.join(rootDir, CODEX_OUTPUT_SCHEMA_REL),
+      lastMessagePath: path.join(codexTempDir, `${safeFileSlug(job?.jobId)}.json`),
+      color: 'never',
+    }
+    : null;
+
   const startedAt = Date.now();
-  const result = await runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env });
+  const result = await runOneShot(clientId, {
+    systemPrompt,
+    userPrompt,
+    timeoutMs,
+    env,
+    cwd: rootDir,
+    codexOutput,
+  });
   const elapsedMs = Date.now() - startedAt;
 
-  const outputText = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  let outputText = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  if (codexOutput?.lastMessagePath) {
+    try {
+      const lastMessage = await fs.readFile(codexOutput.lastMessagePath, 'utf8');
+      if (String(lastMessage || '').trim()) {
+        outputText = String(lastMessage || '').trim();
+      }
+    } catch {
+      // ignore missing last-message file and fall back to stdout/stderr extraction
+    }
+  }
   const rawJson = extractJsonCandidate(outputText);
 
   if (result.exitCode !== 0) {
@@ -432,6 +546,10 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
 
   const agentSpecNormalized = normalizeOrchestratorAgentSpec(agentSpec);
 
+  const codexTempDir = clientId === 'codex-cli'
+    ? await fs.mkdtemp(path.join(os.tmpdir(), 'aios-codex-last-message-'))
+    : null;
+
   const pending = new Map(jobs.map((job) => [job.jobId, job]));
   const running = new Map();
   const jobRunMap = new Map();
@@ -462,6 +580,8 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
         agentSpecNormalized,
         executorLabel,
         dispatchPolicy,
+        rootDir,
+        codexTempDir,
       });
     }
 
@@ -520,6 +640,14 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
 
   const jobRuns = jobs.map((job) => jobRunMap.get(job.jobId)).filter(Boolean);
 
+  if (codexTempDir) {
+    try {
+      await fs.rm(codexTempDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+
   return {
     mode: 'live',
     ok: jobRuns.every((jobRun) => jobRun.status !== 'blocked'),
@@ -531,4 +659,3 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
       .map((jobRun) => ({ jobId: jobRun.jobId, outputType: jobRun.output?.outputType || 'unknown' })),
   };
 }
-
