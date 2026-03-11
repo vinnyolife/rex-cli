@@ -14,18 +14,17 @@ description: 版本历史、升级说明与文档变更入口。
 
 ## 最近版本
 
-- `0.8.0`（2026-03-05）：新增严格 Privacy Guard（`~/.rexcil`），配置类文件必须走脱敏读取路径，支持 Ollama（`qwen3.5:4b`）并接入安装流程
-- `0.7.0`（2026-03-05）：新增浏览器反自动化挑战检测（`browser_challenge_check`）与明确人工接管信号
-- `0.6.2`（2026-03-04）：修复 opt-in wrapper 模式下未自动创建 `.contextdb-enable` 的问题
-- `0.6.1`（2026-03-04）：加固 Windows `browser doctor`，并明确 Node 20+ 前置要求
-- `0.6.0`（2026-03-04）：新增跨 CLI `doctor` 与安全扫描 skills 套件
-- `0.5.3`（2026-03-04）：docs 站点导航更新与博客首页页脚简化
-- `0.5.2`（2026-03-03）：docs 站点页脚统一为 RexAI 全局链接
-- `0.5.1`（2026-03-03）：文档与 superpowers 默认流程对齐
-- `0.5.0`（2026-03-03）：ContextDB 新增 SQLite sidecar 索引、`index:rebuild`、可选 `--semantic` 检索路径，以及统一 `ctx-agent` 运行核心
-- `0.4.2`（2026-03-03）：将 Windows 步骤合并到标签化 Quick Start
-- `0.4.1`（2026-03-03）：新增独立 Windows 指南与互链
-- `0.4.0`（2026-03-03）：新增 Windows PowerShell 安装脚本
+- `main`（未发布）：`aios orchestrate` 上线 `subagent-runtime` live 执行（需 `AIOS_EXECUTE_LIVE=1`）
+- `0.16.0`（2026-03-10）：新增 orchestrator agent catalog 与生成器
+- `0.15.0`（2026-03-10）：`orchestrate live` 默认门禁（`AIOS_EXECUTE_LIVE`）
+- `0.14.0`（2026-03-10）：新增 `subagent-runtime` 运行时适配器（stub）
+- `0.13.0`（2026-03-10）：运行时 manifest 外置化
+- `0.11.0`（2026-03-10）：扩展本地 orchestrate preflight 覆盖范围
+- `0.10.4`（2026-03-08）：非 git 工作区 wrapper fallback 与文档同步
+- `0.10.3`（2026-03-08）：修复 Windows cmd-backed CLI 启动
+- `0.10.0`（2026-03-08）：安装/更新/卸载生命周期统一为 Node
+- `0.8.0`（2026-03-05）：新增严格 Privacy Guard（支持 Ollama）并接入安装流程
+- `0.5.0`（2026-03-03）：ContextDB SQLite sidecar 索引（`index:rebuild`）、可选 `--semantic` 检索路径、统一 `ctx-agent` 运行核心
 
 ## 相关阅读
 

@@ -45,3 +45,16 @@ Set wrapper scope with `CTXDB_WRAP_MODE`:
 - `off`: disable wrapping
 
 Use `opt-in` if you want strict project-by-project control.
+
+## Harness Layer (AIOS)
+
+AIOS adds an operator-facing harness on top of ContextDB:
+
+- `aios orchestrate` builds a local dispatch DAG from blueprints.
+- `dry-run` execution uses `local-dry-run` (token-free simulation).
+- `live` execution uses `subagent-runtime` and runs phase jobs via external CLIs (`codex/claude/gemini`).
+
+Live execution is opt-in and gated by:
+
+- `AIOS_EXECUTE_LIVE=1`
+- `AIOS_SUBAGENT_CLIENT=codex-cli|claude-code|gemini-cli`

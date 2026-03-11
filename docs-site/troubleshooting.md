@@ -75,6 +75,26 @@ If this keeps happening, run the quality gate (includes ContextDB regression che
 aios quality-gate pre-pr --profile strict
 ```
 
+## `aios orchestrate --execute live` is blocked or fails
+
+Live orchestration is opt-in.
+
+1. Enable live execution gate:
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+```
+
+2. Choose which CLI runs the subagent phases:
+
+```bash
+export AIOS_SUBAGENT_CLIENT=codex-cli  # or claude-code, gemini-cli
+```
+
+3. Ensure the selected CLI exists on `PATH` and is authenticated (for example, `codex --version`, `claude --version`).
+
+Tip: to validate the DAG without any model calls, use `--execute dry-run` (or set `AIOS_SUBAGENT_SIMULATE=1` for the live runtime adapter simulation).
+
 ## Commands not wrapped
 
 Check these conditions:

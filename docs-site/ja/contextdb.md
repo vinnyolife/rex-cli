@@ -13,6 +13,22 @@ description: 5 ステップ、SQLite サイドカー、主要コマンド。
 4. `checkpoint`
 5. `context:pack`
 
+## Fail-Open Packing
+
+`contextdb context:pack` が失敗した場合、`ctx-agent` は **警告して続行** します (コンテキスト未注入で CLI を起動)。
+
+パック失敗を致命的エラーにする場合:
+
+```bash
+export CTXDB_PACK_STRICT=1
+```
+
+シェルラッパー (`codex`/`claude`/`gemini`) は対話セッションの破損を避けるため、`CTXDB_PACK_STRICT=1` を設定してもデフォルトは fail-open です。対話ラップも厳格化する場合:
+
+```bash
+export CTXDB_PACK_STRICT_INTERACTIVE=1
+```
+
 ## 例
 
 ```bash

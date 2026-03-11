@@ -16,5 +16,6 @@ description: RexAI CLI エコシステム向けの成長・技術記事。
 
 ## 最新記事
 
+- [Orchestrate Live: Subagent Runtime](orchestrate-live.md)
 - [もう手動で小红書をやらなくていい！AIで毎日2時間増やす自動化運用術](xiaohongshu-automation.md)
 - [2026年AIプログラミングCLI比較：Claude Code vs Codex vs Gemini](ai-cli-comparison.md)

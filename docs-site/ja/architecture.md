@@ -13,3 +13,16 @@ description: wrapper / runner / ContextDB の構成。
 ```text
 ユーザーコマンド -> zsh wrapper -> contextdb-shell-bridge.mjs -> ctx-agent.mjs -> contextdb CLI -> ネイティブ CLI
 ```
+
+## Harness レイヤ (AIOS)
+
+AIOS は ContextDB の上にオペレータ向け harness を提供します:
+
+- `aios orchestrate` は blueprints からローカル dispatch DAG を生成
+- `dry-run` は `local-dry-run` を使用 (トークン消費なし)
+- `live` は `subagent-runtime` を使用し、外部 CLI (`codex/claude/gemini`) でフェーズを実行
+
+`live` はデフォルトで無効です。以下が必要です:
+
+- `AIOS_EXECUTE_LIVE=1`
+- `AIOS_SUBAGENT_CLIENT=codex-cli|claude-code|gemini-cli`

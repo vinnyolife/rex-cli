@@ -16,5 +16,6 @@ description: 面向 RexAI CLI 生态的工程与增长文章。
 
 ## 最新文章
 
+- [Orchestrate Live：Subagent Runtime 正式可用](orchestrate-live.md)
 - [吐血整理！我用 AI 把小红书运营自动化后，同事以为我请了助理](xiaohongshu-automation.md)
 - [2026 年了，别再纠结用哪个 AI 编程工具了](ai-cli-comparison.md)

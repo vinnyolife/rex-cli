@@ -42,6 +42,41 @@ powershell -ExecutionPolicy Bypass -File .\\scripts\\install-browser-mcp.ps1
 1. `cd mcp-server && npm run contextdb -- index:rebuild`
 2. `search` / `timeline` / `event:get` 재실행
 
+## `contextdb context:pack failed`
+
+ContextDB의 `context:pack`이 실패하면, `ctx-agent`는 **경고 후 계속 진행** 합니다 (컨텍스트 미주입 상태로 CLI 실행).
+
+패킹 실패를 치명적으로 만들려면:
+
+```bash
+export CTXDB_PACK_STRICT=1
+```
+
+셸 래퍼(`codex`/`claude`/`gemini`)는 인터랙티브 세션이 깨지는 것을 피하기 위해 `CTXDB_PACK_STRICT=1`이 있어도 기본은 fail-open 입니다. 인터랙티브 래핑도 엄격 모드로 강제하려면:
+
+```bash
+export CTXDB_PACK_STRICT_INTERACTIVE=1
+```
+
+자주 발생하면 품질 게이트(ContextDB 회귀 체크 포함)를 먼저 실행하세요:
+
+```bash
+aios quality-gate pre-pr --profile strict
+```
+
+## `aios orchestrate --execute live`가 막히거나 실패함
+
+live 실행은 opt-in 입니다:
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # 또는 claude-code, gemini-cli
+```
+
+선택한 CLI가 `PATH`에 있고 인증되어 있는지 확인하세요 (예: `codex --version`, `claude --version`).
+
+Tip: 먼저 DAG를 검증하고 싶다면 `--execute dry-run`을 사용하거나, `AIOS_SUBAGENT_SIMULATE=1`로 live 런타임을 로컬 시뮬레이션할 수 있습니다.
+
 ## 래퍼가 동작하지 않음
 
 - ContextDB를 켜려는 워크스페이스/디렉터리 안인지 확인 (non-git 디렉터리도 가능)

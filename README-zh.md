@@ -148,6 +148,14 @@ aios orchestrate --session <session-id> --format json
 aios orchestrate --session <session-id> --preflight auto --format json
 ```
 
+通过 CLI 子代理执行 live（会产生 token 成本，需显式 opt-in）：
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # 或 claude-code, gemini-cli
+aios orchestrate --session <session-id> --dispatch local --execute live --format json
+```
+
 ### Context Pack Fail-Open（避免包装层硬崩）
 
 默认情况下，如果 `contextdb context:pack` 失败，`ctx-agent` 会**告警并继续运行**（不注入上下文，也不让 `codex/claude/gemini` 整体起不来）。

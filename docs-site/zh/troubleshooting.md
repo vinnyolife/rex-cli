@@ -48,6 +48,43 @@ powershell -ExecutionPolicy Bypass -File .\\scripts\\install-browser-mcp.ps1
 1. 执行 `cd mcp-server && npm run contextdb -- index:rebuild`
 2. 重新执行 `search` / `timeline` / `event:get`
 
+## `contextdb context:pack` 失败
+
+AIOS 会先生成 ContextDB 上下文包（`context:pack`），再启动 `codex/claude/gemini`。
+
+如果打包失败，`ctx-agent` 默认会**告警并继续运行**（不注入上下文，也不让 CLI 整体起不来）。
+
+如果你希望打包失败直接中断（严格模式）：
+
+```bash
+export CTXDB_PACK_STRICT=1
+```
+
+注意：shell wrapper（`codex`/`claude`/`gemini`）默认会 fail-open，即便设置了 `CTXDB_PACK_STRICT=1` 也不会让交互式会话直接“起不来”。如果你希望包装层也严格执行：
+
+```bash
+export CTXDB_PACK_STRICT_INTERACTIVE=1
+```
+
+如果频繁出现，建议先跑仓库门禁（包含 ContextDB 回归检查）：
+
+```bash
+aios quality-gate pre-pr --profile strict
+```
+
+## `aios orchestrate --execute live` 被阻塞或失败
+
+live 编排默认关闭，需要显式 opt-in：
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # 或 claude-code, gemini-cli
+```
+
+同时确保所选 CLI 在 `PATH` 中并已登录（例如 `codex --version`、`claude --version`）。
+
+提示：想先验证 DAG 而不产生 token 成本，可以用 `--execute dry-run`，或设置 `AIOS_SUBAGENT_SIMULATE=1` 走 live runtime 的本地模拟路径。
+
 ## 命令没有被包装
 
 检查：

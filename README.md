@@ -148,6 +148,14 @@ aios orchestrate --session <session-id> --format json
 aios orchestrate --session <session-id> --preflight auto --format json
 ```
 
+Execute live via CLI subagents (token cost, opt-in):
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # or claude-code, gemini-cli
+aios orchestrate --session <session-id> --dispatch local --execute live --format json
+```
+
 ### Context Pack Fail-Open (prevent wrapper hard failures)
 
 By default, `ctx-agent` will **warn and continue** if `contextdb context:pack` fails (it will run the CLI without injected context rather than crashing).

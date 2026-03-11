@@ -13,6 +13,22 @@ description: 5단계 흐름, SQLite 사이드카, 명령 예시.
 4. `checkpoint`
 5. `context:pack`
 
+## Context Pack Fail-Open
+
+`contextdb context:pack`이 실패하면, `ctx-agent`는 **경고 후 계속 진행** 합니다 (컨텍스트 미주입 상태로 CLI 실행).
+
+패킹 실패를 치명적으로 만들려면:
+
+```bash
+export CTXDB_PACK_STRICT=1
+```
+
+셸 래퍼(`codex`/`claude`/`gemini`)는 인터랙티브 세션이 깨지는 것을 피하기 위해 `CTXDB_PACK_STRICT=1`이 있어도 기본은 fail-open 입니다. 인터랙티브 래핑도 엄격 모드로 강제하려면:
+
+```bash
+export CTXDB_PACK_STRICT_INTERACTIVE=1
+```
+
 ## 예시
 
 ```bash

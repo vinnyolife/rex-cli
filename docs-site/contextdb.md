@@ -24,6 +24,22 @@ At runtime, ContextDB can execute this sequence:
 - Interactive mode usually runs steps `1, 2, 5` before opening CLI.
 - One-shot mode runs all `1..5` in a single command.
 
+## Fail-Open Packing
+
+If `contextdb context:pack` fails, `ctx-agent` will **warn and continue** by running the CLI without injected context.
+
+To make packing failures fatal:
+
+```bash
+export CTXDB_PACK_STRICT=1
+```
+
+Shell wrappers (`codex`/`claude`/`gemini`) default to fail-open even if `CTXDB_PACK_STRICT=1` is set. To enforce strict packing for wrapped interactive runs too:
+
+```bash
+export CTXDB_PACK_STRICT_INTERACTIVE=1
+```
+
 ## Manual Command Examples
 
 ```bash

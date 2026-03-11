@@ -14,18 +14,17 @@ Use this page to track what changed in `RexCLI` and jump to release-related docs
 
 ## Recent Versions
 
-- `0.8.0` (2026-03-05): add strict Privacy Guard (`~/.rexcil`) with required redacted read path, Ollama (`qwen3.5:4b`) support, and setup integration
-- `0.7.0` (2026-03-05): add browser anti-bot challenge detection (`browser_challenge_check`) and explicit human-handoff signals
-- `0.6.2` (2026-03-04): fix auto-create `.contextdb-enable` for opt-in wrapper mode
-- `0.6.1` (2026-03-04): harden browser doctor on Windows and clarify Node 20+ prerequisite
-- `0.6.0` (2026-03-04): add cross-CLI doctor + security scan skill pack
-- `0.5.3` (2026-03-04): docs-site navigation updates and blog-home footer simplification
-- `0.5.2` (2026-03-03): docs-site footer moved to shared RexAI links
-- `0.5.1` (2026-03-03): docs and superpowers route alignment
-- `0.5.0` (2026-03-03): ContextDB SQLite sidecar index, `index:rebuild`, optional `--semantic` search path, unified `ctx-agent` runtime core
-- `0.4.2` (2026-03-03): merged Windows setup into tabbed Quick Start
-- `0.4.1` (2026-03-03): added dedicated Windows guide pages and cross-links
-- `0.4.0` (2026-03-03): added Windows PowerShell setup scripts
+- `main` (Unreleased): ship `subagent-runtime` live execution for `aios orchestrate` (opt-in via `AIOS_EXECUTE_LIVE=1`)
+- `0.16.0` (2026-03-10): add orchestrator agent catalog and generators
+- `0.15.0` (2026-03-10): gate live orchestrate execution behind `AIOS_EXECUTE_LIVE`
+- `0.14.0` (2026-03-10): add `subagent-runtime` runtime adapter (stub)
+- `0.13.0` (2026-03-10): externalize runtime manifest spec
+- `0.11.0` (2026-03-10): expand local orchestrate preflight coverage
+- `0.10.4` (2026-03-08): wrapper fallback for non-git workspaces and docs sync
+- `0.10.3` (2026-03-08): fix Windows cmd-backed CLI launch
+- `0.10.0` (2026-03-08): consolidate lifecycle flow into Node
+- `0.8.0` (2026-03-05): add strict Privacy Guard with Ollama support and setup integration
+- `0.5.0` (2026-03-03): ContextDB SQLite sidecar index (`index:rebuild`), optional `--semantic` search, unified `ctx-agent` core
 
 ## Related Reading
 

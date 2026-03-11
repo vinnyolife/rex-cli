@@ -29,3 +29,16 @@ description: wrapper、runner 与 ContextDB 的运行关系。
 - `repo-only`：仅 `ROOTPATH` 工作区启用
 - `opt-in`：仅含 `.contextdb-enable` 的工作区启用
 - `off`：关闭包装
+
+## Harness 层（AIOS）
+
+AIOS 在 ContextDB 之上提供面向运营的 harness：
+
+- `aios orchestrate` 基于蓝图生成本地调度 DAG。
+- `dry-run` 使用 `local-dry-run`（免 token，本地模拟）。
+- `live` 使用 `subagent-runtime`，通过外部 CLI（`codex/claude/gemini`）执行各阶段任务。
+
+`live` 默认关闭，需要显式打开：
+
+- `AIOS_EXECUTE_LIVE=1`
+- `AIOS_SUBAGENT_CLIENT=codex-cli|claude-code|gemini-cli`

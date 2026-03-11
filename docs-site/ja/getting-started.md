@@ -183,6 +183,39 @@ claude
 gemini
 ```
 
+## 5.1) 任意: オペレーターツール (quality-gate + learn-eval + orchestrate)
+
+リポジトリ健康チェック (ContextDB 回帰チェックを含む):
+
+```bash
+aios quality-gate pre-pr --profile strict
+```
+
+直近セッションのテレメトリを解析:
+
+```bash
+aios learn-eval --limit 10
+```
+
+ローカルでオーケストレーション骨格を生成 (モデル呼び出しなし):
+
+```bash
+aios orchestrate --session <session-id> --preflight auto --format json
+```
+
+CLI サブエージェント経由で live 実行 (トークン消費あり、opt-in):
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # または claude-code, gemini-cli
+aios orchestrate --session <session-id> --dispatch local --execute live --format json
+```
+
+任意の制御:
+
+- `AIOS_SUBAGENT_CONCURRENCY` (default: `2`)
+- `AIOS_SUBAGENT_TIMEOUT_MS` (default: `600000`)
+
 ## 6) 生成データを確認
 
 === "macOS / Linux"

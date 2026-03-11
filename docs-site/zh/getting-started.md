@@ -237,6 +237,19 @@ aios learn-eval --limit 10
 aios orchestrate --session <session-id> --preflight auto --format json
 ```
 
+通过 CLI 子代理执行 live（会产生 token 成本，需显式 opt-in）：
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # 或 claude-code, gemini-cli
+aios orchestrate --session <session-id> --dispatch local --execute live --format json
+```
+
+可选控制项：
+
+- `AIOS_SUBAGENT_CONCURRENCY`（默认：`2`）
+- `AIOS_SUBAGENT_TIMEOUT_MS`（默认：`600000`）
+
 ## 6) 验证数据已生成
 
 === "macOS / Linux"

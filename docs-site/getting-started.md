@@ -238,6 +238,19 @@ Build a local orchestration skeleton (no model calls):
 aios orchestrate --session <session-id> --preflight auto --format json
 ```
 
+Execute live via CLI subagents (token cost, opt-in):
+
+```bash
+export AIOS_EXECUTE_LIVE=1
+export AIOS_SUBAGENT_CLIENT=codex-cli  # or claude-code, gemini-cli
+aios orchestrate --session <session-id> --dispatch local --execute live --format json
+```
+
+Optional controls:
+
+- `AIOS_SUBAGENT_CONCURRENCY` (default: `2`)
+- `AIOS_SUBAGENT_TIMEOUT_MS` (default: `600000`)
+
 ## 6) Verify data created
 
 === "macOS / Linux"
