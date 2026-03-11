@@ -1,11 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { getCommandSpawnSpec } from './lib/platform/process.mjs';
 import { promises as fs } from 'node:fs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureBootstrapTask, isBootstrapEnabled } from './ctx-bootstrap.mjs';
+import {
+  normalizeWorkspaceMemorySpace,
+  workspaceMemoryEventsPath,
+  workspaceMemoryMetaPath,
+  workspaceMemoryPinnedPath,
+  workspaceMemorySessionId,
+  workspaceMemoryStatePath,
+} from './lib/memo/workspace-memory.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,15 +96,6 @@ function parseBoundedIntegerEnv(value, defaultValue, { min = 0, max = Number.MAX
   return Math.min(Math.max(parsed, min), max);
 }
 
-function normalizeWorkspaceMemorySpace(raw) {
-  const value = String(raw || '').trim();
-  return value ? value : 'default';
-}
-
-function workspaceMemoryStatePath(workspaceRoot) {
-  return path.join(workspaceRoot, 'memory', 'context-db', '.workspace-memory.json');
-}
-
 async function readActiveSpaceFromState(workspaceRoot) {
   try {
     const raw = await fs.readFile(workspaceMemoryStatePath(workspaceRoot), 'utf8');
@@ -115,24 +113,6 @@ async function resolveWorkspaceMemorySpace(workspaceRoot, env = process.env) {
   const stored = await readActiveSpaceFromState(workspaceRoot);
   if (stored) return normalizeWorkspaceMemorySpace(stored);
   return 'default';
-}
-
-function sanitizeSpaceForSessionId(space) {
-  const trimmed = normalizeWorkspaceMemorySpace(space);
-  const normalized = trimmed
-    .toLowerCase()
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  if (normalized) return normalized;
-  const hash = createHash('sha256').update(trimmed, 'utf8').digest('hex').slice(0, 10);
-  return `space-${hash}`;
-}
-
-function workspaceMemorySessionId(space) {
-  return `workspace-memory--${sanitizeSpaceForSessionId(space)}`;
 }
 
 async function readTailText(filePath, maxBytes) {
@@ -210,20 +190,19 @@ export async function buildWorkspaceMemoryOverlay(workspaceRoot, env = process.e
   const recentLimit = parseBoundedIntegerEnv(env.WORKSPACE_MEMORY_RECENT_LIMIT, 10, { min: 0, max: 50 });
 
   const sessionId = workspaceMemorySessionId(space);
-  const sessionRoot = path.join(workspaceRoot, 'memory', 'context-db', 'sessions', sessionId);
-  if (!existsSync(path.join(sessionRoot, 'meta.json'))) {
+  if (!existsSync(workspaceMemoryMetaPath(workspaceRoot, sessionId))) {
     return '';
   }
 
   let pinned = '';
   try {
-    pinned = await fs.readFile(path.join(sessionRoot, 'pinned.md'), 'utf8');
+    pinned = await fs.readFile(workspaceMemoryPinnedPath(workspaceRoot, sessionId), 'utf8');
   } catch {
     pinned = '';
   }
   pinned = String(pinned || '').trim();
 
-  const memos = await loadRecentMemoEvents(path.join(sessionRoot, 'l2-events.jsonl'), recentLimit);
+  const memos = await loadRecentMemoEvents(workspaceMemoryEventsPath(workspaceRoot, sessionId), recentLimit);
 
   if (!pinned && memos.length === 0) {
     return '';

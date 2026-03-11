@@ -1,14 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 
 import { captureCommand } from "../platform/process.mjs";
 import { ensureParentDir, readTextIfExists, writeText } from "../platform/fs.mjs";
 import { runContextDbCli } from "../contextdb-cli.mjs";
+import {
+  DEFAULT_WORKSPACE_MEMORY_SPACE,
+  WORKSPACE_MEMORY_AGENT,
+  WORKSPACE_MEMORY_SESSION_PREFIX,
+  normalizeWorkspaceMemorySpace,
+  sanitizeWorkspaceMemorySpaceForSessionId,
+  workspaceMemoryMetaPath,
+  workspaceMemoryPinnedPath,
+  workspaceMemorySessionDir,
+  workspaceMemorySessionId,
+  workspaceMemoryStatePath,
+} from "./workspace-memory.mjs";
 
-const DEFAULT_SPACE = "default";
-const WORKSPACE_MEMORY_AGENT = "workspace-memory";
-const WORKSPACE_MEMORY_SESSION_PREFIX = "workspace-memory--";
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_PRINT_CHARS = 12_000;
 
@@ -32,7 +40,7 @@ function workspaceProjectName(workspaceRoot) {
 }
 
 function statePath(workspaceRoot) {
-  return path.join(workspaceRoot, "memory", "context-db", ".workspace-memory.json");
+  return workspaceMemoryStatePath(workspaceRoot);
 }
 
 function readActiveSpaceFromState(workspaceRoot) {
@@ -53,9 +61,7 @@ function writeActiveSpaceToState(workspaceRoot, space) {
 }
 
 function normalizeSpace(raw) {
-  const value = String(raw || "").trim();
-  if (!value) return DEFAULT_SPACE;
-  return value;
+  return normalizeWorkspaceMemorySpace(raw);
 }
 
 function resolveActiveSpace(workspaceRoot, env = process.env) {
@@ -63,33 +69,15 @@ function resolveActiveSpace(workspaceRoot, env = process.env) {
   if (envSpace) return normalizeSpace(envSpace);
   const stored = readActiveSpaceFromState(workspaceRoot);
   if (stored) return normalizeSpace(stored);
-  return DEFAULT_SPACE;
-}
-
-function sanitizeSpaceForSessionId(space) {
-  const trimmed = normalizeSpace(space);
-  const normalized = trimmed
-    .toLowerCase()
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  if (normalized) return normalized;
-  const hash = crypto.createHash("sha256").update(trimmed, "utf8").digest("hex").slice(0, 10);
-  return `space-${hash}`;
-}
-
-function workspaceMemorySessionId(space) {
-  return `${WORKSPACE_MEMORY_SESSION_PREFIX}${sanitizeSpaceForSessionId(space)}`;
+  return DEFAULT_WORKSPACE_MEMORY_SPACE;
 }
 
 function sessionDir(workspaceRoot, sessionId) {
-  return path.join(workspaceRoot, "memory", "context-db", "sessions", sessionId);
+  return workspaceMemorySessionDir(workspaceRoot, sessionId);
 }
 
 function sessionMetaPath(workspaceRoot, sessionId) {
-  return path.join(sessionDir(workspaceRoot, sessionId), "meta.json");
+  return workspaceMemoryMetaPath(workspaceRoot, sessionId);
 }
 
 function hasWorkspaceMemorySession(workspaceRoot, space) {
@@ -118,7 +106,7 @@ function ensureWorkspaceMemorySession(workspaceRoot, space) {
 }
 
 function pinnedPath(workspaceRoot, sessionId) {
-  return path.join(sessionDir(workspaceRoot, sessionId), "pinned.md");
+  return workspaceMemoryPinnedPath(workspaceRoot, sessionId);
 }
 
 function readPinned(workspaceRoot, sessionId) {
@@ -242,11 +230,11 @@ export async function runMemo(rawOptions = {}, { io = console } = {}) {
       .filter((entry) => entry.isDirectory() && entry.name.startsWith(WORKSPACE_MEMORY_SESSION_PREFIX))
       .map((entry) => entry.name.slice(WORKSPACE_MEMORY_SESSION_PREFIX.length))
       .sort((a, b) => a.localeCompare(b));
-    if (spaces.length === 0) {
-      io.log("(none)");
-      return;
-    }
-    const activeSuffix = sanitizeSpaceForSessionId(activeSpace);
+  if (spaces.length === 0) {
+    io.log("(none)");
+    return;
+  }
+    const activeSuffix = sanitizeWorkspaceMemorySpaceForSessionId(activeSpace);
     for (const spaceSuffix of spaces) {
       const marker = spaceSuffix === activeSuffix ? "*" : " ";
       io.log(`${marker} ${spaceSuffix}`);
@@ -375,4 +363,3 @@ export async function runMemo(rawOptions = {}, { io = console } = {}) {
 
   throw usageError(`Unknown memo subcommand: ${primary}`);
 }
-
