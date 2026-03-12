@@ -45,6 +45,27 @@ async function makeFakeWindowsNodeInstall({ withNpxCli = true } = {}) {
   return { execPath, npmCli, npxCli };
 }
 
+async function makeFakeWindowsAgentLauncher(command, scriptRelativePath) {
+  const rootDir = await makeTemp(`aios-win-${command}-launcher-`);
+  const binDir = path.join(rootDir, 'bin');
+  const execPath = path.join(binDir, 'node.exe');
+  const scriptPath = path.join(binDir, ...String(scriptRelativePath).split('/'));
+  const launcherPath = path.join(binDir, `${command}.cmd`);
+  const windowsRelPath = String(scriptRelativePath).split('/').join('\\');
+
+  await mkdir(path.dirname(scriptPath), { recursive: true });
+  await mkdir(binDir, { recursive: true });
+  await writeFile(execPath, '', 'utf8');
+  await writeFile(scriptPath, '', 'utf8');
+  await writeFile(
+    launcherPath,
+    `@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\${windowsRelPath}" %*\r\n`,
+    'utf8'
+  );
+
+  return { binDir, execPath, scriptPath, launcherPath };
+}
+
 async function makeFakeMcpServer(rootDir) {
   const mcpDir = path.join(rootDir, 'mcp-server');
   await mkdir(mcpDir, { recursive: true });
@@ -169,18 +190,21 @@ test('windows npx falls back to npm exec when npx cli is absent', async () => {
   assert.deepEqual(spec.args, [npmCli, 'exec', '--', 'playwright', 'install', 'chromium']);
 });
 
-test('windows codex uses shell execution for cmd-backed cli wrappers', async () => {
-  const binDir = await makeTemp('aios-win-codex-path-');
-  await writeFile(path.join(binDir, 'codex.cmd'), '', 'utf8');
+test('windows codex resolves npm-style cmd launcher to direct node execution', async () => {
+  const { binDir, execPath, scriptPath } = await makeFakeWindowsAgentLauncher(
+    'codex',
+    'node_modules/@openai/codex/bin/codex.js'
+  );
 
   const spec = getCommandSpawnSpec('codex', ['--version'], {
     platform: 'win32',
+    execPath,
     env: { PATH: binDir, PATHEXT: '.EXE;.CMD' },
   });
 
-  assert.equal(spec.command, 'codex');
-  assert.deepEqual(spec.args, ['--version']);
-  assert.equal(spec.shell, true);
+  assert.equal(spec.command, execPath);
+  assert.deepEqual(spec.args, [scriptPath, '--version']);
+  assert.equal(spec.shell, false);
 });
 
 test('windows codex avoids shell when a native executable is available', async () => {
@@ -195,22 +219,48 @@ test('windows codex avoids shell when a native executable is available', async (
   assert.equal(spec.shell, false);
 });
 
-test('windows claude and gemini also use shell execution for cmd-backed wrappers', async () => {
-  const binDir = await makeTemp('aios-win-cli-path-');
-  await writeFile(path.join(binDir, 'claude.cmd'), '', 'utf8');
-  await writeFile(path.join(binDir, 'gemini.cmd'), '', 'utf8');
+test('windows codex falls back to shell when cmd launcher entrypoint is not resolvable', async () => {
+  const binDir = await makeTemp('aios-win-codex-shell-fallback-path-');
+  await writeFile(path.join(binDir, 'codex.cmd'), '@ECHO off\r\nREM unresolved wrapper\r\n', 'utf8');
+
+  const spec = getCommandSpawnSpec('codex', ['--version'], {
+    platform: 'win32',
+    env: { PATH: binDir, PATHEXT: '.EXE;.CMD' },
+  });
+
+  assert.equal(spec.command, 'codex');
+  assert.deepEqual(spec.args, ['--version']);
+  assert.equal(spec.shell, true);
+});
+
+test('windows claude and gemini resolve npm-style cmd launchers to direct node execution', async () => {
+  const claude = await makeFakeWindowsAgentLauncher(
+    'claude',
+    'node_modules/@anthropic-ai/claude-code/cli.js'
+  );
+  const gemini = await makeFakeWindowsAgentLauncher(
+    'gemini',
+    'node_modules/@google/gemini-cli/bin/gemini.js'
+  );
 
   const claudeSpec = getCommandSpawnSpec('claude', ['--version'], {
     platform: 'win32',
-    env: { PATH: binDir, PATHEXT: '.EXE;.CMD' },
+    execPath: claude.execPath,
+    env: { PATH: claude.binDir, PATHEXT: '.EXE;.CMD' },
   });
   const geminiSpec = getCommandSpawnSpec('gemini', ['--version'], {
     platform: 'win32',
-    env: { PATH: binDir, PATHEXT: '.EXE;.CMD' },
+    execPath: gemini.execPath,
+    env: { PATH: gemini.binDir, PATHEXT: '.EXE;.CMD' },
   });
 
-  assert.equal(claudeSpec.shell, true);
-  assert.equal(geminiSpec.shell, true);
+  assert.equal(claudeSpec.command, claude.execPath);
+  assert.deepEqual(claudeSpec.args, [claude.scriptPath, '--version']);
+  assert.equal(claudeSpec.shell, false);
+
+  assert.equal(geminiSpec.command, gemini.execPath);
+  assert.deepEqual(geminiSpec.args, [gemini.scriptPath, '--version']);
+  assert.equal(geminiSpec.shell, false);
 });
 
 

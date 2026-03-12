@@ -41,7 +41,7 @@ async function makeRootDir() {
   return await fs.mkdtemp(path.join(os.tmpdir(), 'aios-orchestrator-'));
 }
 
-async function createFakeCodexCommand(payload = null) {
+async function createFakeCodexCommand(payload = null, { usageLog = '', failOnOutputSchema = false, upstreamFailAttempts = 0 } = {}) {
   const binDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-orchestrator-bin-'));
   const json = payload || {
     status: 'completed',
@@ -56,17 +56,62 @@ async function createFakeCodexCommand(payload = null) {
   };
   const jsonText = JSON.stringify(json);
   const jsTextLiteral = JSON.stringify(`${jsonText}\n`);
+  const jsonTextLiteral = JSON.stringify(jsonText);
+  const usageText = String(usageLog || '').trim();
+  const usageLiteral = JSON.stringify(usageText.length > 0 ? `${usageText}\n` : '');
+  const usageWrite = usageText.length > 0 ? `process.stderr.write(${usageLiteral});\n` : '';
+  const invalidSchemaErrorLiteral = JSON.stringify('ERROR: {"error":{"message":"schema rejected","type":"invalid_request_error","code":"invalid_json_schema","param":"text.format.schema"}}\n');
+  const upstreamErrorLiteral = JSON.stringify('ERROR: {"error":{"message":"upstream failure","type":"server_error","code":"upstream_error"}}\n');
+  const upstreamFailureLimit = Number.parseInt(String(upstreamFailAttempts ?? 0), 10);
+  const upstreamFailureLimitLiteral = Number.isFinite(upstreamFailureLimit) && upstreamFailureLimit > 0 ? String(upstreamFailureLimit) : '0';
+  const attemptStatePathLiteral = JSON.stringify(path.join(binDir, 'codex-fake-attempt-count.txt'));
+  const scriptBody = [
+    "import fs from 'node:fs';",
+    "const args = process.argv.slice(2);",
+    `const attemptStatePath = ${attemptStatePathLiteral};`,
+    'let attempt = 0;',
+    'try {',
+    "  attempt = Number.parseInt(fs.readFileSync(attemptStatePath, 'utf8'), 10) || 0;",
+    '} catch {',
+    '  attempt = 0;',
+    '}',
+    'attempt += 1;',
+    'try {',
+    "  fs.writeFileSync(attemptStatePath, String(attempt), 'utf8');",
+    '} catch {',
+    '  // ignore counter write failures in test fixture',
+    '}',
+    `if (attempt <= ${upstreamFailureLimitLiteral}) {`,
+    `  process.stderr.write(${upstreamErrorLiteral});`,
+    '  process.exit(1);',
+    '}',
+    "const schemaFlagIndex = args.indexOf('--output-schema');",
+    "if (schemaFlagIndex >= 0 && " + (failOnOutputSchema ? 'true' : 'false') + ") {",
+    `  process.stderr.write(${invalidSchemaErrorLiteral});`,
+    '  process.exit(1);',
+    '}',
+    "const lastMessageFlagIndex = args.indexOf('--output-last-message');",
+    'if (lastMessageFlagIndex >= 0 && args[lastMessageFlagIndex + 1]) {',
+    '  try {',
+    `    fs.writeFileSync(args[lastMessageFlagIndex + 1], ${jsonTextLiteral}, 'utf8');`,
+    '  } catch {',
+    '    // ignore write failures in test fixture',
+    '  }',
+    '}',
+    `process.stdout.write(${jsTextLiteral});`,
+    usageWrite.trimEnd(),
+  ].filter(Boolean).join('\n');
+  const script = path.join(binDir, 'codex-fake.mjs');
+  await fs.writeFile(script, `${scriptBody}\n`, 'utf8');
 
   if (process.platform === 'win32') {
-    const script = path.join(binDir, 'codex-fake.mjs');
-    await fs.writeFile(script, `process.stdout.write(${jsTextLiteral});\n`, 'utf8');
     const shim = path.join(binDir, 'codex.cmd');
     await fs.writeFile(shim, `@echo off\r\nnode "${script}" %*\r\n`, 'utf8');
     return binDir;
   }
 
   const file = path.join(binDir, 'codex');
-  await fs.writeFile(file, `#!/usr/bin/env node\nprocess.stdout.write(${jsTextLiteral});\n`, 'utf8');
+  await fs.writeFile(file, `#!/usr/bin/env bash\nnode "${script}" "$@"\n`, 'utf8');
   await fs.chmod(file, 0o755);
   return binDir;
 }
@@ -88,8 +133,36 @@ async function writeSession(rootDir, sessionId, metaOverrides = {}, checkpoints 
     ...metaOverrides,
   };
   const lastCheckpoint = checkpoints[checkpoints.length - 1] || null;
+  const summaryUpdatedAt = lastCheckpoint?.ts || meta.updatedAt || meta.createdAt;
+  const summaryStatus = lastCheckpoint?.status || meta.status || 'running';
+  const summaryNextActions = Array.isArray(lastCheckpoint?.nextActions) && lastCheckpoint.nextActions.length > 0
+    ? lastCheckpoint.nextActions.map((item) => `- ${item}`).join('\n')
+    : '- (none)';
+  const summaryArtifacts = Array.isArray(lastCheckpoint?.artifacts) && lastCheckpoint.artifacts.length > 0
+    ? lastCheckpoint.artifacts.map((item) => `- ${item}`).join('\n')
+    : '- (none)';
+  const summaryMarkdown = [
+    `# Session ${sessionId}`,
+    '',
+    `- Agent: ${meta.agent}`,
+    `- Project: ${meta.project}`,
+    `- Goal: ${meta.goal}`,
+    `- Status: ${summaryStatus}`,
+    `- Updated: ${summaryUpdatedAt}`,
+    '',
+    '## Summary',
+    lastCheckpoint?.summary || 'Test session scaffold.',
+    '',
+    '## Next Actions',
+    summaryNextActions,
+    '',
+    '## Artifacts',
+    summaryArtifacts,
+    '',
+  ].join('\n');
 
   await fs.writeFile(path.join(sessionDir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+  await fs.writeFile(path.join(sessionDir, 'l0-summary.md'), summaryMarkdown, 'utf8');
   await fs.writeFile(path.join(sessionDir, 'l2-events.jsonl'), '', 'utf8');
   await fs.writeFile(
     path.join(sessionDir, 'l1-checkpoints.jsonl'),
@@ -309,6 +382,33 @@ test('dispatch runtime registry blocks live subagent execution until explicitly 
   assert.match(String(result.error || ''), /AIOS_EXECUTE_LIVE/i);
 });
 
+test('dispatch runtime registry enforces codex-only subagent client in live mode', async () => {
+  const runtimes = await importDispatchRuntimes();
+  assert.ok(runtimes, 'expected runtime registry module');
+
+  const registry = runtimes.createDispatchRuntimeRegistry({ executeDryRunPlan: () => ({ mode: 'dry-run', ok: true, jobRuns: [] }) });
+  const runtime = runtimes.resolveDispatchRuntime({ runtimeId: 'subagent-runtime', executionMode: 'live' }, registry);
+
+  const plan = buildOrchestrationPlan({ blueprint: 'feature', taskTitle: 'Reject non-codex client' });
+  const dispatchPlan = buildLocalDispatchPlan(plan);
+
+  const result = await runtime.execute({
+    plan,
+    dispatchPlan,
+    dispatchPolicy: null,
+    env: {
+      AIOS_EXECUTE_LIVE: '1',
+      AIOS_SUBAGENT_CLIENT: 'claude-code',
+    },
+  });
+
+  assert.equal(result.mode, 'live');
+  assert.equal(result.ok, false);
+  assert.equal(Array.isArray(result.jobRuns), true);
+  assert.match(String(result.error || ''), /codex-only mode/i);
+  assert.match(String(result.error || ''), /AIOS_SUBAGENT_CLIENT=codex-cli/i);
+});
+
 test('dispatch runtime registry can simulate the subagent runtime when explicitly enabled', async () => {
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
@@ -339,7 +439,9 @@ test('dispatch runtime registry can execute the subagent runtime with a configur
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
 
-  const fakeBin = await createFakeCodexCommand();
+  const fakeBin = await createFakeCodexCommand(null, {
+    usageLog: 'inputTokens=100 outputTokens=40 totalTokens=140 usd=0.2',
+  });
   const registry = runtimes.createDispatchRuntimeRegistry({ executeDryRunPlan: () => ({ mode: 'dry-run', ok: true, jobRuns: [] }) });
   const runtime = runtimes.resolveDispatchRuntime({ runtimeId: 'subagent-runtime', executionMode: 'live' }, registry);
 
@@ -366,6 +468,86 @@ test('dispatch runtime registry can execute the subagent runtime with a configur
   assert.equal(result.jobRuns.length > plan.phases.length, true);
   assert.equal(result.jobRuns.every((jobRun) => jobRun.status !== 'blocked'), true);
   assert.equal(result.finalOutputs.length > 0, true);
+  assert.equal((result.cost?.inputTokens || 0) > 0, true);
+  assert.equal((result.cost?.outputTokens || 0) > 0, true);
+  assert.equal((result.cost?.totalTokens || 0) > 0, true);
+  assert.equal((result.cost?.usd || 0) > 0, true);
+});
+
+test('dispatch runtime registry retries codex execution when output schema is rejected by backend', async () => {
+  const runtimes = await importDispatchRuntimes();
+  assert.ok(runtimes, 'expected runtime registry module');
+
+  const fakeBin = await createFakeCodexCommand(null, {
+    usageLog: 'inputTokens=60 outputTokens=20 totalTokens=80 usd=0.08',
+    failOnOutputSchema: true,
+  });
+  const registry = runtimes.createDispatchRuntimeRegistry({ executeDryRunPlan: () => ({ mode: 'dry-run', ok: true, jobRuns: [] }) });
+  const runtime = runtimes.resolveDispatchRuntime({ runtimeId: 'subagent-runtime', executionMode: 'live' }, registry);
+
+  const plan = buildOrchestrationPlan({ blueprint: 'feature', taskTitle: 'Retry schema fallback' });
+  const dispatchPlan = buildLocalDispatchPlan(plan);
+
+  const result = await runtime.execute({
+    plan,
+    dispatchPlan,
+    dispatchPolicy: null,
+    env: {
+      ...process.env,
+      AIOS_EXECUTE_LIVE: '1',
+      AIOS_SUBAGENT_CLIENT: 'codex-cli',
+      AIOS_SUBAGENT_CONCURRENCY: '1',
+      PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+    },
+    io: { log() {} },
+  });
+
+  assert.equal(result.mode, 'live');
+  assert.equal(result.ok, true);
+  assert.equal(result.runtime?.id, 'subagent-runtime');
+  assert.equal(result.jobRuns.some((jobRun) => jobRun.status === 'blocked'), false);
+  assert.equal((result.cost?.totalTokens || 0) > 0, true);
+  assert.equal((result.cost?.usd || 0) > 0, true);
+});
+
+test('dispatch runtime registry retries codex upstream errors with backoff before succeeding', async () => {
+  const runtimes = await importDispatchRuntimes();
+  assert.ok(runtimes, 'expected runtime registry module');
+
+  const fakeBin = await createFakeCodexCommand(null, {
+    usageLog: 'inputTokens=70 outputTokens=15 totalTokens=85 usd=0.09',
+    upstreamFailAttempts: 1,
+  });
+  const registry = runtimes.createDispatchRuntimeRegistry({ executeDryRunPlan: () => ({ mode: 'dry-run', ok: true, jobRuns: [] }) });
+  const runtime = runtimes.resolveDispatchRuntime({ runtimeId: 'subagent-runtime', executionMode: 'live' }, registry);
+
+  const plan = buildOrchestrationPlan({ blueprint: 'feature', taskTitle: 'Retry upstream error' });
+  const dispatchPlan = buildLocalDispatchPlan(plan);
+  const logs = [];
+
+  const result = await runtime.execute({
+    plan,
+    dispatchPlan,
+    dispatchPolicy: null,
+    env: {
+      ...process.env,
+      AIOS_EXECUTE_LIVE: '1',
+      AIOS_SUBAGENT_CLIENT: 'codex-cli',
+      AIOS_SUBAGENT_CONCURRENCY: '1',
+      AIOS_SUBAGENT_UPSTREAM_MAX_ATTEMPTS: '2',
+      AIOS_SUBAGENT_UPSTREAM_BACKOFF_MS: '1',
+      PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+    },
+    io: { log: (line) => logs.push(String(line)) },
+  });
+
+  assert.equal(result.mode, 'live');
+  assert.equal(result.ok, true);
+  assert.equal(result.runtime?.id, 'subagent-runtime');
+  assert.equal(result.jobRuns.some((jobRun) => jobRun.status === 'blocked'), false);
+  assert.equal((result.cost?.totalTokens || 0) > 0, true);
+  assert.equal((result.cost?.usd || 0) > 0, true);
+  assert.equal(logs.some((line) => line.includes('codex upstream_error retry attempt')), true);
 });
 
 test('dispatch runtime registry keeps blocked workflow results as structured runtime output', async () => {
@@ -615,7 +797,7 @@ test('runOrchestrate defaults to local dry-run execution when dispatch/execute a
     { blueprint: 'feature', taskTitle: 'Default dry-run', format: 'json' },
     { rootDir, io: { log: (line) => logs.push(line) } }
   );
-  const report = JSON.parse(logs.join('\n'));
+  const report = JSON.parse(logs.at(-1));
 
   assert.equal(report.dispatchPlan.mode, 'local');
   assert.equal(report.dispatchRun.mode, 'dry-run');
@@ -678,7 +860,7 @@ test('runOrchestrate resolves blueprint and context from learn-eval overlay', as
     { sessionId: 'security-stable', format: 'json' },
     { rootDir, io: { log: (line) => logs.push(line) } }
   );
-  const report = JSON.parse(logs.join('\n'));
+  const report = JSON.parse(logs.at(-1));
 
   assert.equal(result.exitCode, 0);
   assert.equal(report.blueprint, 'security');
@@ -743,7 +925,7 @@ test('runOrchestrate adds a local dispatch skeleton without invoking models', as
     { sessionId: 'security-stable', dispatchMode: 'local', format: 'json' },
     { rootDir, io: { log: (line) => logs.push(line) } }
   );
-  const report = JSON.parse(logs.join('\n'));
+  const report = JSON.parse(logs.at(-1));
 
   assert.equal(report.dispatchPlan.mode, 'local');
   assert.equal(report.dispatchPlan.readyForExecution, false);
@@ -828,6 +1010,78 @@ test('runOrchestrate blocks live execution by default without persisting evidenc
   );
   const eventsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'live-session', 'l2-events.jsonl'), 'utf8');
   assert.equal(eventsRaw.trim(), '');
+});
+
+test('runOrchestrate persists live dispatch evidence with runtime cost telemetry', async () => {
+  const rootDir = await makeRootDir();
+  const fakeBin = await createFakeCodexCommand(null, {
+    usageLog: 'inputTokens=120 outputTokens=30 totalTokens=150 usd=0.25',
+  });
+  await writeSession(
+    rootDir,
+    'live-cost-session',
+    { updatedAt: '2026-03-09T02:30:00.000Z', goal: 'Validate live cost evidence' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T02:00:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 1',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 1200,
+        },
+      },
+    ]
+  );
+
+  const logs = [];
+  await runOrchestrate(
+    { sessionId: 'live-cost-session', dispatchMode: 'local', executionMode: 'live', format: 'json' },
+    {
+      rootDir,
+      io: { log: (line) => logs.push(line) },
+      env: {
+        ...process.env,
+        AIOS_EXECUTE_LIVE: '1',
+        AIOS_SUBAGENT_CLIENT: 'codex-cli',
+        AIOS_SUBAGENT_CONCURRENCY: '2',
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+      },
+    }
+  );
+  assert.equal(
+    logs.some((line) => String(line).includes('[subagent-runtime] context pack failed')),
+    false,
+    logs.map((line) => String(line)).join('\n')
+  );
+  const report = JSON.parse(logs.at(-1));
+
+  assert.equal(report.dispatchRun.mode, 'live');
+  assert.equal(report.dispatchRun.runtime?.id, 'subagent-runtime');
+  assert.equal(report.dispatchRun.ok, true);
+  assert.equal((report.dispatchRun.cost?.totalTokens || 0) > 0, true);
+  assert.equal((report.dispatchRun.cost?.usd || 0) > 0, true);
+
+  assert.equal(report.dispatchEvidence.persisted, true);
+  assert.equal(report.dispatchEvidence.eventKind, 'orchestration.dispatch-run');
+  assert.match(report.dispatchEvidence.artifactPath, /dispatch-run-/);
+
+  const artifactPath = path.join(rootDir, report.dispatchEvidence.artifactPath);
+  const artifact = JSON.parse(await fs.readFile(artifactPath, 'utf8'));
+  assert.equal(artifact.dispatchRun.mode, 'live');
+  assert.equal(artifact.dispatchRun.runtime?.id, 'subagent-runtime');
+  assert.equal((artifact.dispatchRun.cost?.totalTokens || 0) > 0, true);
+  assert.equal((artifact.dispatchRun.cost?.usd || 0) > 0, true);
+
+  const checkpointsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'live-cost-session', 'l1-checkpoints.jsonl'), 'utf8');
+  const lastCheckpoint = JSON.parse(checkpointsRaw.trim().split('\n').at(-1));
+  assert.match(lastCheckpoint.summary, /live/);
+  assert.equal((lastCheckpoint.telemetry?.cost?.totalTokens || 0) > 0, true);
+  assert.equal((lastCheckpoint.telemetry?.cost?.usd || 0) > 0, true);
 });
 
 test('runOrchestrate adds a dry-run dispatch run without invoking models', async () => {

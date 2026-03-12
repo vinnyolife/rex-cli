@@ -466,6 +466,7 @@ export async function runOrchestrate(
       dispatchPolicy: effectiveDispatchPolicy,
       io,
       env,
+      rootDir,
     })
     : null;
   const dispatchRun = dispatchRuntime && rawDispatchRun

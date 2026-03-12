@@ -15,12 +15,12 @@ export const SUBAGENT_CONCURRENCY_ENV = 'AIOS_SUBAGENT_CONCURRENCY';
 export const SUBAGENT_TIMEOUT_MS_ENV = 'AIOS_SUBAGENT_TIMEOUT_MS';
 export const SUBAGENT_CONTEXT_LIMIT_ENV = 'AIOS_SUBAGENT_CONTEXT_LIMIT';
 export const SUBAGENT_CONTEXT_TOKEN_BUDGET_ENV = 'AIOS_SUBAGENT_CONTEXT_TOKEN_BUDGET';
+export const SUBAGENT_UPSTREAM_MAX_ATTEMPTS_ENV = 'AIOS_SUBAGENT_UPSTREAM_MAX_ATTEMPTS';
+export const SUBAGENT_UPSTREAM_BACKOFF_MS_ENV = 'AIOS_SUBAGENT_UPSTREAM_BACKOFF_MS';
 
-const SUPPORTED_CLIENTS = new Set(['codex-cli', 'claude-code', 'gemini-cli']);
+const SUPPORTED_CLIENTS = new Set(['codex-cli']);
 const CLIENT_COMMAND = {
   'codex-cli': 'codex',
-  'claude-code': 'claude',
-  'gemini-cli': 'gemini',
 };
 
 const CODEX_OUTPUT_SCHEMA_REL = path.join('memory', 'specs', 'agent-handoff.schema.json');
@@ -29,9 +29,16 @@ function normalizeText(value) {
   return String(value ?? '').trim();
 }
 
+function clipText(value, maxLen = 8000) {
+  const text = String(value ?? '');
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen)}\n...[truncated]`;
+}
+
 function resolveRepoRoot() {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, '..', '..', '..', '..');
+  // scripts/lib/harness/subagent-runtime.mjs -> repo root is three levels up.
+  return path.resolve(here, '..', '..', '..');
 }
 
 function safeFileSlug(value) {
@@ -47,6 +54,134 @@ function parsePositiveInt(raw, fallback) {
 function parseNonNegativeInt(raw, fallback) {
   const value = Number.parseInt(String(raw ?? '').trim(), 10);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function parseNonNegativeNumber(raw, fallback = 0) {
+  const value = Number.parseFloat(String(raw ?? '').trim());
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function normalizeCostTelemetry(raw = {}) {
+  const inputTokens = parseNonNegativeInt(raw?.inputTokens, 0);
+  const outputTokens = parseNonNegativeInt(raw?.outputTokens, 0);
+  let totalTokens = parseNonNegativeInt(raw?.totalTokens, 0);
+  const usd = parseNonNegativeNumber(raw?.usd, 0);
+  if (totalTokens === 0 && (inputTokens > 0 || outputTokens > 0)) {
+    totalTokens = inputTokens + outputTokens;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    usd: Number(usd.toFixed(4)),
+  };
+}
+
+function hasCostTelemetry(raw = {}) {
+  const cost = normalizeCostTelemetry(raw);
+  return cost.inputTokens > 0 || cost.outputTokens > 0 || cost.totalTokens > 0 || cost.usd > 0;
+}
+
+function mergeCostTelemetry(base = {}, next = {}) {
+  const left = normalizeCostTelemetry(base);
+  const right = normalizeCostTelemetry(next);
+  return normalizeCostTelemetry({
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    totalTokens: left.totalTokens + right.totalTokens,
+    usd: left.usd + right.usd,
+  });
+}
+
+function pickFirstMatch(text, patterns = [], parser = Number.parseInt) {
+  const source = String(text || '');
+  for (const pattern of patterns) {
+    const match = pattern.exec(source);
+    if (!match || !match[1]) continue;
+    const value = parser(String(match[1]).trim(), 10);
+    if (Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+  }
+  return 0;
+}
+
+function collectCostTelemetryFromText(rawText = '') {
+  const text = String(rawText || '');
+  return normalizeCostTelemetry({
+    inputTokens: pickFirstMatch(text, [
+      /\binput[\s_-]*tokens?\b\s*[:=]\s*(\d+)\b/i,
+      /\bprompt[\s_-]*tokens?\b\s*[:=]\s*(\d+)\b/i,
+    ], Number.parseInt),
+    outputTokens: pickFirstMatch(text, [
+      /\boutput[\s_-]*tokens?\b\s*[:=]\s*(\d+)\b/i,
+      /\bcompletion[\s_-]*tokens?\b\s*[:=]\s*(\d+)\b/i,
+    ], Number.parseInt),
+    totalTokens: pickFirstMatch(text, [
+      /\btotal[\s_-]*tokens?\b\s*[:=]\s*(\d+)\b/i,
+    ], Number.parseInt),
+    usd: pickFirstMatch(text, [
+      /\busd\b\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+      /\bcost\b\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+    ], Number.parseFloat),
+  });
+}
+
+function readUsageShape(source = {}) {
+  if (!source || typeof source !== 'object') {
+    return normalizeCostTelemetry();
+  }
+  return normalizeCostTelemetry({
+    inputTokens: source.inputTokens ?? source.input_tokens ?? source.promptTokens ?? source.prompt_tokens,
+    outputTokens: source.outputTokens ?? source.output_tokens ?? source.completionTokens ?? source.completion_tokens,
+    totalTokens: source.totalTokens ?? source.total_tokens,
+    usd: source.usd,
+  });
+}
+
+function collectCostTelemetryFromJson(rawJson = null) {
+  if (!rawJson || typeof rawJson !== 'object') {
+    return normalizeCostTelemetry();
+  }
+
+  const usageCandidates = [
+    rawJson,
+    rawJson.usage,
+    rawJson.usageMetadata,
+    rawJson.tokenUsage,
+    rawJson.metrics?.usage,
+    rawJson.cost,
+  ];
+
+  let combined = normalizeCostTelemetry();
+  for (const candidate of usageCandidates) {
+    const next = readUsageShape(candidate);
+    combined = normalizeCostTelemetry({
+      inputTokens: Math.max(combined.inputTokens, next.inputTokens),
+      outputTokens: Math.max(combined.outputTokens, next.outputTokens),
+      totalTokens: Math.max(combined.totalTokens, next.totalTokens),
+      usd: Math.max(combined.usd, next.usd),
+    });
+  }
+
+  if (combined.usd === 0 && Number.isFinite(rawJson.costUsd)) {
+    combined = normalizeCostTelemetry({
+      ...combined,
+      usd: Math.max(combined.usd, parseNonNegativeNumber(rawJson.costUsd, 0)),
+    });
+  }
+  return combined;
+}
+
+function collectCostTelemetry({ rawText = '', rawJson = null } = {}) {
+  const fromText = collectCostTelemetryFromText(rawText);
+  const fromJson = collectCostTelemetryFromJson(rawJson);
+  return normalizeCostTelemetry({
+    inputTokens: Math.max(fromText.inputTokens, fromJson.inputTokens),
+    outputTokens: Math.max(fromText.outputTokens, fromJson.outputTokens),
+    totalTokens: Math.max(fromText.totalTokens, fromJson.totalTokens),
+    usd: Math.max(fromText.usd, fromJson.usd),
+  });
 }
 
 function detectSessionIdFromPlan(plan) {
@@ -223,7 +358,76 @@ function isUnsupportedCodexFlagError(text, flags = []) {
   return flags.some((flag) => normalized.includes(String(flag).toLowerCase()));
 }
 
-async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env, cwd = null, codexOutput = null }) {
+function isCodexSchemaValidationError(text) {
+  const normalized = String(text || '').toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes('invalid_json_schema')
+    || normalized.includes('text.format.schema');
+}
+
+function isCodexUpstreamError(text) {
+  const normalized = String(text || '').toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes('upstream_error')
+    || normalized.includes('server_error');
+}
+
+function shouldRetryCodexResult(result, { exitCode, combinedText }) {
+  if (!result || result.error || result.timedOut) {
+    return false;
+  }
+  if (exitCode === 0) {
+    return false;
+  }
+  return isCodexUpstreamError(combinedText);
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Math.floor(ms)));
+  });
+}
+
+async function runCodexExecWithRetry(command, args, { env, timeoutMs, cwd, input, io }) {
+  const maxAttempts = parsePositiveInt(env?.[SUBAGENT_UPSTREAM_MAX_ATTEMPTS_ENV], 2);
+  const baseBackoffMs = parsePositiveInt(env?.[SUBAGENT_UPSTREAM_BACKOFF_MS_ENV], 1200);
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await spawnCommandWithInput(command, args, {
+      env,
+      timeoutMs,
+      cwd: cwd || undefined,
+      input,
+    });
+    lastResult = result;
+
+    const exitCode = Number.isFinite(result.status) ? result.status : 1;
+    const combinedText = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+    if (!shouldRetryCodexResult(result, { exitCode, combinedText }) || attempt >= maxAttempts) {
+      return { ...result, attempts: attempt };
+    }
+
+    const delayMs = Math.max(1, Math.floor(baseBackoffMs * Math.pow(2, attempt - 1)));
+    io?.log?.(`[subagent-runtime] codex upstream_error retry attempt ${attempt + 1}/${maxAttempts} after ${delayMs}ms`);
+    await sleepMs(delayMs);
+  }
+
+  return {
+    ...(lastResult || { status: 1, stdout: '', stderr: '', error: null, timedOut: false }),
+    attempts: maxAttempts,
+  };
+}
+
+function attachAttemptMeta(result, payload) {
+  const attempts = Number.isFinite(result?.attempts) ? Math.max(1, Math.floor(result.attempts)) : 0;
+  if (attempts > 0) {
+    return { ...payload, attempts };
+  }
+  return payload;
+}
+
+async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env, io = null, cwd = null, codexOutput = null }) {
   const command = CLIENT_COMMAND[clientId];
   if (!command) {
     return { exitCode: 1, stdout: '', stderr: '', error: `Unsupported subagent client: ${clientId}` };
@@ -264,54 +468,141 @@ async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env, 
 
     if (structuredFlags.length > 0) {
       args = ['exec', ...structuredFlags, '-'];
-      const result = await spawnCommandWithInput(command, args, { env, timeoutMs, cwd: cwd || undefined, input: fullPrompt });
+      const result = await runCodexExecWithRetry(command, args, { env, timeoutMs, cwd, input: fullPrompt, io });
       const combinedStdout = String(result.stdout || '');
       const combinedStderr = String(result.stderr || '');
       const exitCode = Number.isFinite(result.status) ? result.status : 1;
 
       if (result.error) {
-        return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: result.error.message || String(result.error) };
+        return attachAttemptMeta(result, {
+          exitCode,
+          stdout: combinedStdout,
+          stderr: combinedStderr,
+          error: result.error.message || String(result.error),
+        });
       }
 
       if (result.timedOut) {
-        return { exitCode: exitCode || 124, stdout: combinedStdout, stderr: combinedStderr, error: `Timed out after ${timeoutMs} ms` };
+        return attachAttemptMeta(result, {
+          exitCode: exitCode || 124,
+          stdout: combinedStdout,
+          stderr: combinedStderr,
+          error: `Timed out after ${timeoutMs} ms`,
+        });
       }
 
       if (exitCode !== 0) {
         const combined = `${combinedStdout}\n${combinedStderr}`.trim();
-        const flagNames = ['--output-schema', '--output-last-message', '--color'];
-        if (isUnsupportedCodexFlagError(combined, flagNames)) {
-          const fallback = await spawnCommandWithInput(command, ['exec', '-'], { env, timeoutMs, cwd: cwd || undefined, input: fullPrompt });
+        const structuredFlags = ['--output-schema', '--output-last-message', '--color'];
+        if (isUnsupportedCodexFlagError(combined, structuredFlags) || isCodexSchemaValidationError(combined)) {
+          const fallbackArgs = ['exec'];
+          if (codexOutput?.lastMessagePath) {
+            fallbackArgs.push('--output-last-message', codexOutput.lastMessagePath);
+          }
+          if (codexOutput?.color) {
+            fallbackArgs.push('--color', codexOutput.color);
+          }
+          fallbackArgs.push('-');
+
+          const fallback = await runCodexExecWithRetry(command, fallbackArgs, { env, timeoutMs, cwd, input: fullPrompt, io });
           const fallbackStdout = String(fallback.stdout || '');
           const fallbackStderr = String(fallback.stderr || '');
           const fallbackExit = Number.isFinite(fallback.status) ? fallback.status : 1;
           if (fallback.error) {
-            return { exitCode: fallbackExit, stdout: fallbackStdout, stderr: fallbackStderr, error: fallback.error.message || String(fallback.error) };
+            return attachAttemptMeta(fallback, {
+              exitCode: fallbackExit,
+              stdout: fallbackStdout,
+              stderr: fallbackStderr,
+              error: fallback.error.message || String(fallback.error),
+            });
           }
           if (fallback.timedOut) {
-            return { exitCode: fallbackExit || 124, stdout: fallbackStdout, stderr: fallbackStderr, error: `Timed out after ${timeoutMs} ms` };
+            return attachAttemptMeta(fallback, {
+              exitCode: fallbackExit || 124,
+              stdout: fallbackStdout,
+              stderr: fallbackStderr,
+              error: `Timed out after ${timeoutMs} ms`,
+            });
           }
-          return { exitCode: fallbackExit, stdout: fallbackStdout, stderr: fallbackStderr, error: '' };
+
+          if (fallbackExit !== 0) {
+            const fallbackCombined = `${fallbackStdout}\n${fallbackStderr}`.trim();
+            const fallbackFlags = ['--output-last-message', '--color'];
+            if (isUnsupportedCodexFlagError(fallbackCombined, fallbackFlags)) {
+              const plainFallback = await runCodexExecWithRetry(command, ['exec', '-'], { env, timeoutMs, cwd, input: fullPrompt, io });
+              const plainStdout = String(plainFallback.stdout || '');
+              const plainStderr = String(plainFallback.stderr || '');
+              const plainExit = Number.isFinite(plainFallback.status) ? plainFallback.status : 1;
+              if (plainFallback.error) {
+                return attachAttemptMeta(plainFallback, {
+                  exitCode: plainExit,
+                  stdout: plainStdout,
+                  stderr: plainStderr,
+                  error: plainFallback.error.message || String(plainFallback.error),
+                });
+              }
+              if (plainFallback.timedOut) {
+                return attachAttemptMeta(plainFallback, {
+                  exitCode: plainExit || 124,
+                  stdout: plainStdout,
+                  stderr: plainStderr,
+                  error: `Timed out after ${timeoutMs} ms`,
+                });
+              }
+              return attachAttemptMeta(plainFallback, {
+                exitCode: plainExit,
+                stdout: plainStdout,
+                stderr: plainStderr,
+                error: '',
+              });
+            }
+          }
+          return attachAttemptMeta(fallback, {
+            exitCode: fallbackExit,
+            stdout: fallbackStdout,
+            stderr: fallbackStderr,
+            error: '',
+          });
         }
       }
 
-      return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: '' };
+      return attachAttemptMeta(result, {
+        exitCode,
+        stdout: combinedStdout,
+        stderr: combinedStderr,
+        error: '',
+      });
     }
 
     args = ['exec', '-'];
-    const result = await spawnCommandWithInput(command, args, { env, timeoutMs, cwd: cwd || undefined, input: fullPrompt });
+    const result = await runCodexExecWithRetry(command, args, { env, timeoutMs, cwd, input: fullPrompt, io });
     const combinedStdout = String(result.stdout || '');
     const combinedStderr = String(result.stderr || '');
     const exitCode = Number.isFinite(result.status) ? result.status : 1;
 
     if (result.error) {
-      return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: result.error.message || String(result.error) };
+      return attachAttemptMeta(result, {
+        exitCode,
+        stdout: combinedStdout,
+        stderr: combinedStderr,
+        error: result.error.message || String(result.error),
+      });
     }
     if (result.timedOut) {
-      return { exitCode: exitCode || 124, stdout: combinedStdout, stderr: combinedStderr, error: `Timed out after ${timeoutMs} ms` };
+      return attachAttemptMeta(result, {
+        exitCode: exitCode || 124,
+        stdout: combinedStdout,
+        stderr: combinedStderr,
+        error: `Timed out after ${timeoutMs} ms`,
+      });
     }
 
-    return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: '' };
+    return attachAttemptMeta(result, {
+      exitCode,
+      stdout: combinedStdout,
+      stderr: combinedStderr,
+      error: '',
+    });
   }
 
   const result = await spawnCommand(command, args, { env, timeoutMs, cwd: cwd || undefined });
@@ -329,8 +620,8 @@ async function runOneShot(clientId, { systemPrompt, userPrompt, timeoutMs, env, 
   return { exitCode, stdout: combinedStdout, stderr: combinedStderr, error: '' };
 }
 
-function buildBlockedJobRun(plan, job, dependencyRuns, { executorLabel, reason }) {
-  return {
+function buildBlockedJobRun(plan, job, dependencyRuns, { executorLabel, reason, elapsedMs = null, cost = null, rawOutput = '' }) {
+  const jobRun = {
     jobId: job.jobId,
     jobType: job.jobType,
     role: job.role,
@@ -345,8 +636,38 @@ function buildBlockedJobRun(plan, job, dependencyRuns, { executorLabel, reason }
     output: {
       outputType: job.launchSpec?.outputType || 'unknown',
       error: normalizeText(reason) || 'blocked',
+      ...(normalizeText(rawOutput) ? { rawOutput: clipText(rawOutput) } : {}),
     },
   };
+  if (Number.isFinite(elapsedMs) && elapsedMs >= 0) {
+    jobRun.elapsedMs = Math.floor(elapsedMs);
+  }
+  if (hasCostTelemetry(cost)) {
+    jobRun.cost = normalizeCostTelemetry(cost);
+  }
+  return jobRun;
+}
+
+function buildFailureReason({ baseReason, exitCode, rawCommandOutput }) {
+  const normalizedBase = normalizeText(baseReason);
+  const trimmedOutput = normalizeText(rawCommandOutput);
+  if (!trimmedOutput) {
+    return normalizedBase || `exit=${exitCode}`;
+  }
+
+  const firstLine = trimmedOutput
+    .split(/\r?\n/u)
+    .map((line) => normalizeText(line))
+    .find((line) => line.length > 0) || '';
+
+  if (!firstLine) {
+    return normalizedBase || `exit=${exitCode}`;
+  }
+
+  if (normalizedBase.length > 0 && normalizedBase !== `exit=${exitCode}`) {
+    return `${normalizedBase}; ${firstLine}`;
+  }
+  return `exit=${exitCode}; ${firstLine}`;
 }
 
 async function executePhaseJob(plan, job, phase, dependencyRuns, {
@@ -379,12 +700,14 @@ async function executePhaseJob(plan, job, phase, dependencyRuns, {
     userPrompt,
     timeoutMs,
     env,
+    io,
     cwd: rootDir,
     codexOutput,
   });
   const elapsedMs = Date.now() - startedAt;
 
-  let outputText = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  const rawCommandOutput = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+  let outputText = rawCommandOutput;
   if (codexOutput?.lastMessagePath) {
     try {
       const lastMessage = await fs.readFile(codexOutput.lastMessagePath, 'utf8');
@@ -396,18 +719,33 @@ async function executePhaseJob(plan, job, phase, dependencyRuns, {
     }
   }
   const rawJson = extractJsonCandidate(outputText);
+  const costTelemetry = collectCostTelemetry({ rawText: rawCommandOutput, rawJson });
 
   if (result.exitCode !== 0) {
+    const attemptCount = Number.isFinite(result.attempts) ? Math.max(1, Math.floor(result.attempts)) : 1;
+    const failureReason = buildFailureReason({
+      baseReason: result.error || `exit=${result.exitCode}${attemptCount > 1 ? ` after ${attemptCount} attempts` : ''}`,
+      exitCode: result.exitCode,
+      rawCommandOutput,
+    });
+    io?.log?.(`[subagent-runtime] blocked ${job.jobId} reason=${failureReason}`);
     return buildBlockedJobRun(plan, job, dependencyRuns, {
       executorLabel,
-      reason: result.error || `exit=${result.exitCode}`,
+      reason: failureReason,
+      elapsedMs,
+      cost: costTelemetry,
+      rawOutput: clipText(rawCommandOutput),
     });
   }
 
   if (!rawJson) {
+    io?.log?.(`[subagent-runtime] blocked ${job.jobId} reason=Failed to parse JSON handoff from subagent output`);
     return buildBlockedJobRun(plan, job, dependencyRuns, {
       executorLabel,
       reason: 'Failed to parse JSON handoff from subagent output',
+      elapsedMs,
+      cost: costTelemetry,
+      rawOutput: clipText(rawCommandOutput),
     });
   }
 
@@ -421,9 +759,13 @@ async function executePhaseJob(plan, job, phase, dependencyRuns, {
 
   const validation = validateHandoffPayload(normalizedPayload);
   if (!validation.ok) {
+    io?.log?.(`[subagent-runtime] blocked ${job.jobId} reason=Invalid handoff payload`);
     return buildBlockedJobRun(plan, job, dependencyRuns, {
       executorLabel,
       reason: `Invalid handoff payload: ${validation.errors.join('; ')}`,
+      elapsedMs,
+      cost: costTelemetry,
+      rawOutput: clipText(outputText),
     });
   }
 
@@ -432,7 +774,10 @@ async function executePhaseJob(plan, job, phase, dependencyRuns, {
     ? 'blocked'
     : 'completed';
 
-  io?.log?.(`[subagent-runtime] completed ${job.jobId} status=${payloadStatus} elapsedMs=${elapsedMs}`);
+  const costNote = hasCostTelemetry(costTelemetry)
+    ? ` tokens=${costTelemetry.totalTokens} usd=${costTelemetry.usd}`
+    : '';
+  io?.log?.(`[subagent-runtime] completed ${job.jobId} status=${payloadStatus} elapsedMs=${elapsedMs}${costNote}`);
 
   return {
     jobId: job.jobId,
@@ -443,6 +788,7 @@ async function executePhaseJob(plan, job, phase, dependencyRuns, {
     dependsOn: Array.isArray(job.dependsOn) ? [...job.dependsOn] : [],
     status: jobStatus,
     elapsedMs,
+    ...(hasCostTelemetry(costTelemetry) ? { cost: costTelemetry } : {}),
     inputSummary: {
       dependencyCount: dependencyRuns.length,
       inputTypes: Array.isArray(job.launchSpec?.inputs) ? [...job.launchSpec.inputs] : [],
@@ -510,16 +856,21 @@ function executeMergeGateJob(plan, job, dependencyRuns, { executorLabel }) {
   };
 }
 
-export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatchPolicy = null, io = console, env = process.env } = {}) {
+export async function executeSubagentDispatchPlan(
+  plan,
+  dispatchPlan,
+  { dispatchPolicy = null, io = console, env = process.env, rootDir: runtimeRootDir = null } = {}
+) {
   const normalizedClient = normalizeText(env?.[SUBAGENT_CLIENT_ENV]).toLowerCase();
   const clientId = normalizedClient || '';
   if (!SUPPORTED_CLIENTS.has(clientId)) {
+    const codexOnlyHint = `This repository runs subagent live execution in codex-only mode (set ${SUBAGENT_CLIENT_ENV}=codex-cli).`;
     return {
       mode: 'live',
       ok: false,
       error: clientId
-        ? `Unsupported ${SUBAGENT_CLIENT_ENV}: ${clientId}`
-        : `Missing ${SUBAGENT_CLIENT_ENV}. Set it to one of: codex-cli, claude-code, gemini-cli`,
+        ? `Unsupported ${SUBAGENT_CLIENT_ENV}: ${clientId}. ${codexOnlyHint}`
+        : `Missing ${SUBAGENT_CLIENT_ENV}. ${codexOnlyHint}`,
       executorRegistry: Array.isArray(dispatchPlan?.executorRegistry) ? [...dispatchPlan.executorRegistry] : [],
       executorDetails: Array.isArray(dispatchPlan?.executorDetails) ? dispatchPlan.executorDetails.map((item) => ({ ...item })) : [],
       jobRuns: [],
@@ -527,7 +878,7 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
     };
   }
 
-  const rootDir = resolveRepoRoot();
+  const rootDir = normalizeText(runtimeRootDir) ? path.resolve(String(runtimeRootDir)) : resolveRepoRoot();
   const sessionId = detectSessionIdFromPlan(plan);
   const contextPacket = await loadContextPacket({ rootDir, sessionId, env, io });
   const contextText = contextPacket.ok ? contextPacket.contextText : '';
@@ -639,6 +990,10 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
   }
 
   const jobRuns = jobs.map((job) => jobRunMap.get(job.jobId)).filter(Boolean);
+  const totalCost = jobRuns.reduce(
+    (acc, jobRun) => mergeCostTelemetry(acc, jobRun?.cost || null),
+    normalizeCostTelemetry()
+  );
 
   if (codexTempDir) {
     try {
@@ -654,6 +1009,7 @@ export async function executeSubagentDispatchPlan(plan, dispatchPlan, { dispatch
     executorRegistry,
     executorDetails,
     jobRuns,
+    ...(hasCostTelemetry(totalCost) ? { cost: totalCost } : {}),
     finalOutputs: jobRuns
       .filter((jobRun) => jobRun.output?.outputType === 'merged-handoff' || jobRun.jobType === 'phase')
       .map((jobRun) => ({ jobId: jobRun.jobId, outputType: jobRun.output?.outputType || 'unknown' })),

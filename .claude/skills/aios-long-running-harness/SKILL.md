@@ -24,7 +24,9 @@ Use this harness to keep long tasks stable under UI drift, model variability, an
 - Always finish with `superpowers:verification-before-completion` before claiming run success.
 
 ## Orchestrate Live Notes
-- When running `aios orchestrate --execute live` with `AIOS_SUBAGENT_CLIENT=codex-cli`, Codex CLI v0.114+ supports structured exec outputs (`--output-schema`, `--output-last-message`, stdin). AIOS uses them when available and falls back to stdout parsing for older versions.
+- `aios orchestrate --execute live` currently supports `AIOS_SUBAGENT_CLIENT=codex-cli` only.
+- Codex CLI v0.114+ structured exec outputs (`--output-schema`, `--output-last-message`, stdin) are required for handoff parsing; schema fallback to raw stdout is rejected.
+- Transient `upstream_error`/`server_error` failures are retried with exponential backoff via `AIOS_SUBAGENT_UPSTREAM_MAX_ATTEMPTS` and `AIOS_SUBAGENT_UPSTREAM_BACKOFF_MS`.
 
 ## Required Controls
 - Time budget per step and per run.

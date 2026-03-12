@@ -280,7 +280,7 @@ export function createDispatchRuntimeRegistry({ executeDryRunPlan = executeLocal
     if (runtime.id === SUBAGENT_RUNTIME) {
       registry[SUBAGENT_RUNTIME] = {
         ...runtime,
-        async execute({ plan, dispatchPlan, dispatchPolicy, io, env } = {}) {
+        async execute({ plan, dispatchPlan, dispatchPolicy, io, env, rootDir } = {}) {
           const mode = runtime.executionModes[0] || 'live';
           const gated = !isLiveExecutionEnabled(env);
           const simulate = isSubagentSimulationEnabled(env);
@@ -307,7 +307,7 @@ export function createDispatchRuntimeRegistry({ executeDryRunPlan = executeLocal
             );
           }
 
-          const result = await executeSubagentDispatchPlan(plan, dispatchPlan, { dispatchPolicy, io, env });
+          const result = await executeSubagentDispatchPlan(plan, dispatchPlan, { dispatchPolicy, io, env, rootDir });
           return normalizeDispatchRuntimeResult(result, runtime, mode);
         },
       };

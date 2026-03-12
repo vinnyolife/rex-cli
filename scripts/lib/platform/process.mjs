@@ -57,6 +57,46 @@ function resolveWindowsCommandExt(command, env = process.env) {
   return '';
 }
 
+function resolveWindowsCommandPath(command, env = process.env) {
+  const raw = String(command || '').trim();
+  if (!raw) return '';
+
+  const hasExplicitPath = raw.includes('\\') || raw.includes('/') || raw.includes(':');
+  if (hasExplicitPath) {
+    if (fs.existsSync(raw)) {
+      return path.resolve(raw);
+    }
+    return '';
+  }
+
+  const pathValue = getEnvCaseInsensitive(env, 'PATH') || '';
+  const pathExtValue = getEnvCaseInsensitive(env, 'PATHEXT') || '.COM;.EXE;.BAT;.CMD';
+  const dirs = splitWindowsPathEntries(pathValue);
+  const exts = splitWindowsPathExt(pathExtValue);
+
+  const directExt = path.extname(raw).toLowerCase();
+  if (directExt) {
+    for (const dir of dirs) {
+      const candidate = path.join(dir, raw);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return '';
+  }
+
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, `${raw}${ext}`);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return '';
+}
+
 function splitExecutionOptions(options = {}) {
   const {
     platform = process.platform,
@@ -77,7 +117,48 @@ function findFirstExisting(paths) {
   return null;
 }
 
-function getWindowsNodeCli(command, { platform = process.platform, execPath = process.execPath } = {}) {
+function resolveNodeScriptFromWindowsLauncher(launcherPath) {
+  const ext = path.extname(launcherPath).toLowerCase();
+  if (!['.cmd', '.bat', '.ps1'].includes(ext)) {
+    return '';
+  }
+
+  let content = '';
+  try {
+    content = fs.readFileSync(launcherPath, 'utf8');
+  } catch {
+    return '';
+  }
+
+  const launcherDir = path.dirname(launcherPath);
+  const candidates = [];
+  const quotedPathRegex = /["']([^"'\r\n]*?\.js)["']/giu;
+  for (const match of content.matchAll(quotedPathRegex)) {
+    const rawPath = String(match[1] || '').trim();
+    if (!rawPath) continue;
+
+    const normalized = rawPath
+      .replace(/%~dp0/giu, '')
+      .replace(/%dp0%/giu, '')
+      .replace(/\$basedir/giu, '')
+      .replace(/^[/\\]+/u, '')
+      .replace(/\\/gu, path.sep)
+      .replace(/\//gu, path.sep);
+
+    if (!normalized) continue;
+    candidates.push(path.resolve(launcherDir, normalized));
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return '';
+}
+
+function getWindowsNodeCli(command, { platform = process.platform, execPath = process.execPath, env = process.env } = {}) {
   if (platform !== 'win32' || !fs.existsSync(execPath)) {
     return null;
   }
@@ -104,6 +185,17 @@ function getWindowsNodeCli(command, { platform = process.platform, execPath = pr
 
     if (npmCli) {
       return { command: execPath, argsPrefix: [npmCli, 'exec', '--'] };
+    }
+  }
+
+  const commandBase = path.basename(String(command || ''), path.extname(String(command || ''))).toLowerCase();
+  if (WINDOWS_SHELL_COMMANDS.has(commandBase)) {
+    const launcherPath = resolveWindowsCommandPath(command, env);
+    if (launcherPath) {
+      const cliEntry = resolveNodeScriptFromWindowsLauncher(launcherPath);
+      if (cliEntry) {
+        return { command: execPath, argsPrefix: [cliEntry] };
+      }
     }
   }
 
@@ -143,7 +235,7 @@ function shouldUseWindowsShellCommand(command, { platform = process.platform, en
 
 export function getCommandSpawnSpec(command, args = [], options = {}) {
   const { platform, execPath, spawnOptions } = splitExecutionOptions(options);
-  const windowsNodeCli = getWindowsNodeCli(command, { platform, execPath });
+  const windowsNodeCli = getWindowsNodeCli(command, { platform, execPath, env: spawnOptions.env });
   if (windowsNodeCli) {
     return {
       command: windowsNodeCli.command,
@@ -161,7 +253,7 @@ export function getCommandSpawnSpec(command, args = [], options = {}) {
 
 export function commandExists(name, options = {}) {
   const { platform, execPath, spawnOptions } = splitExecutionOptions(options);
-  if (getWindowsNodeCli(name, { platform, execPath })) {
+  if (getWindowsNodeCli(name, { platform, execPath, env: spawnOptions.env })) {
     return true;
   }
 

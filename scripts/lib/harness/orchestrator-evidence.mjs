@@ -13,39 +13,86 @@ function buildArtifactPath(sessionId, stamp) {
   return path.join('memory', 'context-db', 'sessions', sessionId, 'artifacts', `dispatch-run-${stamp}.json`);
 }
 
+function normalizeDispatchMode(dispatchRun = {}) {
+  const mode = String(dispatchRun?.mode || '').trim();
+  return mode || 'dry-run';
+}
+
+function normalizeDispatchCost(raw = {}) {
+  const inputTokens = Number.isFinite(raw?.inputTokens) ? Math.max(0, Math.floor(raw.inputTokens)) : 0;
+  const outputTokens = Number.isFinite(raw?.outputTokens) ? Math.max(0, Math.floor(raw.outputTokens)) : 0;
+  let totalTokens = Number.isFinite(raw?.totalTokens) ? Math.max(0, Math.floor(raw.totalTokens)) : 0;
+  const usd = Number.isFinite(raw?.usd) ? Math.max(0, Number(raw.usd)) : 0;
+  if (totalTokens === 0 && (inputTokens > 0 || outputTokens > 0)) {
+    totalTokens = inputTokens + outputTokens;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    usd: Number(usd.toFixed(4)),
+  };
+}
+
+function hasDispatchCost(raw = {}) {
+  const cost = normalizeDispatchCost(raw);
+  return cost.inputTokens > 0 || cost.outputTokens > 0 || cost.totalTokens > 0 || cost.usd > 0;
+}
+
+function formatDispatchCostForEvent(raw = {}) {
+  const cost = normalizeDispatchCost(raw);
+  const parts = [];
+  if (cost.totalTokens > 0) parts.push(`tokens=${cost.totalTokens}`);
+  if (cost.usd > 0) parts.push(`usd=${cost.usd}`);
+  return parts.join(' ');
+}
+
 function buildDispatchHeadline(report) {
   const dispatchRun = report.dispatchRun || { ok: false, jobRuns: [], executorRegistry: [] };
+  const mode = normalizeDispatchMode(dispatchRun);
   const blockedCount = dispatchRun.jobRuns.filter((jobRun) => jobRun.status === 'blocked').length;
   const executorSummary = dispatchRun.executorRegistry.length > 0
     ? dispatchRun.executorRegistry.join(',')
     : 'none';
 
   return dispatchRun.ok
-    ? `orchestrate dry-run ready: blueprint=${report.blueprint} jobs=${dispatchRun.jobRuns.length} executors=${executorSummary}`
-    : `orchestrate dry-run blocked: blueprint=${report.blueprint} jobs=${dispatchRun.jobRuns.length} blocked=${blockedCount} executors=${executorSummary}`;
+    ? `orchestrate ${mode} ready: blueprint=${report.blueprint} jobs=${dispatchRun.jobRuns.length} executors=${executorSummary}`
+    : `orchestrate ${mode} blocked: blueprint=${report.blueprint} jobs=${dispatchRun.jobRuns.length} blocked=${blockedCount} executors=${executorSummary}`;
 }
 
 function buildEventText(report, artifactPath) {
   const dispatchRun = report.dispatchRun || { ok: false, jobRuns: [] };
   const finalOutputs = Array.isArray(dispatchRun.finalOutputs) ? dispatchRun.finalOutputs.length : 0;
-  return [
+  const parts = [
     buildDispatchHeadline(report),
     `task=${report.taskTitle}`,
     `artifact=${artifactPath}`,
     `finalOutputs=${finalOutputs}`,
-  ].join(' | ');
+  ];
+  if (hasDispatchCost(dispatchRun.cost)) {
+    parts.push(`cost=${formatDispatchCostForEvent(dispatchRun.cost)}`);
+  }
+  return parts.join(' | ');
 }
 
 function buildCheckpointSummary(report) {
   const dispatchRun = report.dispatchRun || { ok: false, jobRuns: [] };
+  const mode = normalizeDispatchMode(dispatchRun);
   const blockedCount = dispatchRun.jobRuns.filter((jobRun) => jobRun.status === 'blocked').length;
   const statusLabel = dispatchRun.ok ? 'ready' : 'blocked';
-  return `Recorded orchestrate dry-run ${statusLabel} for ${report.taskTitle}; jobs=${dispatchRun.jobRuns.length}; blocked=${blockedCount}.`;
+  return `Recorded orchestrate ${mode} ${statusLabel} for ${report.taskTitle}; jobs=${dispatchRun.jobRuns.length}; blocked=${blockedCount}.`;
 }
 
 function buildNextActions(report, artifactPath) {
   const dispatchRun = report.dispatchRun || { ok: false };
+  const mode = normalizeDispatchMode(dispatchRun);
   if (dispatchRun.ok) {
+    if (mode === 'live') {
+      return [
+        `Review live-dispatch artifact ${artifactPath}`,
+        'Run learn-eval to inspect cost/token telemetry trends',
+      ];
+    }
     return [
       `Review dry-run artifact ${artifactPath}`,
       'Attach a real executor runtime when available',
@@ -68,8 +115,11 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
     return { persisted: false, reason: 'dispatch-run-missing' };
   }
 
-  const mode = String(report.dispatchRun.mode || '').trim() || null;
-  if (mode && mode !== 'dry-run') {
+  const mode = normalizeDispatchMode(report.dispatchRun);
+  if (mode !== 'dry-run' && mode !== 'live') {
+    return { persisted: false, reason: 'mode-unsupported', mode };
+  }
+  if (mode === 'live' && (!Array.isArray(report.dispatchRun.jobRuns) || report.dispatchRun.jobRuns.length === 0)) {
     return { persisted: false, reason: 'mode-unsupported', mode };
   }
 
@@ -96,6 +146,7 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
   await writeArtifact(artifactAbsPath, artifactPayload);
 
   try {
+    const dispatchCost = normalizeDispatchCost(report.dispatchRun.cost);
     const event = runContextDbCli([
       'event:add',
       '--workspace',
@@ -136,14 +187,18 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
       '0',
       '--elapsed-ms',
       String(Math.max(0, Math.floor(elapsedMs || 0))),
+      '--cost-input-tokens',
+      String(dispatchCost.inputTokens),
+      '--cost-output-tokens',
+      String(dispatchCost.outputTokens),
       '--cost-total-tokens',
-      '0',
+      String(dispatchCost.totalTokens),
       '--cost-usd',
-      '0',
+      String(dispatchCost.usd),
     ];
 
     if (!report.dispatchRun.ok) {
-      checkpointArgs.push('--failure-category', 'merge-gate-blocked');
+      checkpointArgs.push('--failure-category', mode === 'live' ? 'dispatch-runtime-blocked' : 'merge-gate-blocked');
     }
 
     const checkpoint = runContextDbCli(checkpointArgs);
