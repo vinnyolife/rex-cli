@@ -279,7 +279,8 @@ function buildSystemPrompt({ agent, contextText, plan, job, phase }) {
   lines.push('Output Contract');
   lines.push('Output a single JSON object (no surrounding text) that conforms to `memory/specs/agent-handoff.schema.json`.');
   lines.push('');
-  lines.push('Required fields: fromRole, toRole, taskTitle, contextSummary.');
+  lines.push('Required fields: schemaVersion, status, fromRole, toRole, taskTitle, contextSummary, findings, filesTouched, openQuestions, recommendations.');
+  lines.push('Set schemaVersion=1. Always include array fields (empty arrays are OK).');
   lines.push(`Set fromRole=${normalizeText(job?.role) || 'unknown'} and toRole=${normalizeText(job?.launchSpec?.handoffTarget) || 'next-phase'}.`);
   lines.push('');
 
