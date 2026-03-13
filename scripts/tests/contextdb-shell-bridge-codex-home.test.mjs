@@ -24,6 +24,32 @@ async function createFakeCodexCommand() {
   return binDir;
 }
 
+async function createFakePassthroughCommand(commandName, marker) {
+  const binDir = await mkdtemp(path.join(os.tmpdir(), `aios-bridge-${commandName}-`));
+  const markerLiteral = JSON.stringify(marker);
+
+  if (process.platform === 'win32') {
+    const script = path.join(binDir, `${commandName}-fake.mjs`);
+    await writeFile(
+      script,
+      `process.stdout.write(JSON.stringify({ marker: ${markerLiteral}, argv: process.argv.slice(2) }) + "\\n");\n`,
+      'utf8'
+    );
+    const shim = path.join(binDir, `${commandName}.cmd`);
+    await writeFile(shim, `@echo off\r\nnode "${script}" %*\r\n`, 'utf8');
+    return binDir;
+  }
+
+  const file = path.join(binDir, commandName);
+  await writeFile(
+    file,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ marker: ${markerLiteral}, argv: process.argv.slice(2) }) + "\\n");\n`,
+    'utf8'
+  );
+  await chmod(file, 0o755);
+  return binDir;
+}
+
 async function createFakeRunner() {
   const binDir = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-runner-'));
   const runnerScript = path.join(binDir, 'runner-script.mjs');
@@ -47,7 +73,15 @@ async function createFakeRunner() {
   return file;
 }
 
-function runBridge({ cwd, codeHome, pathPrefix, env: envOverrides = {}, args = ['--help'] }) {
+function runBridge({
+  cwd,
+  codeHome,
+  pathPrefix,
+  env: envOverrides = {},
+  args = ['--help'],
+  agent = 'codex-cli',
+  command = 'codex',
+}) {
   const env = { ...process.env, ...envOverrides };
   env.PATH = `${pathPrefix}${path.delimiter}${env.PATH || ''}`;
 
@@ -57,8 +91,8 @@ function runBridge({ cwd, codeHome, pathPrefix, env: envOverrides = {}, args = [
 
   const result = spawnSync('node', [
     BRIDGE,
-    '--agent', 'codex-cli',
-    '--command', 'codex',
+    '--agent', agent,
+    '--command', command,
     '--cwd', cwd,
     '--',
     ...args,
@@ -79,6 +113,17 @@ function parseReportedCodeHome(stdout) {
 function parseRunnerWorkspace(stdout) {
   const line = (stdout || '').trim().split(/\r?\n/).find((x) => x.startsWith('RUNNER_WORKSPACE='));
   return line ? line.slice('RUNNER_WORKSPACE='.length) : '';
+}
+
+function parseRunnerArgs(stdout) {
+  const line = (stdout || '').trim().split(/\r?\n/).find((x) => x.startsWith('RUNNER_ARGS='));
+  if (!line) return [];
+  return JSON.parse(line.slice('RUNNER_ARGS='.length));
+}
+
+function parseLastJsonPayload(stdout) {
+  const line = (stdout || '').trim().split(/\r?\n/).at(-1) || '{}';
+  return JSON.parse(line);
 }
 
 test('relative CODEX_HOME is resolved against invocation cwd', async () => {
@@ -192,4 +237,76 @@ test('opt-in mode auto-creates marker and wraps a non-git cwd', async () => {
   assert.equal(result.status, 0);
   assert.equal(parseRunnerWorkspace(result.stdout), cwd);
   assert.equal(existsSync(markerPath), true);
+});
+
+test('wrapped interactive runs do not get rewritten to one-shot continue prompts', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-interactive-'));
+  const fakeBin = await createFakeCodexCommand();
+  const fakeRunner = await createFakeRunner();
+
+  const result = runBridge({
+    cwd,
+    pathPrefix: fakeBin,
+    args: [],
+    env: {
+      CTXDB_RUNNER: fakeRunner,
+      CTXDB_WRAP_MODE: 'all',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  const runnerArgs = parseRunnerArgs(result.stdout);
+  assert.equal(runnerArgs.includes('--prompt'), false);
+  assert.equal(runnerArgs.at(-1), '--');
+});
+
+test('opencode interactive runs are wrapped through ctx-agent without prompt rewriting', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-opencode-interactive-'));
+  const fakeBin = await createFakePassthroughCommand('opencode', 'FAKE_OPENCODE');
+  const fakeRunner = await createFakeRunner();
+
+  const result = runBridge({
+    cwd,
+    pathPrefix: fakeBin,
+    agent: 'opencode-cli',
+    command: 'opencode',
+    args: [],
+    env: {
+      CTXDB_RUNNER: fakeRunner,
+      CTXDB_WRAP_MODE: 'all',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(parseRunnerWorkspace(result.stdout), cwd);
+  const runnerArgs = parseRunnerArgs(result.stdout);
+  const agentIndex = runnerArgs.indexOf('--agent');
+  assert.equal(agentIndex >= 0, true);
+  assert.equal(runnerArgs[agentIndex + 1], 'opencode-cli');
+  assert.equal(runnerArgs.includes('--prompt'), false);
+  assert.equal(runnerArgs.at(-1), '--');
+});
+
+test('opencode run subcommand passes through without wrapping', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-opencode-run-'));
+  const fakeBin = await createFakePassthroughCommand('opencode', 'FAKE_OPENCODE');
+  const fakeRunner = await createFakeRunner();
+
+  const result = runBridge({
+    cwd,
+    pathPrefix: fakeBin,
+    agent: 'opencode-cli',
+    command: 'opencode',
+    args: ['run', 'hello'],
+    env: {
+      CTXDB_RUNNER: fakeRunner,
+      CTXDB_WRAP_MODE: 'all',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  const payload = parseLastJsonPayload(result.stdout);
+  assert.equal(payload.marker, 'FAKE_OPENCODE');
+  assert.deepEqual(payload.argv, ['run', 'hello']);
+  assert.equal(parseRunnerWorkspace(result.stdout), '');
 });

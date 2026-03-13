@@ -233,7 +233,7 @@ test('windows codex falls back to shell when cmd launcher entrypoint is not reso
   assert.equal(spec.shell, true);
 });
 
-test('windows claude and gemini resolve npm-style cmd launchers to direct node execution', async () => {
+test('windows claude, gemini, and opencode resolve npm-style cmd launchers to direct node execution', async () => {
   const claude = await makeFakeWindowsAgentLauncher(
     'claude',
     'node_modules/@anthropic-ai/claude-code/cli.js'
@@ -241,6 +241,10 @@ test('windows claude and gemini resolve npm-style cmd launchers to direct node e
   const gemini = await makeFakeWindowsAgentLauncher(
     'gemini',
     'node_modules/@google/gemini-cli/bin/gemini.js'
+  );
+  const opencode = await makeFakeWindowsAgentLauncher(
+    'opencode',
+    'node_modules/opencode-ai/dist/index.js'
   );
 
   const claudeSpec = getCommandSpawnSpec('claude', ['--version'], {
@@ -253,6 +257,11 @@ test('windows claude and gemini resolve npm-style cmd launchers to direct node e
     execPath: gemini.execPath,
     env: { PATH: gemini.binDir, PATHEXT: '.EXE;.CMD' },
   });
+  const opencodeSpec = getCommandSpawnSpec('opencode', ['--version'], {
+    platform: 'win32',
+    execPath: opencode.execPath,
+    env: { PATH: opencode.binDir, PATHEXT: '.EXE;.CMD' },
+  });
 
   assert.equal(claudeSpec.command, claude.execPath);
   assert.deepEqual(claudeSpec.args, [claude.scriptPath, '--version']);
@@ -261,6 +270,10 @@ test('windows claude and gemini resolve npm-style cmd launchers to direct node e
   assert.equal(geminiSpec.command, gemini.execPath);
   assert.deepEqual(geminiSpec.args, [gemini.scriptPath, '--version']);
   assert.equal(geminiSpec.shell, false);
+
+  assert.equal(opencodeSpec.command, opencode.execPath);
+  assert.deepEqual(opencodeSpec.args, [opencode.scriptPath, '--version']);
+  assert.equal(opencodeSpec.shell, false);
 });
 
 

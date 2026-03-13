@@ -16,17 +16,17 @@ const BEGIN_MARK = '# >>> contextdb-shell >>>';
 const END_MARK = '# <<< contextdb-shell <<<';
 
 function buildPosixBlock(rootDir, mode) {
-  return `${BEGIN_MARK}\n# ContextDB transparent CLI wrappers (codex/claude/gemini)\nexport ROOTPATH="\${ROOTPATH:-${rootDir}}"\nexport CTXDB_WRAP_MODE="\${CTXDB_WRAP_MODE:-${mode}}"\nif [[ -f "\$ROOTPATH/scripts/contextdb-shell.zsh" ]]; then\n  source "\$ROOTPATH/scripts/contextdb-shell.zsh"\nfi\n${END_MARK}\n`;
+  return `${BEGIN_MARK}\n# ContextDB transparent CLI wrappers (codex/claude/gemini/opencode)\nexport ROOTPATH="\${ROOTPATH:-${rootDir}}"\nexport CTXDB_WRAP_MODE="\${CTXDB_WRAP_MODE:-${mode}}"\nif [[ -f "\$ROOTPATH/scripts/contextdb-shell.zsh" ]]; then\n  source "\$ROOTPATH/scripts/contextdb-shell.zsh"\nfi\n${END_MARK}\n`;
 }
 
 function buildPowerShellBlock(rootDir, mode) {
-  return `${BEGIN_MARK}\n# ContextDB transparent CLI wrappers (codex/claude/gemini, PowerShell)\nif (-not $env:ROOTPATH) { $env:ROOTPATH = "${rootDir}" }\nif (-not $env:CTXDB_WRAP_MODE) { $env:CTXDB_WRAP_MODE = "${mode}" }\n$ctxShell = Join-Path $env:ROOTPATH "scripts/contextdb-shell.ps1"\nif (Test-Path $ctxShell) {\n  . $ctxShell\n}\n${END_MARK}\n`;
+  return `${BEGIN_MARK}\n# ContextDB transparent CLI wrappers (codex/claude/gemini/opencode, PowerShell)\nif (-not $env:ROOTPATH) { $env:ROOTPATH = "${rootDir}" }\nif (-not $env:CTXDB_WRAP_MODE) { $env:CTXDB_WRAP_MODE = "${mode}" }\n$ctxShell = Join-Path $env:ROOTPATH "scripts/contextdb-shell.ps1"\nif (Test-Path $ctxShell) {\n  . $ctxShell\n}\n${END_MARK}\n`;
 }
 
 function getShellPatterns(platform) {
   return platform === 'win32'
-    ? [/^\.\s+.*scripts\/contextdb-shell\.ps1\s*$/u, /^# ContextDB transparent CLI wrappers \(codex\/claude\/gemini, PowerShell\)$/u]
-    : [/^source ".*\/scripts\/contextdb-shell\.zsh"$/u, /^# ContextDB transparent CLI wrappers \(codex\/claude\/gemini\)$/u];
+    ? [/^\.\s+.*scripts\/contextdb-shell\.ps1\s*$/u, /^# ContextDB transparent CLI wrappers \(codex\/claude\/gemini\/opencode, PowerShell\)$/u]
+    : [/^source ".*\/scripts\/contextdb-shell\.zsh"$/u, /^# ContextDB transparent CLI wrappers \(codex\/claude\/gemini\/opencode\)$/u];
 }
 
 function resolveTargetFiles({ platform = process.platform, rcFile, env = process.env, homeDir = os.homedir() } = {}) {
@@ -205,7 +205,7 @@ export async function doctorContextDbShell({
     }
   }
 
-  for (const command of ['codex', 'claude', 'gemini']) {
+  for (const command of ['codex', 'claude', 'gemini', 'opencode']) {
     if (commandExists(command, { platform, env })) {
       io.log(`[ok] ${command} found in PATH`);
     } else {

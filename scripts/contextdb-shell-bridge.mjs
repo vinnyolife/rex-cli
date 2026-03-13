@@ -20,11 +20,16 @@ const BLOCKED_SUBCOMMANDS = {
   gemini: new Set([
     'mcp', 'extensions', 'skills', 'hooks', '-h', '--help', '-v', '--version',
   ]),
+  opencode: new Set([
+    'completion', 'acp', 'mcp', 'attach', 'run', 'debug', 'auth', 'agent', 'upgrade',
+    'uninstall', 'serve', 'web', 'models', 'stats', 'export', 'import', 'github', 'pr',
+    'session', 'db', '-h', '--help', '-v', '--version',
+  ]),
 };
 
 function usage() {
   console.log(`Usage:
-  node scripts/contextdb-shell-bridge.mjs --agent <codex-cli|claude-code|gemini-cli> --command <codex|claude|gemini> [--cwd <path>] [-- <args...>]
+  node scripts/contextdb-shell-bridge.mjs --agent <codex-cli|claude-code|gemini-cli|opencode-cli> --command <codex|claude|gemini|opencode> [--cwd <path>] [-- <args...>]
 
 Environment:
   ROOTPATH               Repo root containing scripts/ctx-agent.mjs
@@ -257,15 +262,15 @@ function spawnInherited(command, args, cwd, env) {
 }
 
 function validateOptions(opts) {
-  const validAgents = new Set(['codex-cli', 'claude-code', 'gemini-cli']);
-  const validCommands = new Set(['codex', 'claude', 'gemini']);
+  const validAgents = new Set(['codex-cli', 'claude-code', 'gemini-cli', 'opencode-cli']);
+  const validCommands = new Set(['codex', 'claude', 'gemini', 'opencode']);
 
   if (!validAgents.has(opts.agent)) {
-    throw new Error('--agent must be one of: codex-cli, claude-code, gemini-cli');
+    throw new Error('--agent must be one of: codex-cli, claude-code, gemini-cli, opencode-cli');
   }
 
   if (!validCommands.has(opts.command)) {
-    throw new Error('--command must be one of: codex, claude, gemini');
+    throw new Error('--command must be one of: codex, claude, gemini, opencode');
   }
 }
 
@@ -336,9 +341,9 @@ function main(argv = process.argv.slice(2)) {
     '--workspace', workspace,
     '--agent', opts.agent,
     '--project', project,
-    '--',
-    ...opts.passthroughArgs,
   ];
+
+  args.push('--', ...opts.passthroughArgs);
 
   const code = spawnInherited(runner.command, args, opts.cwd, env);
   process.exit(code);

@@ -21,10 +21,10 @@ const MCP_DIR = path.join(ROOT_DIR, 'mcp-server');
 
 function usage() {
   console.log(`Usage:
-  scripts/ctx-agent.mjs --agent <claude-code|gemini-cli|codex-cli> [options] [-- <extra agent args>]
+  scripts/ctx-agent.mjs --agent <claude-code|gemini-cli|codex-cli|opencode-cli> [options] [-- <extra agent args>]
 
 Options:
-  --agent <name>      Agent name: claude-code | gemini-cli | codex-cli
+  --agent <name>      Agent name: claude-code | gemini-cli | codex-cli | opencode-cli
   --workspace <path>  Workspace root to store context-db (default: current git root, else current dir)
   --project <name>    Project name (default: current directory name)
   --goal <text>       Session goal (used when creating a new session)
@@ -249,6 +249,60 @@ function shouldStrictContextPack(env = process.env) {
   return parseBoolEnv(env.CTXDB_PACK_STRICT, false);
 }
 
+function getAutoPrompt(env = process.env) {
+  const value = String(env.CTXDB_AUTO_PROMPT || '').trim();
+  return value || '';
+}
+
+function extractHandoffPrompt(contextText) {
+  const text = String(contextText || '');
+  if (!text) return '';
+  const match = /(^|\n)## Handoff Prompt\s*\n([\s\S]*?)(\n## |\n?$)/u.exec(text);
+  if (!match || !match[2]) return '';
+  return String(match[2]).trim();
+}
+
+const DEFAULT_HANDOFF_PROMPT = 'Continue from this state. Preserve constraints, avoid repeating completed work, and update the next checkpoint when done.';
+
+function buildOpenCodePrompt({
+  contextPacketPath = '',
+  contextText = '',
+  prompt = '',
+  injectContext = true,
+  promptKind = 'request',
+} = {}) {
+  const requestText = String(prompt || '').trim();
+  const inlineContext = String(contextText || '').trim();
+
+  if (!injectContext) {
+    return requestText;
+  }
+
+  if (contextPacketPath) {
+    const handoffText = requestText || (promptKind === 'handoff' ? DEFAULT_HANDOFF_PROMPT : '');
+    if (!handoffText) {
+      return `Read the context packet at "${contextPacketPath}" first.`;
+    }
+    if (promptKind === 'handoff') {
+      return `Read the context packet at "${contextPacketPath}" first.\n\n${handoffText}`;
+    }
+    return `Read the context packet at "${contextPacketPath}" first.\n\nThen continue with this request:\n${handoffText}`;
+  }
+
+  if (!inlineContext) {
+    return requestText || (promptKind === 'handoff' ? DEFAULT_HANDOFF_PROMPT : '');
+  }
+
+  const handoffText = requestText || (promptKind === 'handoff' ? DEFAULT_HANDOFF_PROMPT : '');
+  if (!handoffText) {
+    return inlineContext;
+  }
+  if (promptKind === 'handoff') {
+    return `${inlineContext}\n\n${handoffText}`;
+  }
+  return `${inlineContext}\n\n## New User Request\n${handoffText}`;
+}
+
 function getCommandFailureDetail(result) {
   if (result.error) {
     return result.error.message || String(result.error);
@@ -363,9 +417,9 @@ function validateOpts(opts) {
   if (!opts.agent) {
     throw new Error('Missing required --agent');
   }
-  const validAgents = new Set(['claude-code', 'gemini-cli', 'codex-cli']);
+  const validAgents = new Set(['claude-code', 'gemini-cli', 'codex-cli', 'opencode-cli']);
   if (!validAgents.has(opts.agent)) {
-    throw new Error('--agent must be one of: claude-code, gemini-cli, codex-cli');
+    throw new Error('--agent must be one of: claude-code, gemini-cli, codex-cli, opencode-cli');
   }
   const validStatus = new Set(['running', 'blocked', 'done']);
   if (!validStatus.has(opts.checkpointStatus)) {
@@ -430,7 +484,7 @@ function extractCreatedSessionId(jsonText) {
   return parseJsonValue(jsonText, (x) => x?.data?.sessionId || x?.sessionId);
 }
 
-function runOneShotAgent(agent, contextText, prompt, extraArgs, { injectContext = true } = {}) {
+function runOneShotAgent(agent, contextText, prompt, extraArgs, { injectContext = true, contextPacketPath = '' } = {}) {
   let cmd = '';
   let args = [];
 
@@ -447,7 +501,7 @@ function runOneShotAgent(agent, contextText, prompt, extraArgs, { injectContext 
     } else {
       args = ['-p', prompt, ...extraArgs];
     }
-  } else {
+  } else if (agent === 'codex-cli') {
     cmd = 'codex';
     if (injectContext) {
       const fullPrompt = `${contextText}\n\n## New User Request\n${prompt}`;
@@ -463,6 +517,16 @@ function runOneShotAgent(agent, contextText, prompt, extraArgs, { injectContext 
       const exitCode = result.status ?? 1;
       return { output, exitCode };
     }
+  } else {
+    cmd = 'opencode';
+    const fullPrompt = buildOpenCodePrompt({
+      contextPacketPath,
+      contextText,
+      prompt,
+      injectContext,
+      promptKind: 'request',
+    });
+    args = ['run', ...extraArgs, fullPrompt];
   }
 
   const result = runCommand(cmd, args);
@@ -471,17 +535,25 @@ function runOneShotAgent(agent, contextText, prompt, extraArgs, { injectContext 
   return { output, exitCode };
 }
 
-function runInteractiveAgent(agent, contextText, extraArgs, { injectContext = true } = {}) {
+function runInteractiveAgent(agent, contextText, extraArgs, { injectContext = true, contextPacketPath = '' } = {}) {
   let cmd = '';
   let args = [];
+  const explicitAutoPrompt = getAutoPrompt(process.env);
+  const handoffPrompt = extractHandoffPrompt(contextText);
+  const autoPrompt = explicitAutoPrompt || handoffPrompt;
 
   if (agent === 'claude-code') {
     cmd = 'claude';
     args = injectContext ? ['--append-system-prompt', contextText, ...extraArgs] : [...extraArgs];
+    if (autoPrompt) {
+      const promptSource = explicitAutoPrompt ? 'env' : 'context handoff';
+      console.log(`Auto prompt: enabled (${promptSource})`);
+      args.push(autoPrompt);
+    }
   } else if (agent === 'gemini-cli') {
     cmd = 'gemini';
     args = injectContext ? ['-i', contextText, ...extraArgs] : [...extraArgs];
-  } else {
+  } else if (agent === 'codex-cli') {
     cmd = 'codex';
     let shouldInject = injectContext;
     if (shouldInject && process.platform === 'win32') {
@@ -492,6 +564,22 @@ function runInteractiveAgent(agent, contextText, extraArgs, { injectContext = tr
       }
     }
     args = shouldInject ? [...extraArgs, contextText] : [...extraArgs];
+  } else {
+    cmd = 'opencode';
+    const promptText = buildOpenCodePrompt({
+      contextPacketPath,
+      contextText,
+      prompt: autoPrompt,
+      injectContext,
+      promptKind: 'handoff',
+    });
+    args = promptText ? ['--prompt', promptText, ...extraArgs] : [...extraArgs];
+    if (promptText) {
+      const promptSource = explicitAutoPrompt
+        ? (contextPacketPath && injectContext ? 'env via file' : 'env')
+        : (contextPacketPath && injectContext ? 'context handoff via file' : 'context handoff');
+      console.log(`Auto prompt: enabled (${promptSource})`);
+    }
   }
 
   const result = runCommand(cmd, args, { stdio: 'inherit' });
@@ -500,6 +588,29 @@ function runInteractiveAgent(agent, contextText, extraArgs, { injectContext = tr
     process.exit(1);
   }
   process.exit(result.status ?? 1);
+}
+
+async function ensureOpenCodeContextPacket({ workspaceRoot, sessionId, packAbs, contextText, baseContextText }) {
+  const effectiveContext = String(contextText || '').trim();
+  if (!effectiveContext) {
+    return '';
+  }
+
+  const baseText = String(baseContextText || '').trim();
+  if (packAbs && effectiveContext === baseText) {
+    return packAbs;
+  }
+
+  const exportsDir = packAbs
+    ? path.dirname(packAbs)
+    : path.join(workspaceRoot, 'memory', 'context-db', 'exports');
+  await fs.mkdir(exportsDir, { recursive: true });
+
+  const filePath = packAbs
+    ? packAbs.replace(/\.md$/u, '-opencode.md')
+    : path.join(exportsDir, `${sessionId}-opencode-context.md`);
+  await fs.writeFile(filePath, effectiveContext.endsWith('\n') ? effectiveContext : `${effectiveContext}\n`, 'utf8');
+  return filePath;
 }
 
 async function safeContextPack(workspaceRoot, { sessionId, eventLimit, packPath }, { strict = false } = {}) {
@@ -613,6 +724,15 @@ export async function runCtxAgent(argv = process.argv.slice(2)) {
       : workspaceMemoryOverlay
     : contextText;
   const injectContext = String(effectiveContextText).trim().length > 0;
+  const openCodeContextPacketPath = opts.agent === 'opencode-cli' && injectContext
+    ? await ensureOpenCodeContextPacket({
+      workspaceRoot: opts.workspaceRoot,
+      sessionId: opts.sessionId,
+      packAbs: packResult.ok ? packAbs : '',
+      contextText: effectiveContextText,
+      baseContextText: contextText,
+    })
+    : '';
 
   console.log(`Session: ${opts.sessionId}`);
   console.log(`Workspace: ${opts.workspaceRoot}`);
@@ -640,7 +760,10 @@ export async function runCtxAgent(argv = process.argv.slice(2)) {
       output = `[dry-run] ${opts.agent} would execute prompt with context packet: ${packAbs}
 Prompt: ${opts.prompt}`;
     } else {
-      const result = runOneShotAgent(opts.agent, effectiveContextText, opts.prompt, opts.extraArgs, { injectContext });
+      const result = runOneShotAgent(opts.agent, effectiveContextText, opts.prompt, opts.extraArgs, {
+        injectContext,
+        contextPacketPath: openCodeContextPacketPath,
+      });
       output = result.output;
       exitCode = result.exitCode;
     }
@@ -703,5 +826,8 @@ Prompt: ${opts.prompt}`;
     return;
   }
 
-  runInteractiveAgent(opts.agent, effectiveContextText, opts.extraArgs, { injectContext });
+  runInteractiveAgent(opts.agent, effectiveContextText, opts.extraArgs, {
+    injectContext,
+    contextPacketPath: openCodeContextPacketPath,
+  });
 }

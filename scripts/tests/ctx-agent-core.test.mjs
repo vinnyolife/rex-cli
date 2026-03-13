@@ -13,22 +13,47 @@ import {
 } from '../ctx-agent-core.mjs';
 import { runContextDbCli } from '../lib/contextdb-cli.mjs';
 
-async function createFakeCodexCommand(marker = 'FAKE_CODEX_OK') {
+async function createFakeCliCommand(commandName, marker) {
   const binDir = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-bin-'));
-  const jsTextLiteral = JSON.stringify(`${marker}\n`);
+  const markerLiteral = JSON.stringify(marker);
 
   if (process.platform === 'win32') {
-    const script = path.join(binDir, 'codex-fake.mjs');
-    await writeFile(script, `process.stdout.write(${jsTextLiteral});\n`, 'utf8');
-    const shim = path.join(binDir, 'codex.cmd');
+    const script = path.join(binDir, `${commandName}-fake.mjs`);
+    await writeFile(
+      script,
+      `process.stdout.write(JSON.stringify({ marker: ${markerLiteral}, argv: process.argv.slice(2) }) + "\\n");\n`,
+      'utf8'
+    );
+    const shim = path.join(binDir, `${commandName}.cmd`);
     await writeFile(shim, `@echo off\r\nnode "${script}" %*\r\n`, 'utf8');
     return binDir;
   }
 
-  const file = path.join(binDir, 'codex');
-  await writeFile(file, `#!/usr/bin/env node\nprocess.stdout.write(${jsTextLiteral});\n`, 'utf8');
+  const file = path.join(binDir, commandName);
+  await writeFile(
+    file,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ marker: ${markerLiteral}, argv: process.argv.slice(2) }) + "\\n");\n`,
+    'utf8'
+  );
   await chmod(file, 0o755);
   return binDir;
+}
+
+async function createFakeCodexCommand(marker = 'FAKE_CODEX_OK') {
+  return createFakeCliCommand('codex', marker);
+}
+
+async function createFakeClaudeCommand(marker = 'FAKE_CLAUDE_OK') {
+  return createFakeCliCommand('claude', marker);
+}
+
+async function createFakeOpenCodeCommand(marker = 'FAKE_OPENCODE_OK') {
+  return createFakeCliCommand('opencode', marker);
+}
+
+function parseLastJsonPayload(stdout) {
+  const line = String(stdout || '').trim().split(/\r?\n/).at(-1) || '{}';
+  return JSON.parse(line);
 }
 
 test('detects better-sqlite3 Node ABI mismatch errors', () => {
@@ -259,6 +284,243 @@ test('ctx-agent tolerates context:pack failures in interactive mode by still inv
     assert.equal(result.status, 0);
     assert.match(result.stdout, /FAKE_CODEX_OK/);
     assert.match(result.stderr, /contextdb context:pack failed/i);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent interactive Claude mode injects context packet as system prompt', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-claude-interactive-'));
+  const sessionId = 'ctx-claude-interactive';
+  const fakeBin = await createFakeClaudeCommand();
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'claude-code',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify claude interactive context injection',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'claude-code',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+        },
+      }
+    );
+
+    assert.equal(result.status, 0);
+    const lines = result.stdout.trim().split('\n');
+    const payload = JSON.parse(lines.at(-1) || '{}');
+    assert.equal(payload.marker, 'FAKE_CLAUDE_OK');
+    assert.equal(payload.argv.includes('--append-system-prompt'), true);
+    assert.equal(payload.argv.length, 3);
+    assert.equal(
+      payload.argv.at(-1),
+      'Continue from this state. Preserve constraints, avoid repeating completed work, and update the next checkpoint when done.'
+    );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent interactive Claude mode sends auto prompt when CTXDB_AUTO_PROMPT is set', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-claude-auto-prompt-'));
+  const sessionId = 'ctx-claude-auto-prompt';
+  const fakeBin = await createFakeClaudeCommand();
+  const autoPrompt = 'Continue from this state. Preserve constraints, avoid repeating completed work, and update the next checkpoint when done.';
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'claude-code',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify claude auto prompt injection',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'claude-code',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CTXDB_AUTO_PROMPT: autoPrompt,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+        },
+      }
+    );
+
+    assert.equal(result.status, 0);
+    const lines = result.stdout.trim().split('\n');
+    const payload = JSON.parse(lines.at(-1) || '{}');
+    assert.equal(payload.marker, 'FAKE_CLAUDE_OK');
+    assert.equal(payload.argv.includes('--append-system-prompt'), true);
+    assert.equal(payload.argv.length, 3);
+    assert.equal(payload.argv.at(-1), autoPrompt);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent one-shot OpenCode mode uses file-backed context handoff', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-opencode-one-shot-'));
+  const sessionId = 'ctx-opencode-one-shot';
+  const fakeBin = await createFakeOpenCodeCommand();
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'opencode-cli',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify opencode one-shot context handoff',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'opencode-cli',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--prompt',
+        'Summarize the current status.',
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+        },
+      }
+    );
+
+    assert.equal(result.status, 0);
+    const payload = parseLastJsonPayload(result.stdout);
+    assert.equal(payload.marker, 'FAKE_OPENCODE_OK');
+    assert.equal(payload.argv[0], 'run');
+    assert.match(payload.argv[1], /Read the context packet at/u);
+    assert.match(payload.argv[1], new RegExp(`${sessionId}-context\\.md`));
+    assert.match(payload.argv[1], /Summarize the current status\./u);
+    assert.doesNotMatch(payload.argv[1], /# Context Packet/u);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent interactive OpenCode mode sends auto prompt via context packet file reference', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-opencode-interactive-'));
+  const sessionId = 'ctx-opencode-interactive';
+  const fakeBin = await createFakeOpenCodeCommand();
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'opencode-cli',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify opencode interactive context handoff',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'opencode-cli',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+        },
+      }
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Auto prompt: enabled \(context handoff via file\)/u);
+    const payload = parseLastJsonPayload(result.stdout);
+    assert.equal(payload.marker, 'FAKE_OPENCODE_OK');
+    assert.deepEqual(payload.argv.slice(0, 2), ['--prompt', payload.argv[1]]);
+    assert.match(payload.argv[1], /Read the context packet at/u);
+    assert.match(payload.argv[1], new RegExp(`${sessionId}-context\\.md`));
+    assert.match(
+      payload.argv[1],
+      /Continue from this state\. Preserve constraints, avoid repeating completed work, and update the next checkpoint when done\./u
+    );
+    assert.doesNotMatch(payload.argv[1], /# Context Packet/u);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

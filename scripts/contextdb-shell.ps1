@@ -1,5 +1,5 @@
 # ContextDB transparent command wrappers for PowerShell.
-# Source this file in PowerShell profile to make codex/claude/gemini auto-load context packets.
+# Source this file in PowerShell profile to make codex/claude/gemini/opencode auto-load context packets.
 # Optional env vars:
 # - ROOTPATH
 # - CTXDB_SHELL_BRIDGE
@@ -136,6 +136,12 @@ function gemini {
   param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Args)
 
   $global:LASTEXITCODE = Invoke-BridgeOrPassthrough -Agent "gemini-cli" -Passthrough "gemini" -Arguments $Args
+}
+
+function opencode {
+  param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Args)
+
+  $global:LASTEXITCODE = Invoke-BridgeOrPassthrough -Agent "opencode-cli" -Passthrough "opencode" -Arguments $Args
 }
 
 function aios {
