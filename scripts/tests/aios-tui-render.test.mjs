@@ -97,6 +97,15 @@ test('repo catalog exposes xhs and jimeng skills to global scope without default
   assert.equal(jimeng.defaultInstall.project, false);
 });
 
+test('repo catalog keeps skill-constraints in the default core selection set', () => {
+  const catalogPath = path.resolve(process.cwd(), 'config', 'skills-catalog.json');
+  const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+  const skillConstraints = catalog.skills.find((skill) => skill.name === 'skill-constraints');
+
+  assert.equal(skillConstraints.defaultInstall.global, true);
+  assert.equal(skillConstraints.defaultInstall.project, false);
+});
+
 test('uninstall picker renders only installed skills for current scope and client', () => {
   const state = createInitialState({
     catalogSkills: [

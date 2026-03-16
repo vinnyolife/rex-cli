@@ -80,7 +80,7 @@
       "clients": ["codex", "claude", "gemini", "opencode"],
       "scopes": ["global", "project"],
       "defaultInstall": {
-        "global": false,
+        "global": true,
         "project": false
       },
       "tags": ["general", "safety"]
