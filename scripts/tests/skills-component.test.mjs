@@ -227,3 +227,77 @@ test('project scope can target a workspace that differs from the catalog source 
     /sample/
   );
 });
+
+test('doctor warns about project overriding global even when scope=global', async () => {
+  const rootDir = await makeTemp('aios-skills-override-global-root-');
+  const codexHome = await makeTemp('aios-skills-override-global-home-');
+  await writeSkill(rootDir, 'skill-sources/find-skills');
+
+  const catalogDir = path.join(rootDir, 'config');
+  await mkdir(catalogDir, { recursive: true });
+  await writeFile(path.join(catalogDir, 'skills-catalog.json'), JSON.stringify({
+    version: 1,
+    skills: [
+      {
+        name: 'find-skills',
+        description: 'general',
+        source: 'skill-sources/find-skills',
+        clients: ['codex'],
+        scopes: ['global', 'project'],
+        defaultInstall: { global: true, project: false },
+        tags: ['general'],
+      },
+    ],
+  }, null, 2), 'utf8');
+
+  await installContextDbSkills({ rootDir, client: 'codex', scope: 'global', homeMap: { codex: codexHome } });
+  await installContextDbSkills({ rootDir, client: 'codex', scope: 'project', homeMap: { codex: codexHome } });
+
+  const logs = [];
+  await doctorContextDbSkills({
+    rootDir,
+    client: 'codex',
+    scope: 'global',
+    homeMap: { codex: codexHome },
+    io: { log: (line) => logs.push(String(line)) },
+  });
+
+  assert.match(logs.join('\n'), /project install overrides global install/);
+});
+
+test('doctor warns about project overriding global even when scope=project', async () => {
+  const rootDir = await makeTemp('aios-skills-override-project-root-');
+  const codexHome = await makeTemp('aios-skills-override-project-home-');
+  await writeSkill(rootDir, 'skill-sources/find-skills');
+
+  const catalogDir = path.join(rootDir, 'config');
+  await mkdir(catalogDir, { recursive: true });
+  await writeFile(path.join(catalogDir, 'skills-catalog.json'), JSON.stringify({
+    version: 1,
+    skills: [
+      {
+        name: 'find-skills',
+        description: 'general',
+        source: 'skill-sources/find-skills',
+        clients: ['codex'],
+        scopes: ['global', 'project'],
+        defaultInstall: { global: true, project: false },
+        tags: ['general'],
+      },
+    ],
+  }, null, 2), 'utf8');
+
+  await installContextDbSkills({ rootDir, client: 'codex', scope: 'global', homeMap: { codex: codexHome } });
+  await installContextDbSkills({ rootDir, client: 'codex', scope: 'project', homeMap: { codex: codexHome } });
+
+  const logs = [];
+  await doctorContextDbSkills({
+    rootDir,
+    client: 'codex',
+    scope: 'project',
+    homeMap: { codex: codexHome },
+    io: { log: (line) => logs.push(String(line)) },
+  });
+
+  assert.match(logs.join('\n'), /project install overrides global install/);
+});

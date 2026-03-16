@@ -95,6 +95,25 @@ function resolveCatalogEntries({ rootDir, catalog, clientName, scope, selectedSk
     }));
 }
 
+function collectOverrideWarnings({ rootDir, projectRoot, catalog, clientName, selectedSkills, homes, io }) {
+  const globalRoot = resolveTargetRoot({ rootDir, projectRoot, clientName, scope: 'global', homes });
+  const projectScopeRoot = resolveTargetRoot({ rootDir, projectRoot, clientName, scope: 'project', homes });
+  const entries = resolveCatalogEntries({ rootDir, catalog, clientName, scope: 'global', selectedSkills })
+    .filter((entry) => entry.scopes.includes('project'));
+
+  let warnings = 0;
+  for (const entry of entries) {
+    const globalPath = path.join(globalRoot, entry.name);
+    const projectPath = path.join(projectScopeRoot, entry.name);
+    if (fs.existsSync(globalPath) && fs.existsSync(projectPath)) {
+      io.log(`[warn] ${clientName}: ${entry.name} project install overrides global install`);
+      warnings += 1;
+    }
+  }
+
+  return warnings;
+}
+
 export async function installContextDbSkills({
   rootDir,
   projectRoot = rootDir,
@@ -239,6 +258,7 @@ export async function doctorContextDbSkills({
       warnings += 1;
     }
     io.log(`[summary] ${clientName} ok=${okCount} warn=${warnCount}`);
+    warnings += collectOverrideWarnings({ rootDir, projectRoot, catalog, clientName, selectedSkills, homes, io });
   }
 
   return { warnings, effectiveWarnings: warnings, errors: 0 };

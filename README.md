@@ -368,6 +368,7 @@ ContextDB wrapping and CLI skill loading are different layers:
 - Skill installers skip existing same-name targets by default; use `--force` / `-Force` only when you intentionally replace them.
 - Use `--scope global` to install reusable skills into home directories, or `--scope project` to install them into the current repo.
 - Use `--skills <name1,name2>` to install or remove only the skills you selected.
+- Skills doctor always reports project-overrides-global collisions for the same skill name, regardless of the selected scope.
 - Skills installed in `~/.codex/skills`, `~/.claude/skills`, `~/.gemini/skills`, or `~/.config/opencode/skills` are global.
 - Project-only skills should live in `<repo>/.codex/skills` or `<repo>/.claude/skills`.
 - Business-specific skills such as Jimeng or Xiaohongshu workflows should usually stay project-scoped instead of global.

@@ -368,6 +368,7 @@ ContextDB 包装和 CLI 的 Skills 加载是两层机制：
 - skills 安装脚本默认会跳过同名已有目录；只有你明确要替换时再使用 `--force` / `-Force`。
 - 用 `--scope global` 把通用技能安装到用户 home；用 `--scope project` 把技能安装到当前仓库。
 - 用 `--skills <name1,name2>` 只安装或卸载你明确选中的技能。
+- skills doctor 无论当前选择的是哪个 scope，都会报告同名技能的 project 覆盖 global 冲突。
 - 安装在 `~/.codex/skills`、`~/.claude/skills`、`~/.gemini/skills`、`~/.config/opencode/skills` 的技能是全局可见。
 - 仅项目可见的技能应放在 `<repo>/.codex/skills`、`<repo>/.claude/skills`。
 - 即梦、小红书这类强业务工作流技能通常应保持为项目级，而不是默认全局安装。
