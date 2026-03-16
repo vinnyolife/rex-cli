@@ -12,6 +12,10 @@ function renderValue(label, value, active) {
   return `${active ? '▸' : ' '} ${label}: ${value}`;
 }
 
+function renderDescription(text) {
+  return `      ${text}`;
+}
+
 function renderSelectedSkills(selectedSkills) {
   if (!Array.isArray(selectedSkills) || selectedSkills.length === 0) {
     return '<none>';
@@ -140,12 +144,14 @@ export function renderState(state, rootDir) {
       ? state.catalogSkills
         .filter((skill) => Array.isArray(skill.scopes) && skill.scopes.includes(options.scope))
         .filter((skill) => options.client === 'all' || (Array.isArray(skill.clients) && skill.clients.includes(options.client)))
-        .map((skill) => skill.name)
       : [];
     lines.push(`Select skills for ${owner || 'unknown'}`, '');
     for (let index = 0; index < skills.length; index += 1) {
-      const name = skills[index];
-      lines.push(renderCheckbox(name, Array.isArray(options?.selectedSkills) && options.selectedSkills.includes(name), state.cursor === index));
+      const skill = skills[index];
+      lines.push(renderCheckbox(skill.name, Array.isArray(options?.selectedSkills) && options.selectedSkills.includes(skill.name), state.cursor === index));
+      if (skill.description) {
+        lines.push(renderDescription(skill.description));
+      }
     }
     lines.push(renderItem('Done', state.cursor === skills.length));
     return `${lines.join('\n')}\n`;
