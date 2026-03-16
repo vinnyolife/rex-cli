@@ -90,10 +90,10 @@
       "description": "Canonical architecture and operating constraints for aios.",
       "source": ".codex/skills/aios-project-system",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
-        "project": true
+        "project": false
       },
       "tags": ["aios", "repo"]
     },
@@ -102,10 +102,10 @@
       "description": "Harness controls for long-running AIOS jobs.",
       "source": ".codex/skills/aios-long-running-harness",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
-        "project": true
+        "project": false
       },
       "tags": ["aios", "harness"]
     },
@@ -114,10 +114,10 @@
       "description": "Automatic ContextDB persistence workflow.",
       "source": ".codex/skills/contextdb-autopilot",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
-        "project": true
+        "project": false
       },
       "tags": ["aios", "contextdb"]
     },
@@ -126,7 +126,7 @@
       "description": "Fast commit-and-push shortcut for this repository.",
       "source": ".codex/skills/cap-commit-push",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
         "project": false
@@ -138,7 +138,7 @@
       "description": "Jimeng image generation workflow for aios.",
       "source": ".codex/skills/aios-jimeng-image-ops",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
         "project": false
@@ -150,7 +150,7 @@
       "description": "Seed2 style manga-drama generation workflow.",
       "source": ".codex/skills/seed2-manga-drama",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
         "project": false
@@ -162,7 +162,7 @@
       "description": "Reusable Xiaohongshu operations workflow.",
       "source": ".codex/skills/xhs-ops-methods",
       "clients": ["codex", "claude"],
-      "scopes": ["project"],
+      "scopes": ["global", "project"],
       "defaultInstall": {
         "global": false,
         "project": false
