@@ -768,6 +768,68 @@ function buildBlockedJobRun(plan, job, dependencyRuns, {
   return jobRun;
 }
 
+function shouldAutoCompleteReadOnlyReviewPhase(job, dependencyRuns = []) {
+  const role = normalizeText(job?.role);
+  if (role !== 'reviewer' && role !== 'security-reviewer') {
+    return false;
+  }
+  if (!Array.isArray(dependencyRuns) || dependencyRuns.length === 0) {
+    return false;
+  }
+  return dependencyRuns.every((run) => {
+    if (!run || run.status !== 'completed') {
+      return false;
+    }
+    const payload = run?.output?.payload;
+    if (!payload || typeof payload !== 'object') {
+      return false;
+    }
+    const filesTouched = Array.isArray(payload.filesTouched) ? payload.filesTouched : [];
+    return filesTouched.length === 0;
+  });
+}
+
+function buildAutoCompletedReadOnlyReviewRun(plan, job, dependencyRuns, { executorLabel }) {
+  const role = normalizeText(job?.role) || 'reviewer';
+  const handoffTarget = normalizeText(job?.launchSpec?.handoffTarget) || 'next-phase';
+  const upstreamIds = dependencyRuns.map((run) => normalizeText(run?.jobId)).filter(Boolean);
+  const contextSummary = 'Auto-completed no-op review: upstream handoffs touched no files.';
+  const payload = normalizeHandoffPayload({
+    status: 'completed',
+    fromRole: role,
+    toRole: handoffTarget,
+    taskTitle: normalizeText(plan?.taskTitle) || 'orchestration-task',
+    contextSummary,
+    findings: [
+      `Skipped model invocation because ${dependencyRuns.length} upstream handoff(s) reported no file changes.`,
+      ...(upstreamIds.length > 0 ? [`Upstream jobs: ${upstreamIds.join(', ')}`] : []),
+    ],
+    filesTouched: [],
+    openQuestions: [],
+    recommendations: [],
+  });
+
+  return {
+    jobId: job.jobId,
+    jobType: job.jobType,
+    role,
+    executor: normalizeText(job?.launchSpec?.executor) || 'unknown',
+    executorLabel,
+    dependsOn: Array.isArray(job.dependsOn) ? [...job.dependsOn] : [],
+    status: 'completed',
+    elapsedMs: 0,
+    inputSummary: {
+      dependencyCount: dependencyRuns.length,
+      inputTypes: Array.isArray(job.launchSpec?.inputs) ? [...job.launchSpec.inputs] : [],
+    },
+    output: {
+      outputType: job.launchSpec?.outputType || 'handoff',
+      payload,
+      rawOutput: contextSummary,
+    },
+  };
+}
+
 function buildFailureReason({ baseReason, exitCode, rawCommandOutput }) {
   const normalizedBase = normalizeText(baseReason);
   const trimmedOutput = normalizeText(rawCommandOutput);
@@ -1065,6 +1127,10 @@ export async function executeSubagentDispatchPlan(
       const phase = phases.find((item) => normalizeText(item?.id) === normalizeText(job.phaseId)) || null;
       if (!phase) {
         return buildBlockedJobRun(plan, job, dependencyRuns, { executorLabel, reason: `Unknown orchestration phase for job: ${job.jobId}` });
+      }
+      if (shouldAutoCompleteReadOnlyReviewPhase(job, dependencyRuns)) {
+        io?.log?.(`[subagent-runtime] auto-completed ${job.jobId} status=completed reason=no-upstream-file-changes`);
+        return buildAutoCompletedReadOnlyReviewRun(plan, job, dependencyRuns, { executorLabel });
       }
       return await executePhaseJob(plan, job, phase, dependencyRuns, {
         clientId,

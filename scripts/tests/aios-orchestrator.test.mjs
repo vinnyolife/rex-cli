@@ -925,6 +925,100 @@ test('subagent runtime honors work-item ownedPathHints for file policy', async (
   assert.equal(implementRun.status, 'completed');
 });
 
+test('subagent runtime auto-completes review/security when upstream handoffs touched no files', async () => {
+  const runtimes = await importDispatchRuntimes();
+  assert.ok(runtimes, 'expected runtime registry module');
+
+  const fakeBin = await createFakeCodexCommand({
+    status: 'completed',
+    fromRole: 'implementer',
+    toRole: 'next-phase',
+    taskTitle: 'No-op implementation',
+    contextSummary: 'No files changed',
+    findings: [],
+    filesTouched: [],
+    openQuestions: [],
+    recommendations: [],
+  });
+
+  const registry = runtimes.createDispatchRuntimeRegistry({
+    executeDryRunPlan: () => ({ mode: 'dry-run', ok: true, jobRuns: [] }),
+  });
+  const runtime = runtimes.resolveDispatchRuntime({ runtimeId: 'subagent-runtime', executionMode: 'live' }, registry);
+
+  const plan = {
+    blueprint: 'feature',
+    description: 'auto-complete review/security no-op path',
+    taskTitle: 'No-op fast path',
+    contextSummary: '',
+    phases: [
+      {
+        step: 1,
+        id: 'implement',
+        role: 'implementer',
+        mode: 'sequential',
+        group: null,
+        label: 'Implementer',
+        responsibility: 'No-op implement',
+        ownership: 'Production code',
+        canEditFiles: true,
+        ownedPathPrefixes: ['scripts/'],
+      },
+      {
+        step: 2,
+        id: 'review',
+        role: 'reviewer',
+        mode: 'sequential',
+        group: null,
+        label: 'Reviewer',
+        responsibility: 'Review no-op handoff',
+        ownership: 'Findings only',
+        canEditFiles: false,
+        ownedPathPrefixes: [],
+      },
+      {
+        step: 3,
+        id: 'security',
+        role: 'security-reviewer',
+        mode: 'sequential',
+        group: null,
+        label: 'Security Reviewer',
+        responsibility: 'Security review no-op handoff',
+        ownership: 'Security findings only',
+        canEditFiles: false,
+        ownedPathPrefixes: [],
+      },
+    ],
+  };
+  const dispatchPlan = buildLocalDispatchPlan(plan);
+
+  const result = await runtime.execute({
+    plan,
+    dispatchPlan,
+    dispatchPolicy: null,
+    env: {
+      ...process.env,
+      AIOS_EXECUTE_LIVE: '1',
+      AIOS_SUBAGENT_CLIENT: 'codex-cli',
+      AIOS_SUBAGENT_CONCURRENCY: '1',
+      PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+    },
+    io: { log() {} },
+  });
+
+  assert.equal(result.ok, true);
+  const attemptStatePath = path.join(fakeBin, 'codex-fake-attempt-count.txt');
+  const attemptCount = Number.parseInt(await fs.readFile(attemptStatePath, 'utf8'), 10);
+  assert.equal(attemptCount, 1);
+
+  const reviewRun = result.jobRuns.find((jobRun) => jobRun.jobId === 'phase.review');
+  const securityRun = result.jobRuns.find((jobRun) => jobRun.jobId === 'phase.security');
+  assert.ok(reviewRun, 'expected review job run');
+  assert.ok(securityRun, 'expected security job run');
+  assert.equal(reviewRun.status, 'completed');
+  assert.equal(securityRun.status, 'completed');
+});
+
 test('dispatch runtime registry keeps blocked workflow results as structured runtime output', async () => {
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
