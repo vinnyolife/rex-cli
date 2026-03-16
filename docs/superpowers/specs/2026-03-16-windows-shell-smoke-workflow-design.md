@@ -11,7 +11,7 @@ Add a minimal GitHub Actions workflow that validates the Windows PowerShell wrap
 In scope:
 - Run on GitHub Actions `windows-latest`.
 - Trigger on every push to `main` (no path filters).
-- Validate PowerShell wrapper install/uninstall and `aios doctor` execution.
+- Validate PowerShell wrapper install/uninstall and `internal shell doctor` execution.
 - No model calls, no external credentials, no browser automation.
 
 Out of scope:
@@ -32,7 +32,7 @@ Jobs:
 Steps:
 1. Checkout repository.
 2. Setup Node.js (version 22, consistent with release workflow).
-3. Install `mcp-server` dependencies via `npm ci`.
+3. Install `mcp-server` dependencies via `npm ci` (working-directory: `mcp-server/`).
 4. Run `.\scripts\install-contextdb-shell.ps1 --mode repo-only --force`.
 5. Run `node scripts/aios.mjs internal shell doctor` (minimal, shell-only scope).
 6. Validate PowerShell profile(s) contain the managed block marker (`# >>> contextdb-shell >>>`).
@@ -46,12 +46,42 @@ PowerShell invocation:
 ## Error Handling
 
 - The uninstall step uses `if: always()` to ensure cleanup even if earlier steps fail.
+- The post-uninstall marker validation uses `if: ${{ always() && steps.install.outcome == 'success' }}` so it still runs if later steps fail, but skips enforcement when install itself fails.
 - Doctor step success criteria is **exit code only** (warnings allowed).
 - Profile block checks should fail the workflow if the marker is missing after install or still present after uninstall.
-- Profile validation targets **both** PowerShell profiles used by the runtime:
-  - `Documents/PowerShell/Microsoft.PowerShell_profile.ps1`
-  - `Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1`
-  (use `$PROFILE.CurrentUserAllHosts` and `$PROFILE.CurrentUserCurrentHost`).
+- Profile validation targets **both** PowerShell profiles used by the runtime (explicit paths):
+  - `$HOME\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1`
+  - `$HOME\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1`
+  (do not rely on `$PROFILE` paths when running `pwsh`).
+
+Explicit PowerShell assertions (used in both checks):
+
+```powershell
+$profiles = @(
+  "$HOME\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1",
+  "$HOME\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1"
+)
+
+foreach ($profile in $profiles) {
+  if (-not (Test-Path $profile)) {
+    throw "Missing profile: $profile"
+  }
+}
+
+# After install: marker must exist in each profile
+foreach ($profile in $profiles) {
+  if (-not (Select-String -Path $profile -Pattern '# >>> contextdb-shell >>>' -SimpleMatch)) {
+    throw "Marker missing in: $profile"
+  }
+}
+
+# After uninstall: marker must be absent in each profile
+foreach ($profile in $profiles) {
+  if (Select-String -Path $profile -Pattern '# >>> contextdb-shell >>>' -SimpleMatch) {
+    throw "Marker still present in: $profile"
+  }
+}
+```
 
 ## Evidence
 
@@ -81,9 +111,10 @@ Remove `.github/workflows/windows-shell-smoke.yml` if the workflow proves noisy 
 The workflow is considered passing when all are true:
 - Install step exits 0.
 - `node scripts/aios.mjs internal shell doctor` exits 0 (warnings allowed).
-- After install, both `$PROFILE.CurrentUserAllHosts` and `$PROFILE.CurrentUserCurrentHost` contain `# >>> contextdb-shell >>>`.
+- After install, both PowerShell profile files (see explicit paths above) contain `# >>> contextdb-shell >>>`.
 - After uninstall, neither profile file contains `# >>> contextdb-shell >>>`.
 
 Failure conditions:
 - Any step exits non-zero.
 - Marker missing after install or still present after uninstall.
+- Missing profile files after install (install is expected to create them).
