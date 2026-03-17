@@ -42,11 +42,11 @@ jobs:
 
       - name: Release preflight
         run: |
-          scripts/release-preflight.sh --tag "${GITHUB_REF_NAME}"
+          bash scripts/release-preflight.sh --tag "${GITHUB_REF_NAME}"
 
       - name: Package release assets
         run: |
-          scripts/package-release.sh --out dist/release
+          bash scripts/package-release.sh --out dist/release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
