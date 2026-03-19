@@ -15,6 +15,8 @@ description: 版本历史、升级说明与文档变更入口。
 ## 最近版本
 
 - `main`（未发布）：
+  - ContextDB `search` 默认走 SQLite FTS5 + `bm25(...)` 排序；当 FTS 不可用时自动回退 lexical 检索
+  - ContextDB 语义重排改为基于当前 query 的 lexical 候选集执行，降低旧但精确命中的误丢失
   - `aios orchestrate` 上线 `subagent-runtime` live 执行（需 `AIOS_EXECUTE_LIVE=1`）
   - 新增有界 work-item 队列调度与 ownership hints 传播
   - 新增 no-op 快路径：上游 `filesTouched=[]` 时自动完成 `reviewer` / `security-reviewer`

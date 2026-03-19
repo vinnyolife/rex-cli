@@ -16,6 +16,7 @@ description: RexAI CLI 생태계를 위한 성장/엔지니어링 아티클.
 
 ## 최신 글
 
+- [ContextDB Search Upgrade: FTS5/BM25 by Default](contextdb-fts-bm25-search.md)
 - [Windows CLI Startup Stability Update](windows-cli-startup-stability.md)
 - [Orchestrate Live: Subagent Runtime](orchestrate-live.md)
 - [小手작업 그만! AI 자동화로 매일 2시간씩 절약한 방법](xiaohongshu-automation.md)

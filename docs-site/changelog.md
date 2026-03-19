@@ -15,6 +15,8 @@ Use this page to track what changed in `RexCLI` and jump to release-related docs
 ## Recent Versions
 
 - `main` (Unreleased):
+  - ContextDB `search` now defaults to SQLite FTS5 + `bm25(...)` ranking, with automatic lexical fallback when FTS is unavailable
+  - ContextDB semantic rerank now operates on query-scoped lexical candidates, reducing drops of older exact matches
   - `subagent-runtime` live execution for `aios orchestrate` (opt-in via `AIOS_EXECUTE_LIVE=1`)
   - bounded work-item queue scheduling with ownership hints
   - no-op fast path: auto-complete `reviewer` / `security-reviewer` when upstream handoffs touched no files

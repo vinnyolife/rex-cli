@@ -84,6 +84,8 @@ npm run contextdb -- index:rebuild
 - `timeline`: merged event/checkpoint feed.
 - `event:get`: fetch a specific event by stable ID.
 - `index:rebuild`: rebuild SQLite sidecar from canonical session files.
+- Default ranking path: SQLite FTS5 `MATCH` + `bm25(...)` over `kind/text/refs`.
+- Backward compatibility: if FTS is unavailable, search automatically falls back to lexical matching.
 
 ## Optional Semantic Search (P2)
 
@@ -98,6 +100,7 @@ npm run contextdb -- search --query "issue auth" --project demo --semantic
 - `--semantic`: request semantic reranking.
 - `CONTEXTDB_SEMANTIC_PROVIDER=token`: local token-overlap rerank, no network call.
 - Unknown/disabled providers automatically fall back to lexical query path.
+- Semantic rerank runs on query-scoped lexical candidates (not recency-only candidates), so older exact hits are not dropped by default.
 
 ## Storage Layout
 

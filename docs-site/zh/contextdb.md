@@ -73,6 +73,8 @@ npm run contextdb -- index:rebuild
 - `timeline`：合并 event/checkpoint 时间线。
 - `event:get`：按稳定 ID 获取单条事件。
 - `index:rebuild`：从 `sessions/*` 真源文件重建 SQLite 索引。
+- 默认排序路径：SQLite FTS5 `MATCH` + `bm25(...)`（覆盖 `kind/text/refs`）。
+- 兼容性回退：如果当前环境不可用 FTS，`search` 会自动回退到 lexical 匹配。
 
 ## 可选语义检索（P2）
 
@@ -87,6 +89,7 @@ npm run contextdb -- search --query "issue auth" --project demo --semantic
 - `--semantic`：请求语义重排。
 - `CONTEXTDB_SEMANTIC_PROVIDER=token`：本地 token overlap 重排，不走网络。
 - 未知或不可用 provider 会自动回退到 lexical 路径。
+- 语义重排基于“当前 query 的 lexical 候选集”执行，而非仅按最近事件取样，避免旧但精确的命中被默认过滤。
 
 ## 存储布局
 
