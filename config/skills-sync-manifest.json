@@ -14,6 +14,11 @@
       "repoTargets": ["codex", "claude", "gemini", "opencode", "agents"]
     },
     {
+      "relativeSkillPath": "debug",
+      "installCatalogName": "debug",
+      "repoTargets": ["codex", "claude", "gemini", "opencode", "agents"]
+    },
+    {
       "relativeSkillPath": "search-first",
       "installCatalogName": "search-first",
       "repoTargets": ["codex", "claude", "gemini", "opencode"]

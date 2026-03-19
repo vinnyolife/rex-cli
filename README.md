@@ -249,6 +249,7 @@ Inside the TUI:
 3. If you enable `Skills`, open the skill picker when needed:
    setup/update now mark already-installed skills with `(installed)`
    uninstall shows only installed skills, supports scrolling, and includes `Select all` / `Clear all`
+   Tip: select `debug` for evidence-first runtime debugging (includes a local NDJSON collector).
 4. Let the install finish, then run `Doctor`
 5. Reload your shell if wrappers were installed
 
@@ -404,6 +405,28 @@ node scripts/aios.mjs setup --components skills --client codex --scope project -
 # local-dev-only: keep installs linked back to this repo
 node scripts/aios.mjs setup --components skills --client codex --scope global --install-mode link --skills find-skills
 ```
+
+Optional: third-party skills (does not depend on `aios`)
+
+This repo ships a curated set of skills under `skill-sources/` (including `debug`) so they show up in the TUI skill picker.
+If you want *additional* skills beyond the catalog, you can install external skill repos via the Skills CLI (separate from the `aios` catalog flow):
+
+```bash
+# find a skill by keyword
+npx skills find <keyword>
+
+# list skills in a repo (no install)
+npx skills add <owner>/<repo> --list
+
+# install a single skill
+# -g: global install; -a codex: install into Codex skill dir; -y: skip prompts
+npx skills add <owner>/<repo> --skill <skill-name> -g -a codex -y
+
+# keep external skills updated
+npx skills update
+```
+
+Note: avoid installing third-party skills that share the same name as repo-shipped skills (e.g. `debug`), otherwise skills doctor will report project/global collisions.
 
 ### 3.3 Privacy Guard (strict by default)
 

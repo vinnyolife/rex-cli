@@ -249,6 +249,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\aios.ps1
 3. 如果启用了 `Skills`，需要时可以进入 skill picker：
    setup/update 里已安装项会带 `(installed)` 标记
    uninstall 只显示已安装项，支持滚动，并提供 `Select all` / `Clear all`
+   小贴士：可以勾选 `debug`，用于证据优先的运行时调试（自带本地 NDJSON 日志采集器）。
 4. 等安装跑完后，再执行一次 `Doctor`
 5. 如果装了 shell 包装层，记得重新加载终端配置
 
@@ -404,6 +405,28 @@ node scripts/aios.mjs setup --components skills --client codex --scope project -
 # 仅本地开发使用：保持技能安装回链到当前仓库
 node scripts/aios.mjs setup --components skills --client codex --scope global --install-mode link --skills find-skills
 ```
+
+可选：第三方 Skills（不依赖 `aios`）
+
+本仓库已经把一批常用技能以 `skill-sources/` 的方式内置（包含 `debug`），因此能直接出现在 TUI 的 skill picker 里。
+如果你想装 *catalog 之外* 的额外技能，也可以用 Skills CLI 安装外部仓库的技能（独立于 `aios` 的 catalog 机制）：
+
+```bash
+# 按关键字搜索技能
+npx skills find <keyword>
+
+# 列出外部仓库有哪些技能（不安装）
+npx skills add <owner>/<repo> --list
+
+# 安装某个技能
+# -g：全局安装；-a codex：安装到 Codex 的技能目录；-y：跳过确认
+npx skills add <owner>/<repo> --skill <skill-name> -g -a codex -y
+
+# 后续统一更新外部技能
+npx skills update
+```
+
+注：尽量避免安装与本仓库内置技能同名的第三方 skill（例如 `debug`），否则 skills doctor 会提示 project/global 冲突。
 
 ### 3.3 Privacy Guard（默认严格）
 

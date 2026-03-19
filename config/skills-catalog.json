@@ -14,6 +14,18 @@
       "tags": ["general", "discovery"]
     },
     {
+      "name": "debug",
+      "description": "Evidence-first runtime debugging with a local NDJSON log collector.",
+      "source": "skill-sources/debug",
+      "clients": ["codex", "claude", "gemini", "opencode"],
+      "scopes": ["global", "project"],
+      "defaultInstall": {
+        "global": false,
+        "project": false
+      },
+      "tags": ["general", "debug", "verification"]
+    },
+    {
       "name": "search-first",
       "description": "Research-before-building workflow.",
       "source": "skill-sources/search-first",
