@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { BrowserProfile, ProfileState } from './types.js';
 import { profileManager } from './profiles.js';
+import { STEALTH_SCRIPT } from './stealth-script.js';
 
 // 反检测启动参数
 const STEALTH_ARGS = [
@@ -17,7 +18,6 @@ const STEALTH_ARGS = [
   '--disable-features=VizDisplayCompositor',
   '--ignore-certificate-errors',
   '--disable-extensions',
-  '--disable-plugins',
   '--disable-default-apps',
   '--disable-background-networking',
   '--disable-sync',
@@ -29,16 +29,11 @@ const STEALTH_ARGS = [
   '--disable-breakpad',
 ];
 
-// Playwright 默认会传 --enable-automation，容易触发“Chrome 正受到自动测试软件控制”提示条。
+// 通过 assistantMode: true 已经移除了 --enable-automation，此处保留 IGNORE_DEFAULT_ARGS
+// 作为防御性配置，防止 Playwright 版本升级后行为变化。
 const IGNORE_DEFAULT_ARGS = ['--enable-automation'];
 
-// 反检测注入脚本
-const STEALTH_SCRIPT = `
-  Object.defineProperty(navigator, 'webdriver', { get: () => false });
-  Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-  Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en-US', 'en'] });
-  window.chrome = { runtime: {} };
-`;
+// STEALTH_SCRIPT 已移至 stealth-script.ts，通过 import 导入
 
 function parseHeadlessEnv(value: string | undefined): boolean | undefined {
   if (!value) return undefined;
@@ -204,6 +199,11 @@ export class BrowserLauncher {
       ignoreDefaultArgs: IGNORE_DEFAULT_ARGS,
       executablePath: options.executablePath,
       viewport: { width: 1280, height: 720 },
+      // assistantMode: true 禁用 AutomationControlled 特性并移除 --enable-automation，
+      // 使 navigator.webdriver 从一开始就是 false，无需依赖 JS timing hack。
+      // channel: 'chrome' 只影响 infobar，与自动化标志无关，已废弃。
+      // @ts-ignore - assistantMode 是 Playwright 内部选项，未暴露在 TypeScript 类型中
+      assistantMode: true,
     };
 
     try {
@@ -327,6 +327,8 @@ export class BrowserLauncher {
           args: STEALTH_ARGS,
           ignoreDefaultArgs: IGNORE_DEFAULT_ARGS,
           executablePath,
+          // @ts-ignore - assistantMode 是 Playwright 内部选项
+          assistantMode: true,
         });
         context = await browser.newContext({
           viewport: { width: 1280, height: 720 },
