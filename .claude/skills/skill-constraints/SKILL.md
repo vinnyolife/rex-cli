@@ -21,7 +21,7 @@ description: Use when executing any skill or browser automation task - enforces 
 
 ```markdown
 0. 启动浏览器时默认要求可见界面
-   - 优先：`browser_launch { profile: 'default', visible: true }`
+   - 优先：`browser_launch { profile: 'local', visible: true }`
    - 仅在无图形环境或后台 smoke test 时才用 `headless: true`
    - 当同一 `userDataDir` 被其他进程占用时，MCP 会默认自动切到隔离 profile 目录重试（`BROWSER_ISOLATE_ON_LOCK=true`）
    - 若目标是“多个 agent 共享同一登录态”，优先使用 CDP 连接同一个已启动浏览器，而不是共享本地 profile 目录
@@ -29,8 +29,8 @@ description: Use when executing any skill or browser automation task - enforces 
 1. 优先使用 browser_snapshot 获取布局快照
    - 先读 `pageSummary`、`regions`、`elements`、`textBlocks`、`visualHints`
    - 比整页截图更高效，仍保留页面结构感
-   - 格式：{ profile: 'default' }
-   - 约定：`default` 应映射为 CDP 指纹浏览器；本地启动浏览器请显式用 `profile: 'local'`
+   - 格式：`{ profile: 'local' }`
+   - 约定：只用 `local`（持久化本地 profile）；`default` 需要 CDP 端口，无 Chrome 调试实例时不可用
    - 不使用 `chrome-devtools` 工具链执行业务流程，统一走 `puppeteer-stealth` 的 `browser_*` 工具
 
 2. 只有视觉降级时才截图，并保存到 temp/ 目录
@@ -47,12 +47,19 @@ description: Use when executing any skill or browser automation task - enforces 
 sleep $((RANDOM % 26 + 5))
 ```
 
-## Rules
+## 浏览器 Profile 约束（关键）
+
+- **只使用一个 profile：`local`**：在 `browser-profiles.json` 中，`local` 是持久化本地 profile；`default` 需要 CDP 调试端口，无 Chrome 运行时不可用
+- **会话开始先检查**：先调用 `browser_list_tabs` 确认已有浏览器，再进行后续操作
+- **所有 browser_* 工具必须显式传 `profile: 'local'`**
+- **不因失败而重建**：导航超时、元素找不到等问题优先排查原因，不通过反复 `browser_launch` 重建浏览器；每次重建都是全新的无 cookie 浏览器
 
 ### 禁止行为
 
 | 禁止 | 说明 |
 |------|------|
+| 调用 `default` profile | `default` 需要 CDP 端口，必须用 `local` |
+| 创建/切换/重建 profile | 只用 `local`，不因失败而反复 launch |
 | 直接在对话中粘贴大段截图 | 浪费 token，必须保存到文件 |
 | 跳过反检测脚本 | 每次操作前必须执行 |
 | 忽略操作间隔 | 必须随机 5-30 秒 |
@@ -83,10 +90,10 @@ sleep $((RANDOM % 26 + 5))
 
 ```json
 // 启动可见浏览器
-browser_launch { profile: 'default', visible: true }
+browser_launch { profile: 'local', visible: true }
 
 // 获取页面快照
-browser_snapshot { profile: 'default' }
+browser_snapshot { profile: 'local' }
 
 // 先读取这些字段做决策
 // pageSummary / regions / elements / textBlocks / visualHints
@@ -95,7 +102,7 @@ browser_snapshot { profile: 'default' }
 grep "关注" snapshot.txt
 
 // 仅视觉降级时做局部截图并保存到正确位置
-browser_screenshot { profile: 'default', selector: '[aria-label="发布"]', filePath: 'aios/temp/publish_20240301_120000.png' }
+browser_screenshot { profile: 'local', selector: '[aria-label="发布"]', filePath: 'aios/temp/publish_20240301_120000.png' }
 ```
 
 ### Bad
@@ -113,6 +120,7 @@ browser_click()  // 没有等待
 
 | 错误 | 正确做法 |
 |------|----------|
+| 导航失败后重建浏览器 | 先 `browser_list_tabs` 确认状态，排查原因 |
 | 截图直接在对话中显示 | 保存到 temp/，用 Read 工具查看 |
 | 忽略随机间隔 | 每次操作后 sleep 5-30 秒 |
 | 默认先看整页截图 | 先读布局字段，必要时再局部截图 |
