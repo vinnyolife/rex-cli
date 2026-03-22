@@ -215,6 +215,80 @@ Rules:
 
 This makes the monitoring window finite, deterministic, and aligned with the `4`-trajectory update cadence.
 
+## Concurrency Policy
+
+Phase 3 uses a single-writer control plane.
+
+Rules:
+
+- only one `update_epoch` may be open at a time,
+- only one online update may execute at a time,
+- only one rollback may execute at a time,
+- checkpoint pointer mutation is serialized,
+- epoch admission, batch sealing, comparison result recording, update completion, and rollback completion are all committed in order.
+
+Real task execution may use isolated worktrees, but Phase 3 does not allow parallel mutation of control state. A real task episode must acquire the current active checkpoint id at start and publish its terminal control events through the serialized control plane before any later episode may mutate epoch or checkpoint state.
+
+## Control Events and Interfaces
+
+Each control-layer unit communicates through explicit events with deterministic required fields.
+
+### `trajectory.persisted`
+
+- producer: `rl-trajectory-store`
+- required fields: `trajectory_id`, `task_id`, `task_family`, `student_checkpoint_id`, `terminal_result`, `teacher_call_status`
+- consumer: `live-batch-buffer`, replay admission logic
+- effect: trajectory is durably stored and becomes eligible for admission checks
+
+### `trajectory.admitted`
+
+- producer: `live-batch-buffer`
+- required fields: `trajectory_id`, `update_epoch_id`, `admission_status`, `admission_reason`
+- consumer: epoch ledger, batch sealing logic
+- effect: admitted trajectory is attached to the current epoch; non-admitted trajectories remain stored but do not count toward sealing
+
+### `comparison.recorded`
+
+- producer: `degradation-monitor`
+- required fields: `trajectory_id`, `update_epoch_id`, `comparison_status`, `relative_outcome`, `pre_update_ref_checkpoint_id`
+- consumer: epoch ledger, rollback logic, metrics
+- effect: comparison result becomes part of streak tracking and epoch-close eligibility
+
+### `batch.sealed`
+
+- producer: `live-batch-buffer`
+- required fields: `batch_id`, `update_epoch_id`, `trajectory_ids[4]`, `source_checkpoint_id`
+- consumer: `online-update-engine`
+- effect: one deterministic batch of `4` admitted trajectories is frozen for update
+
+### `update.completed`
+
+- producer: `online-update-engine`
+- required fields: `batch_id`, `update_epoch_id`, `pre_update_ref_checkpoint_id`, `new_active_checkpoint_id`
+- consumer: `active-checkpoint-registry`, epoch ledger
+- effect: new checkpoint becomes active and a new monitoring epoch opens
+
+### `update.failed`
+
+- producer: `online-update-engine`
+- required fields: `batch_id`, `update_epoch_id`, `failure_reason`
+- consumer: `active-checkpoint-registry`, replay sink, metrics
+- effect: active checkpoint remains unchanged, the failed batch is preserved as `update_failed`, and a fresh epoch is reopened under the unchanged active checkpoint
+
+### `rollback.triggered`
+
+- producer: `degradation-monitor`
+- required fields: `update_epoch_id`, `pre_update_ref_checkpoint_id`, `trigger_trajectory_ids`
+- consumer: `rollback-and-replay-sink`
+- effect: rollback begins with deterministic input evidence
+
+### `rollback.completed`
+
+- producer: `rollback-and-replay-sink`
+- required fields: `update_epoch_id`, `restored_checkpoint_id`, `rollback_batch_ids`
+- consumer: `active-checkpoint-registry`, replay lanes, metrics
+- effect: active checkpoint is restored and rollback evidence is preserved
+
 ## Real Task Episode Flow
 
 Each real repository episode follows the same end-to-end flow:
@@ -228,9 +302,10 @@ Each real repository episode follows the same end-to-end flow:
 7. invoke the teacher once for episode-level `critique + reference + shaping`,
 8. write the trajectory to the trajectory store,
 9. admit or reject the trajectory for live-batch collection,
-10. once `4` admitted trajectories are present, trigger an online update,
-11. after promotion, compare future active-task performance against `pre_update_ref_checkpoint_id`,
-12. if the degradation streak reaches `3`, roll back automatically.
+10. if the current epoch is in post-update monitoring, run matched comparison against `pre_update_ref_checkpoint_id`,
+11. when the current epoch closes without rollback, seal its `4` admitted post-update trajectories as the next live batch,
+12. trigger the next online update only from a sealed batch created at epoch close,
+13. if the degradation streak reaches `3`, roll back automatically.
 
 No episode may execute outside its temporary worktree. No Phase 3 success claim is valid without terminal verification evidence.
 
@@ -276,9 +351,15 @@ For `build`:
 
 Secondary rules are used only when primary task-family outcomes tie:
 
-- fewer no-progress steps is better,
-- fewer unrelated file modifications is better,
-- shorter convergence path is better.
+- lower `no_progress_step_count` is better,
+- lower `unrelated_file_modification_count` is better,
+- lower `convergence_step_count` is better.
+
+Definitions:
+
+- `no_progress_step_count`: the number of steps whose post-step verification snapshot and file diff are both unchanged from the immediately preceding step,
+- `unrelated_file_modification_count`: the number of modified files outside the task manifest target set; if the task manifest has no target set, this metric is disabled for the comparison,
+- `convergence_step_count`: the number of action steps before the first strictly better primary verification result; if no primary improvement occurs, use the total action-step count.
 
 Secondary rules may upgrade `same` to `better`, but they may not override a primary `worse` classification.
 
@@ -451,6 +532,8 @@ Handling:
 
 - leave `active_checkpoint_id` unchanged,
 - preserve the failed live batch as a diagnostic artifact,
+- mark the sealed batch as `update_failed` and remove it from automatic online retry inside the current campaign,
+- reopen a fresh epoch under the unchanged active checkpoint after recording the failure,
 - do not partially promote a broken checkpoint,
 - emit a run-level error artifact.
 
@@ -484,7 +567,7 @@ Handling:
 
 ## Metrics and Success Criteria
 
-Phase 3 is successful only if all of the following are true over an evaluation campaign of at least `3` update epochs and at least `12` matched real-task comparisons:
+Phase 3 is successful only if all of the following are true over an evaluation campaign of at least `3` update epochs and at least `12` total comparisons, where `total_comparisons = completed_comparisons + comparison_failed_count`:
 
 1. `better_count > worse_count`,
 2. automatic rollback prevents sustained regression and recovers service after bad updates,
@@ -492,6 +575,15 @@ Phase 3 is successful only if all of the following are true over an evaluation c
 4. replay lanes remain populated with valid, reusable real trajectories,
 5. `comparison_failed_count / total_comparisons <= 0.10`,
 6. teacher shaping remains directionally aligned with real terminal verification for at least `70%` of trajectories whose teacher output is complete.
+
+For metric purposes:
+
+- `completed_comparisons` counts trajectories with `comparison_status=completed`,
+- `comparison_failed_count` counts trajectories with `comparison_status=comparison_failed`,
+- teacher shaping is directionally aligned when the sign of numeric `teacher_shaping` matches the sign of the primary comparison result:
+  - positive for `better`,
+  - zero for `same`,
+  - negative for `worse`.
 
 ### Required Monitoring Metrics
 
