@@ -344,20 +344,39 @@ export async function executeAction({ workspace, action, policy = createDefaultE
   const validatedAction = validateStudentAction(action);
 
   if (validatedAction.action === 'read') {
-    const targetPath = resolveWorkspacePath(workspace, validatedAction.path);
-    const content = await readFile(targetPath, 'utf8');
-    const truncated = truncateText(content, policy.max_output_bytes_per_stream);
-    return await recordObservation({
-      workspace,
-      action: validatedAction,
-      status: 'ok',
-      payload: {
-        path: validatedAction.path,
-        content_excerpt: truncated.excerpt,
-        content_truncated: truncated.truncated,
-        bytes_read: Buffer.byteLength(content, 'utf8'),
-      },
-    });
+    try {
+      const targetPath = resolveWorkspacePath(workspace, validatedAction.path);
+      const content = await readFile(targetPath, 'utf8');
+      const truncated = truncateText(content, policy.max_output_bytes_per_stream);
+      return await recordObservation({
+        workspace,
+        action: validatedAction,
+        status: 'ok',
+        payload: {
+          path: validatedAction.path,
+          content_excerpt: truncated.excerpt,
+          content_truncated: truncated.truncated,
+          bytes_read: Buffer.byteLength(content, 'utf8'),
+        },
+      });
+    } catch (error) {
+      if (/temp workspace root/i.test(error.message)) {
+        throw error;
+      }
+      return await recordObservation({
+        workspace,
+        action: validatedAction,
+        status: 'error',
+        errorCode: 'read_failed',
+        errorMessage: error.message,
+        payload: {
+          path: validatedAction.path,
+          content_excerpt: '',
+          content_truncated: false,
+          bytes_read: 0,
+        },
+      });
+    }
   }
 
   if (validatedAction.action === 'run') {
