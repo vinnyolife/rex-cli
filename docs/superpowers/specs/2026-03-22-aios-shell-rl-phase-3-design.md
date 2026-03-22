@@ -86,7 +86,7 @@ The following design decisions are fixed for Phase 3:
 
 ## Core Architecture
 
-Phase 3 adds five control-layer units on top of the Phase 2 runtime.
+Phase 3 adds six control-layer units on top of the Phase 2 runtime.
 
 ### 1. `active-checkpoint-registry`
 
@@ -102,6 +102,26 @@ Responsibilities:
 - freeze the comparison baseline before each online update,
 - restore the correct checkpoint on rollback,
 - write checkpoint lineage metadata into every real trajectory and live batch.
+
+### Checkpoint Pointer Lifecycle
+
+The three checkpoint pointers change only on explicit control events:
+
+- on `update.completed`:
+  - `active_checkpoint_id <- new_active_checkpoint_id`
+  - `pre_update_ref_checkpoint_id <- previous active checkpoint`
+  - `last_stable_checkpoint_id` remains unchanged until the new epoch closes as `promotion_eligible`
+- on `epoch.closed` with `promotion_eligible=true`:
+  - `last_stable_checkpoint_id <- active_checkpoint_id`
+  - `pre_update_ref_checkpoint_id <- null`
+- on `update.failed`:
+  - `active_checkpoint_id` remains unchanged
+  - `last_stable_checkpoint_id` remains unchanged
+  - `pre_update_ref_checkpoint_id <- null`
+- on `rollback.completed`:
+  - `active_checkpoint_id <- restored_checkpoint_id`
+  - `last_stable_checkpoint_id <- restored_checkpoint_id`
+  - `pre_update_ref_checkpoint_id <- null`
 
 ### 2. `live-batch-buffer`
 
@@ -129,7 +149,8 @@ Each admitted trajectory in the live batch must include:
 A real trajectory is admitted to the live update path only if all of the following are true:
 
 - the task definition is reproducible,
-- the episode completed terminal verification,
+- `verification_executed=true`,
+- terminal verification produced a structured parseable result,
 - the trajectory structure is valid and parseable,
 - worktree isolation succeeded without main-workspace contamination,
 - `teacher_call_status=complete` and all required teacher payload fields are non-null.
@@ -175,6 +196,20 @@ Responsibilities:
 
 Rollback removes the bad promotion from active service, but it never deletes the underlying trajectories.
 
+### 6. `epoch-ledger`
+
+Owns epoch state and promotion eligibility.
+
+Responsibilities:
+
+- track `update_epoch_id`, epoch phase, and admitted trajectory membership,
+- record comparison completion state for each post-update trajectory,
+- compute epoch-close status as `promotion_eligible`, `replay_only`, or `rolled_back`,
+- gate whether a sealed batch may feed the next online update,
+- publish deterministic epoch snapshots for metrics and diagnosis.
+
+The `epoch-ledger` is the only owner of epoch-close decisions.
+
 ## State Machine
 
 Phase 3 runs the following checkpoint lifecycle:
@@ -211,7 +246,8 @@ Rules:
 - an epoch closes only when either:
   - rollback has occurred, or
   - all `4` post-update trajectories have completed matched comparison or been marked `comparison_failed`,
-- if the epoch closes without rollback, the `4` admitted post-update trajectories become the next sealed live batch.
+- if the epoch closes without rollback and all `4` post-update trajectories have `comparison_status=completed`, the epoch closes as `promotion_eligible` and the `4` admitted post-update trajectories become the next sealed live batch,
+- if any post-update trajectory has `comparison_status=comparison_failed`, the epoch may close as `replay_only`, but it is not eligible for automatic promotion into the next online update.
 
 This makes the monitoring window finite, deterministic, and aligned with the `4`-trajectory update cadence.
 
@@ -253,6 +289,13 @@ Each control-layer unit communicates through explicit events with deterministic 
 - required fields: `trajectory_id`, `update_epoch_id`, `comparison_status`, `relative_outcome`, `pre_update_ref_checkpoint_id`
 - consumer: epoch ledger, rollback logic, metrics
 - effect: comparison result becomes part of streak tracking and epoch-close eligibility
+
+### `epoch.closed`
+
+- producer: `epoch-ledger`
+- required fields: `update_epoch_id`, `close_reason`, `completed_comparison_count`, `comparison_failed_count`, `promotion_eligible`
+- consumer: `live-batch-buffer`, `online-update-engine`, `active-checkpoint-registry`
+- effect: the epoch is finalized either as `promotion_eligible`, `replay_only`, or `rolled_back`
 
 ### `batch.sealed`
 
@@ -303,7 +346,7 @@ Each real repository episode follows the same end-to-end flow:
 8. write the trajectory to the trajectory store,
 9. admit or reject the trajectory for live-batch collection,
 10. if the current epoch is in post-update monitoring, run matched comparison against `pre_update_ref_checkpoint_id`,
-11. when the current epoch closes without rollback, seal its `4` admitted post-update trajectories as the next live batch,
+11. when the current epoch closes as `promotion_eligible`, seal its `4` admitted post-update trajectories as the next live batch,
 12. trigger the next online update only from a sealed batch created at epoch close,
 13. if the degradation streak reaches `3`, roll back automatically.
 
@@ -413,6 +456,8 @@ Phase 3 real trajectories must be persisted as full episode records. At minimum,
 - `files_read`
 - `files_modified`
 - `patch_summary`
+- `verification_executed`
+- `verification_passed`
 - `verification_before`
 - `verification_after`
 - `teacher_critique` (nullable)
