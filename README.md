@@ -584,8 +584,10 @@ Manual fallback (only if needed): remove the managed `# >>> contextdb-shell >>>`
 ## Experimental: Shell RL
 
 This repository includes an isolated shell/coding RL experiment runner under `scripts/rl-shell-v1.mjs`.
+Its shared control plane now lives under `scripts/lib/rl-core/`, which is the adapter-facing RL library for shell first and the future browser/orchestrator environments later.
 
 - Generate benchmark: `npm run rl-shell-v1:benchmark`
+- Run focused RL Core tests: `npm run test:rl-core`
 - Run Phase 2A synthetic training smoke: `npm run rl-shell-v1:train:2a`
 - Run Phase 2B real-task shadow eval: `npm run rl-shell-v1:eval:2b`
 - Run Phase 2C campaign: `npm run rl-shell-v1:campaign:2c`
@@ -596,6 +598,7 @@ This repository includes an isolated shell/coding RL experiment runner under `sc
 Phase 3 notes:
 
 - Real-task online RL stays isolated from the main workspace. Episodes must execute in temporary worktrees or temporary directories; the main worktree is never mutated directly.
+- `scripts/lib/rl-core/` owns shared checkpoint lineage, epoch bookkeeping, reward fusion, replay routing, trainer entry points, teacher normalization, comparison semantics, and the serialized online campaign controller.
 - The online controller seals one live update batch every `4` admitted trajectories, then promotes the new checkpoint immediately.
 - Three relative `worse` outcomes without an intervening `better` trigger automatic rollback to the pre-update reference checkpoint.
 - If rollback itself fails, the control plane enters `frozen_failure` mode and blocks further online updates until an operator intervenes.
