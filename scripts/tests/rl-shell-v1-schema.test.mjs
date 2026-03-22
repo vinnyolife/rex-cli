@@ -14,11 +14,13 @@ function makeValidEpisodeRecord() {
     episode_id: 'episode-001',
     run_id: 'run-001',
     task_id: 'task-001',
+    task_source: 'synthetic',
     split: 'train',
     repo_snapshot_id: 'task-001@v1',
     student_model_id: 'tiny-json-policy-v1',
     teacher_backend_requested: 'codex-cli',
     teacher_backend_used: 'codex-cli',
+    attempt_id: null,
     seed: 17,
     start_ts: '2026-03-22T03:00:00.000Z',
     end_ts: '2026-03-22T03:00:05.000Z',
@@ -63,6 +65,8 @@ function makeValidEpisodeRecord() {
     runtime_failures: [],
     timeout_flag: false,
     stop_reason: 'budget_exhausted',
+    stop_condition: 'max_steps_reached',
+    no_progress_window: 3,
     teacher_call_status: 'ok',
     teacher_latency_ms: 123,
     teacher_confidence: 0.7,
@@ -81,6 +85,8 @@ function makeValidEpisodeRecord() {
     fused_reward: 0.08,
     advantage: 0.08,
     return: 0.08,
+    replay_eligible: true,
+    replay_priority: 0.6,
     policy_loss: 0.1,
     distill_loss: 0.2,
     kl_loss: 0.01,
@@ -149,6 +155,28 @@ test('validateEpisodeRecord requires reward, distillation, and artifact fields',
   const episode = makeValidEpisodeRecord();
   assert.doesNotThrow(() => validateEpisodeRecord(episode));
   assert.throws(() => validateEpisodeRecord({ ...episode, fused_reward: undefined }), /fused_reward/i);
+  assert.throws(() => validateEpisodeRecord({ ...episode, task_source: undefined }), /task_source/i);
+  assert.doesNotThrow(() => validateEpisodeRecord({
+    ...episode,
+    task_source: 'synthetic',
+    stop_condition: 'repeated_no_progress',
+    no_progress_window: 3,
+    replay_eligible: true,
+    replay_priority: 0.6,
+  }));
+});
+
+test('validateEpisodeRecord requires attempt_id for real shadow episodes', () => {
+  const episode = makeValidEpisodeRecord();
+  assert.throws(
+    () => validateEpisodeRecord({ ...episode, task_source: 'real_shadow', attempt_id: null }),
+    /attempt_id/i
+  );
+  assert.doesNotThrow(() => validateEpisodeRecord({
+    ...episode,
+    task_source: 'real_shadow',
+    attempt_id: 'attempt-001',
+  }));
 });
 
 test('validateRunSummary enforces ContextDB summary contract', () => {

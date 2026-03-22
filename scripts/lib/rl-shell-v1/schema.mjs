@@ -6,6 +6,15 @@ const TEACHER_CALL_STATUS = new Set(['ok', 'fallback_ok', 'invalid_response', 'f
 const SPLITS = new Set(['train', 'held_out']);
 const EPISODE_STATUS = new Set(['success', 'failed', 'runtime_error', 'timeout']);
 const DISTILLATION_STATUS = new Set(['applied', 'skipped']);
+const TASK_SOURCES = new Set(['synthetic', 'real_shadow']);
+const STOP_CONDITIONS = new Set([
+  'student_stop',
+  'verification_passed',
+  'max_steps_reached',
+  'episode_timeout',
+  'unsafe_runner_state',
+  'repeated_no_progress',
+]);
 
 function assertObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -214,11 +223,13 @@ export function validateEpisodeRecord(raw) {
       'episode_id',
       'run_id',
       'task_id',
+      'task_source',
       'split',
       'repo_snapshot_id',
       'student_model_id',
       'teacher_backend_requested',
       'teacher_backend_used',
+      'attempt_id',
       'seed',
       'start_ts',
       'end_ts',
@@ -240,6 +251,8 @@ export function validateEpisodeRecord(raw) {
       'runtime_failures',
       'timeout_flag',
       'stop_reason',
+      'stop_condition',
+      'no_progress_window',
       'teacher_call_status',
       'teacher_latency_ms',
       'teacher_confidence',
@@ -253,6 +266,8 @@ export function validateEpisodeRecord(raw) {
       'fused_reward',
       'advantage',
       'return',
+      'replay_eligible',
+      'replay_priority',
       'policy_loss',
       'distill_loss',
       'kl_loss',
@@ -266,11 +281,17 @@ export function validateEpisodeRecord(raw) {
   assertString(raw.episode_id, 'episode.episode_id');
   assertString(raw.run_id, 'episode.run_id');
   assertString(raw.task_id, 'episode.task_id');
+  assertEnum(raw.task_source, TASK_SOURCES, 'episode.task_source');
   assertEnum(raw.split, SPLITS, 'episode.split');
   assertString(raw.repo_snapshot_id, 'episode.repo_snapshot_id');
   assertString(raw.student_model_id, 'episode.student_model_id');
   assertString(raw.teacher_backend_requested, 'episode.teacher_backend_requested');
   assertString(raw.teacher_backend_used, 'episode.teacher_backend_used');
+  if (raw.task_source === 'real_shadow') {
+    assertString(raw.attempt_id, 'episode.attempt_id');
+  } else if (raw.attempt_id !== null && raw.attempt_id !== undefined) {
+    assertString(raw.attempt_id, 'episode.attempt_id');
+  }
   assertInteger(raw.seed, 'episode.seed');
   assertString(raw.start_ts, 'episode.start_ts');
   assertString(raw.end_ts, 'episode.end_ts');
@@ -293,6 +314,8 @@ export function validateEpisodeRecord(raw) {
   assertArray(raw.runtime_failures, 'episode.runtime_failures');
   assertBoolean(raw.timeout_flag, 'episode.timeout_flag');
   assertString(raw.stop_reason, 'episode.stop_reason');
+  assertEnum(raw.stop_condition, STOP_CONDITIONS, 'episode.stop_condition');
+  assertInteger(raw.no_progress_window, 'episode.no_progress_window', { min: 1 });
   assertEnum(raw.teacher_call_status, TEACHER_CALL_STATUS, 'episode.teacher_call_status');
   assertInteger(raw.teacher_latency_ms, 'episode.teacher_latency_ms', { min: 0 });
   assertNumber(raw.teacher_confidence, 'episode.teacher_confidence');
@@ -308,9 +331,13 @@ export function validateEpisodeRecord(raw) {
   if (raw.distillation_skip_reason !== null && typeof raw.distillation_skip_reason !== 'string') {
     throw new Error('episode.distillation_skip_reason must be a string or null');
   }
-  for (const field of ['terminal_reward', 'teacher_term', 'fused_reward', 'advantage', 'return', 'policy_loss', 'distill_loss', 'kl_loss']) {
+  for (const field of ['terminal_reward', 'teacher_term', 'fused_reward', 'advantage', 'return', 'replay_priority', 'policy_loss', 'distill_loss', 'kl_loss']) {
     assertNumber(raw[field], `episode.${field}`);
   }
+  if (raw.replay_priority < 0 || raw.replay_priority > 1) {
+    throw new Error('episode.replay_priority must be in [0, 1]');
+  }
+  assertBoolean(raw.replay_eligible, 'episode.replay_eligible');
   for (const field of ['stdout_artifact_path', 'stderr_artifact_path', 'final_diff_artifact_path', 'observation_trace_artifact_path']) {
     assertString(raw[field], `episode.${field}`);
   }
