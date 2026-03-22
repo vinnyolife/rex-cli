@@ -201,6 +201,29 @@ test('contextdb summary writer validates required fields and keeps write failure
   );
 });
 
+test('contextdb summary payload carries phase and replay pool status', async () => {
+  const mod = await import('../lib/rl-shell-v1/contextdb-summary.mjs');
+  const summary = mod.buildRunSummaryPayload({
+    run: {
+      runId: 'run-002',
+      studentModelId: 'tiny-json-policy-v1',
+      bestCheckpointPath: 'experiments/rl-shell-v1/runs/run-002/checkpoints/best/policy.json',
+      status: 'ok',
+    },
+    metrics: { successRate: 0.4 },
+    config: {
+      teacher_backend_requested: 'codex-cli',
+      fallback_order: ['claude-code'],
+      seed_results: [{ seed: 17, status: 'ok' }],
+      phase: '2C',
+      replay_pool_status: 'limited-pool',
+    },
+  });
+
+  assert.equal(summary.phase, '2C');
+  assert.equal(summary.replay_pool_status, 'limited-pool');
+});
+
 test('real-task shadow eval does not update trainer state and repeats tasks across seed-attempt pairs', async () => {
   const mod = await import('../lib/rl-shell-v1/run-orchestrator.mjs');
   let trainerUpdates = 0;
@@ -240,4 +263,44 @@ test('real-task shadow eval does not update trainer state and repeats tasks acro
   assert.equal(trainerUpdates, 0);
   assert.equal(result.attempt_results.length, 4);
   assert.equal(result.repeatability.stableRepairCount, 1);
+});
+
+test('runCampaign reports phase 2C replay and shadow metrics', async () => {
+  const mod = await import('../lib/rl-shell-v1/run-orchestrator.mjs');
+  const result = await mod.runCampaign({
+    config: makeConfig({
+      rootDir: REPO_ROOT,
+      phase: '2C',
+      acceptanceSeeds: [17, 29, 41],
+    }),
+    deps: {
+      registryLoader: async () => ({ trainTasks: [{}], heldOutTasks: [] }),
+      trainingRunner: async ({ seed }) => ({
+        seed,
+        status: 'ok',
+        heldOutMetrics: { successRate: 0.5, regressionFreeFixRate: 0.5, avgTokenCount: 10 },
+        bestCheckpointPath: `ckpt-${seed}`,
+        runId: `run-${seed}`,
+        summaryPath: `summary-${seed}`,
+      }),
+      shadowEvalRunner: async () => ({
+        pool_status: 'limited-pool',
+        admitted_tasks: 1,
+        repeatability: {
+          repeatedRepairRate: 0.5,
+          stableRepairCount: 1,
+          mainWorktreeContaminationFailures: 0,
+        },
+      }),
+      replayPoolLoader: async () => ({
+        synthetic: { episodes: [{ episode_id: 'synthetic-1' }, { episode_id: 'synthetic-2' }] },
+        realShadow: { episodes: [{ episode_id: 'real-1' }] },
+      }),
+    },
+  });
+
+  assert.equal(result.phase, '2C');
+  assert.equal(result.replayPoolStatus, 'limited-pool');
+  assert.equal(result.realRepeatedRepairRate, 0.5);
+  assert.equal(result.replayMix.realShadow, 1);
 });

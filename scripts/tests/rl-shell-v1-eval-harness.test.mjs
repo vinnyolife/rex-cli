@@ -138,3 +138,17 @@ test('eval harness summarizes real-task shadow repeatability metrics', async () 
   assert.equal(summary.stableRepairCount, 1);
   assert.equal(summary.mainWorktreeContaminationFailures, 1);
 });
+
+test('eval harness summarizes phase 2 ablation deltas and warnings', async () => {
+  const mod = await import('../lib/rl-shell-v1/eval-harness.mjs');
+  const summary = mod.summarizePhase2Ablation({
+    phase2a: { successRate: 0.4, avgTokenCount: 100 },
+    phase2b: { repeatedRepairRate: 0.2 },
+    phase2c: { successRate: 0.55, repeatedRepairRate: 0.35, avgTokenCount: 108 },
+  });
+
+  assert.equal(summary.syntheticImprovement, 0.15);
+  assert.equal(summary.realRepairImprovement, 0.15);
+  assert.equal(summary.replayDrivenImprovement, 0.15);
+  assert.equal(summary.overfittingWarning, false);
+});

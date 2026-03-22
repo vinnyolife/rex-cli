@@ -91,10 +91,21 @@ async function main() {
   if (command === 'campaign') {
     const config = await loadConfig(rootDir, flags.config || 'experiments/rl-shell-v1/configs/benchmark-v1.json', flags.teacher, flags.phase);
     const result = await runCampaign({ config });
+    console.log(`phase=${config.phase}`);
     console.log(`campaign_id=${result.campaignId}`);
     console.log(`status=${result.status}`);
     for (const seedResult of result.seedResults) {
       console.log(`seed=${seedResult.seed} held_out_success_rate=${seedResult.successRate}`);
+    }
+    if (result.realRepeatedRepairRate !== undefined) {
+      console.log(`real_repeated_repair_rate=${result.realRepeatedRepairRate}`);
+    }
+    if (result.replayPoolStatus !== undefined) {
+      console.log(`replay_pool_status=${result.replayPoolStatus}`);
+    }
+    if (result.replayMix) {
+      console.log(`replay_mix_real=${result.replayMix.realShadow}`);
+      console.log(`replay_mix_synthetic=${result.replayMix.synthetic}`);
     }
     if (result.bestRun) {
       console.log(`best_checkpoint=${result.bestRun.bestCheckpointPath}`);

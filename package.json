@@ -10,6 +10,9 @@
     "test:scripts": "node --test scripts/tests/aios-cli.test.mjs scripts/tests/ctx-agent-core.test.mjs scripts/tests/aios-components.test.mjs scripts/tests/aios-doctor.test.mjs scripts/tests/aios-harness.test.mjs scripts/tests/aios-orchestrator.test.mjs scripts/tests/aios-orchestrator-agents.test.mjs scripts/tests/aios-learn-eval.test.mjs scripts/tests/aios-lifecycle-plan.test.mjs scripts/tests/aios-tui-state.test.mjs scripts/tests/aios-wrappers.test.mjs",
     "test:rl-shell-v1": "node --test scripts/tests/rl-shell-v1-*.test.mjs",
     "rl-shell-v1:benchmark": "node scripts/generate-rl-shell-v1-benchmark.mjs --config experiments/rl-shell-v1/configs/benchmark-v1.json --seed 17",
-    "rl-shell-v1:campaign": "node scripts/rl-shell-v1.mjs campaign --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli"
+    "rl-shell-v1:train:2a": "node scripts/rl-shell-v1.mjs train --phase 2A --config experiments/rl-shell-v1/configs/benchmark-v1.json --seed 17 --teacher codex-cli",
+    "rl-shell-v1:eval:2b": "node scripts/rl-shell-v1.mjs eval --phase 2B --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli",
+    "rl-shell-v1:campaign": "node scripts/rl-shell-v1.mjs campaign --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli",
+    "rl-shell-v1:campaign:2c": "node scripts/rl-shell-v1.mjs campaign --phase 2C --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli"
   }
 }

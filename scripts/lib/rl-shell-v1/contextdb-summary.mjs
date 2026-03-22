@@ -47,6 +47,7 @@ export function buildRunSummaryPayload({ run, metrics, config }) {
     run_id: run.runId,
     spec_path: 'docs/superpowers/specs/2026-03-22-aios-shell-rl-v1-design.md',
     student_model_id: run.studentModelId || 'tiny-json-policy-v1',
+    phase: config.phase || 'v1',
     primary_teacher: config.teacher_backend_requested,
     fallback_order: config.fallback_order || [],
     train_split: 'benchmark-v1-train',
@@ -54,6 +55,7 @@ export function buildRunSummaryPayload({ run, metrics, config }) {
     best_checkpoint_path: run.bestCheckpointPath,
     best_metrics: metrics,
     seed_results: config.seed_results || [],
+    replay_pool_status: config.replay_pool_status,
     status: run.status || 'ok',
   });
 }

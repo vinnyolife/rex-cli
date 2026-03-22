@@ -110,6 +110,19 @@ export function summarizeRealShadowEval({ pool_status, admitted_tasks, attempt_r
   };
 }
 
+export function summarizePhase2Ablation({ phase2a, phase2b, phase2c }) {
+  const syntheticImprovement = Number((Number(phase2c?.successRate || 0) - Number(phase2a?.successRate || 0)).toFixed(2));
+  const realRepairImprovement = Number((Number(phase2c?.repeatedRepairRate || 0) - Number(phase2b?.repeatedRepairRate || 0)).toFixed(2));
+  const replayDrivenImprovement = syntheticImprovement;
+  const overfittingWarning = Number(phase2c?.avgTokenCount || 0) > Number(phase2a?.avgTokenCount || 0) * 1.5;
+  return {
+    syntheticImprovement,
+    realRepairImprovement,
+    replayDrivenImprovement,
+    overfittingWarning,
+  };
+}
+
 export function pickBestCheckpoint(checkpoints) {
   return [...checkpoints].sort((left, right) => {
     if (right.successRate !== left.successRate) {

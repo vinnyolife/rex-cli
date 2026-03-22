@@ -355,6 +355,9 @@ export function validateRunSummary(raw) {
   assertString(raw.run_id, 'run summary.run_id');
   assertString(raw.spec_path, 'run summary.spec_path');
   assertString(raw.student_model_id, 'run summary.student_model_id');
+  if (raw.phase !== undefined) {
+    assertString(raw.phase, 'run summary.phase');
+  }
   assertString(raw.primary_teacher, 'run summary.primary_teacher');
   assertStringArray(raw.fallback_order, 'run summary.fallback_order');
   assertString(raw.train_split, 'run summary.train_split');
@@ -362,6 +365,9 @@ export function validateRunSummary(raw) {
   assertString(raw.best_checkpoint_path, 'run summary.best_checkpoint_path');
   assertObject(raw.best_metrics, 'run summary.best_metrics');
   assertArray(raw.seed_results, 'run summary.seed_results');
+  if (raw.replay_pool_status !== undefined) {
+    assertString(raw.replay_pool_status, 'run summary.replay_pool_status');
+  }
   assertString(raw.status, 'run summary.status');
   return raw;
 }

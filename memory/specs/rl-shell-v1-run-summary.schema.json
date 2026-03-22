@@ -21,6 +21,7 @@
     "run_id": { "type": "string", "minLength": 1 },
     "spec_path": { "type": "string", "minLength": 1 },
     "student_model_id": { "type": "string", "minLength": 1 },
+    "phase": { "type": "string", "minLength": 1 },
     "primary_teacher": { "type": "string", "minLength": 1 },
     "fallback_order": {
       "type": "array",
@@ -34,6 +35,7 @@
       "type": "array",
       "items": { "type": "object" }
     },
+    "replay_pool_status": { "type": "string", "minLength": 1 },
     "status": { "type": "string", "minLength": 1 }
   }
 }

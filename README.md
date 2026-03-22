@@ -581,10 +581,13 @@ source ~/.zshrc
 ```
 
 Manual fallback (only if needed): remove the managed `# >>> contextdb-shell >>>` block from `~/.zshrc`.
-## Experimental: Shell RL V1
+## Experimental: Shell RL
 
 This repository includes an isolated shell/coding RL experiment runner under `scripts/rl-shell-v1.mjs`.
 
 - Generate benchmark: `npm run rl-shell-v1:benchmark`
-- Run campaign: `npm run rl-shell-v1:campaign`
+- Run Phase 2A synthetic training smoke: `npm run rl-shell-v1:train:2a`
+- Run Phase 2B real-task shadow eval: `npm run rl-shell-v1:eval:2b`
+- Run Phase 2C campaign: `npm run rl-shell-v1:campaign:2c`
+- Run baseline campaign: `npm run rl-shell-v1:campaign`
 - Run focused tests: `npm run test:rl-shell-v1`

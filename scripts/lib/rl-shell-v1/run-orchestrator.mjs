@@ -542,6 +542,9 @@ export async function runRealShadowEval({ config, deps = {} }) {
 
 export async function runCampaign({ config, deps = {} }) {
   const rootDir = config.rootDir || process.cwd();
+  const trainingRunner = deps.trainingRunner || runTrainingRun;
+  const shadowEvalRunner = deps.shadowEvalRunner || runRealShadowEval;
+  const replayPoolLoader = deps.replayPoolLoader || loadReplayPool;
   const registryLoader = deps.registryLoader || (async () => await loadTaskRegistry({
     rootDir,
     configPath: config.configPath || 'experiments/rl-shell-v1/configs/benchmark-v1.json',
@@ -557,7 +560,7 @@ export async function runCampaign({ config, deps = {} }) {
 
   const seedResults = [];
   for (const seed of seeds) {
-    const result = await runTrainingRun({
+    const result = await trainingRunner({
       config,
       seed,
       deps: {
@@ -594,18 +597,45 @@ export async function runCampaign({ config, deps = {} }) {
   await mkdir(campaignDir, { recursive: true });
   const campaignArtifactPath = path.join(campaignDir, `${campaignId}.json`);
   const status = seedResults.some((row) => row.successRate >= 0.5) ? 'passed' : 'failed';
+  let replayPoolStatus = undefined;
+  let realRepeatedRepairRate = undefined;
+  let replayMix = undefined;
+
+  if (config.phase === '2C') {
+    const shadowResult = await shadowEvalRunner({ config, deps });
+    const replayPool = await replayPoolLoader({ rootDir });
+    const replayBatch = buildMixedReplayBatch({
+      pool: replayPool,
+      batchSize: Number(config.replayBatchSize || 5),
+    });
+    replayPoolStatus = shadowResult.pool_status;
+    realRepeatedRepairRate = shadowResult.repeatability.repeatedRepairRate;
+    replayMix = {
+      realShadow: replayBatch.realShadow.length,
+      synthetic: replayBatch.synthetic.length,
+    };
+  }
+
   await writeFile(campaignArtifactPath, `${JSON.stringify({
     campaign_id: campaignId,
+    phase: config.phase || 'v1',
     status,
     seed_results: seedResults,
     best_run: bestRun,
+    replay_pool_status: replayPoolStatus,
+    real_repeated_repair_rate: realRepeatedRepairRate,
+    replay_mix: replayMix,
   }, null, 2)}\n`, 'utf8');
 
   return {
     campaignId,
+    phase: config.phase || 'v1',
     status,
     seedResults,
     bestRun,
+    replayPoolStatus,
+    realRepeatedRepairRate,
+    replayMix,
     campaignArtifactPath,
   };
 }
