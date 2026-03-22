@@ -10,6 +10,7 @@ const DEFAULT_POLICY = Object.freeze({
   max_command_seconds: 30,
   max_episode_seconds: 180,
   max_output_bytes_per_stream: 65536,
+  no_progress_window: 3,
   network_access: false,
   forbidden_command_patterns: ['sudo', 'ssh', 'scp', 'curl', 'wget', 'git push', 'git reset --hard', 'rm -rf /'],
 });
@@ -166,6 +167,48 @@ function collectFailingTests(output) {
     .filter((line) => line.includes('not ok') || line.includes('ERR_ASSERTION') || line.includes('ERR_TEST_FAILURE'));
 }
 
+function normalizeFailureLabel(line) {
+  return String(line || '')
+    .replace(/^not ok\s+\d+\s*-\s*/i, '')
+    .replace(/^#\s*/i, '')
+    .trim()
+    .toLowerCase();
+}
+
+function computeVerificationStatus(observation) {
+  if (observation.status === 'timeout') {
+    return 'timeout';
+  }
+  if (observation.status === 'ok' && observation.payload?.exit_code === 0) {
+    return 'ok';
+  }
+  return 'failed';
+}
+
+function buildNoProgressFingerprint(event) {
+  const actionType = event.action?.action || 'unknown';
+  if (actionType === 'read') {
+    return `${actionType}:${event.status}:${event.payload?.path || 'unknown'}`;
+  }
+  if (actionType === 'run') {
+    return `${actionType}:${event.status}:${event.action?.command || ''}:${event.payload?.exit_code ?? 'unknown'}`;
+  }
+  if (actionType === 'patch') {
+    return `${actionType}:${event.status}:${event.payload?.reject_reason || ''}:${event.payload?.diff_excerpt || ''}`;
+  }
+  return `${actionType}:${event.status}:${event.payload?.message || ''}`;
+}
+
+function isNoProgressObservation(event) {
+  if (event.status === 'rejected' || event.status === 'timeout' || event.status === 'error') {
+    return true;
+  }
+  if (event.action?.action === 'patch' && event.payload?.applied === false) {
+    return true;
+  }
+  return false;
+}
+
 function parsePatchOperations(diffText) {
   const lines = normalizePatchDiff(diffText).split('\n');
   if (lines[0] !== '*** Begin Patch') {
@@ -247,6 +290,20 @@ export function createDefaultExecutionPolicy() {
     ...DEFAULT_POLICY,
     forbidden_command_patterns: [...DEFAULT_POLICY.forbidden_command_patterns],
   };
+}
+
+export function getStopConditionCandidate({ workspace, policy = createDefaultExecutionPolicy() }) {
+  const windowSize = Math.max(1, Number(policy.no_progress_window || DEFAULT_POLICY.no_progress_window));
+  const recent = workspace?.observations?.slice(-windowSize) || [];
+  if (recent.length < windowSize) {
+    return null;
+  }
+  if (!recent.every(isNoProgressObservation)) {
+    return null;
+  }
+  const fingerprints = recent.map(buildNoProgressFingerprint);
+  const reference = fingerprints[0];
+  return fingerprints.every((fingerprint) => fingerprint === reference) ? 'repeated_no_progress' : null;
 }
 
 export async function createEpisodeWorkspace({ taskManifest, rootDir }) {
@@ -386,17 +443,17 @@ export async function executeAction({ workspace, action, policy = createDefaultE
 }
 
 export async function runBaselineFailureCheck({ workspace, verificationCommand, policy = createDefaultExecutionPolicy() }) {
-  const observation = await runVerification({ workspace, verificationCommand, policy });
-  const failingTests = collectFailingTests(`${observation.payload.stdout_excerpt}\n${observation.payload.stderr_excerpt}`);
+  const verification = await runVerification({ workspace, verificationCommand, policy });
   return {
-    reproduced: observation.payload.exit_code !== 0 && failingTests.length > 0,
-    failingTests,
-    observation,
+    reproduced: verification.verification_status !== 'ok' && verification.tests_after.length > 0,
+    failingTests: verification.tests_after,
+    observation: verification.observation,
+    verification_status: verification.verification_status,
   };
 }
 
 export async function runVerification({ workspace, verificationCommand, policy = createDefaultExecutionPolicy() }) {
-  return await executeAction({
+  const observation = await executeAction({
     workspace,
     action: {
       action: 'run',
@@ -404,4 +461,17 @@ export async function runVerification({ workspace, verificationCommand, policy =
     },
     policy,
   });
+
+  const testsAfter = collectFailingTests(`${observation.payload.stdout_excerpt}\n${observation.payload.stderr_excerpt}`);
+  const baselineSet = new Set((workspace.taskManifest?.baseline_failing_tests || []).map(normalizeFailureLabel));
+  const newFailures = testsAfter.filter((line) => !baselineSet.has(normalizeFailureLabel(line)));
+
+  const verification = {
+    observation,
+    tests_after: testsAfter,
+    new_failures: newFailures,
+    verification_status: computeVerificationStatus(observation),
+  };
+  workspace.finalVerification = verification;
+  return verification;
 }

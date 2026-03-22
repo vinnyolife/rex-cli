@@ -57,6 +57,54 @@ test('student runner emits stop_reason=budget_exhausted when no steps remain', a
   assert.deepEqual(result.tokenIds, []);
 });
 
+test('student runner builds a bounded step prompt from the latest observation trace', async () => {
+  const mod = await import('../lib/rl-shell-v1/student-runner.mjs');
+  const prompt = mod.buildStudentStepPrompt({
+    trace: [
+      {
+        task_prompt: 'Fix the math helper in src/math.mjs',
+        baseline_failing_tests: ['not ok 1 - addition returns the sum'],
+      },
+      {
+        observation_event: {
+          action: { action: 'read', path: 'src/math.mjs' },
+          status: 'ok',
+          payload: {
+            path: 'src/math.mjs',
+            content_excerpt: 'return a - b;',
+          },
+        },
+      },
+      {
+        observation_event: {
+          action: { action: 'read', path: 'src/math.mjs' },
+          status: 'ok',
+          payload: {
+            path: 'src/math.mjs',
+            content_excerpt: 'return a - b;',
+          },
+        },
+      },
+      {
+        observation_event: {
+          action: { action: 'run', command: 'node --test' },
+          status: 'error',
+          payload: {
+            stderr_excerpt: 'not ok 1 - addition returns the sum',
+          },
+        },
+      },
+    ],
+    budget: { remainingSteps: 2 },
+    maxEvents: 3,
+  });
+
+  assert.match(prompt, /Fix the math helper/i);
+  assert.match(prompt, /return a - b;/i);
+  assert.match(prompt, /x2/i);
+  assert.match(prompt, /remaining steps: 2/i);
+});
+
 test('student runner emits one valid json action with token ids and logprobs', async () => {
   const policyMod = await import('../lib/rl-shell-v1/student-policy.mjs');
   const runnerMod = await import('../lib/rl-shell-v1/student-runner.mjs');
@@ -80,4 +128,47 @@ test('student runner emits one valid json action with token ids and logprobs', a
   assert.notEqual(result.parsedAction, null);
   assert.equal(typeof result.parsedAction.action, 'string');
   assert.match(result.stopReason, /action_emitted|student_stop/);
+});
+
+test('student runner uses latest observation trace when generating the next action', async () => {
+  const policyMod = await import('../lib/rl-shell-v1/student-policy.mjs');
+  const runnerMod = await import('../lib/rl-shell-v1/student-runner.mjs');
+
+  const initial = await runnerMod.requestStudentAction({
+    policy: policyMod.createStudentPolicy({ seed: 5 }),
+    trace: [
+      {
+        task_prompt: 'Fix src/math.mjs',
+        baseline_failing_tests: ['not ok 1 - addition returns the sum'],
+      },
+    ],
+    budget: { remainingSteps: 2 },
+    evaluationMode: true,
+  });
+
+  const next = await runnerMod.requestStudentAction({
+    policy: policyMod.createStudentPolicy({ seed: 5 }),
+    trace: [
+      {
+        task_prompt: 'Fix src/math.mjs',
+        baseline_failing_tests: ['not ok 1 - addition returns the sum'],
+      },
+      {
+        observation_event: {
+          action: { action: 'read', path: 'src/math.mjs' },
+          status: 'ok',
+          payload: {
+            path: 'src/math.mjs',
+            content_excerpt: 'return a - b;',
+          },
+        },
+      },
+    ],
+    budget: { remainingSteps: 2 },
+    evaluationMode: true,
+  });
+
+  assert.equal(initial.parsedAction.action, 'read');
+  assert.equal(next.parsedAction.action, 'run');
+  assert.notEqual(next.featureKey, initial.featureKey);
 });

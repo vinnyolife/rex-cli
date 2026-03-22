@@ -137,11 +137,45 @@ test('temp runner replays baseline failing tests before student actions and clea
     verificationCommand: 'node --test',
     policy: defaultPolicy(mod),
   });
-  assert.equal(verification.status, 'ok');
-  assert.equal(verification.payload.exit_code, 0);
-  assert.doesNotThrow(() => validateObservationEvent(verification));
+  assert.equal(verification.verification_status, 'ok');
+  assert.deepEqual(verification.tests_after, []);
+  assert.deepEqual(verification.new_failures, []);
+  assert.equal(verification.observation.status, 'ok');
+  assert.equal(verification.observation.payload.exit_code, 0);
+  assert.doesNotThrow(() => validateObservationEvent(verification.observation));
 
   const workspacePath = workspace.workspacePath;
   await mod.destroyEpisodeWorkspace(workspace);
   await assert.rejects(() => access(workspacePath));
+});
+
+test('temp runner flags repeated identical failed actions as repeated_no_progress', async () => {
+  const mod = await import('../lib/rl-shell-v1/temp-runner.mjs');
+  const { workspace } = await createFixtureWorkspace(mod);
+  const policy = defaultPolicy(mod, { no_progress_window: 3 });
+  const invalidPatch = {
+    action: 'patch',
+    diff: [
+      '*** Begin Patch',
+      '*** Update File: src/math.mjs',
+      '@@',
+      '-return missing_line;',
+      '+return a + b;',
+      '*** End Patch',
+    ].join('\n'),
+  };
+
+  for (let index = 0; index < 3; index += 1) {
+    const event = await mod.executeAction({
+      workspace,
+      action: invalidPatch,
+      policy,
+    });
+    assert.equal(event.status, 'error');
+  }
+
+  assert.equal(
+    mod.getStopConditionCandidate({ workspace, policy }),
+    'repeated_no_progress'
+  );
 });
