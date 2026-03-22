@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "task_id": "string-trim-v06-s17",
+  "repo_snapshot_id": "string-trim@v6",
+  "repo_source_path": "experiments/rl-shell-v1/tasks/generated/string-trim-v06-s17/repo",
+  "split": "held_out",
+  "task_prompt": "Fix the normalization helper for trim variant 6.",
+  "verification_command": "node --test",
+  "baseline_failing_tests": [],
+  "constraints": [
+    "Do not edit tests",
+    "Keep function signature stable"
+  ]
+}

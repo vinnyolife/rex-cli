@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "task_id": "arithmetic-add-v07-s17",
+  "repo_snapshot_id": "arithmetic-add@v7",
+  "repo_source_path": "experiments/rl-shell-v1/tasks/generated/arithmetic-add-v07-s17/repo",
+  "split": "held_out",
+  "task_prompt": "Fix the failing addition behavior for variant 7.",
+  "verification_command": "node --test",
+  "baseline_failing_tests": [],
+  "constraints": [
+    "Do not edit tests",
+    "Use only local files"
+  ]
+}
