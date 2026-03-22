@@ -127,3 +127,46 @@ test('trainer backs off toward synthetic when real-shadow replay is too duplicat
   assert.equal(batch.realShadow.length, 1);
   assert.equal(batch.synthetic.length, 4);
 });
+
+test('trainer runOnlineUpdateBatch returns deterministic checkpoint metadata', async () => {
+  const trainerMod = await import('../lib/rl-shell-v1/trainer.mjs');
+  const policyMod = await import('../lib/rl-shell-v1/student-policy.mjs');
+  const policy = policyMod.createStudentPolicy({ seed: 9 });
+  const referencePolicy = trainerMod.createReferencePolicyFrom(policy);
+
+  const result = trainerMod.runOnlineUpdateBatch({
+    batchId: 'batch-001',
+    checkpointId: 'ckpt-a',
+    policy,
+    referencePolicy,
+    trajectories: [
+      {
+        stepFeatureKeys: ['step-1'],
+        stepTokenIds: [[5]],
+        rewards: [1],
+        distillationStatus: 'skipped',
+        teacherTokenIds: [],
+      },
+    ],
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.batchId, 'batch-001');
+  assert.equal(result.nextCheckpointId, 'ckpt-a-u1');
+});
+
+test('trainer runOnlineUpdateBatch surfaces update failures without mutating checkpoint ids', async () => {
+  const trainerMod = await import('../lib/rl-shell-v1/trainer.mjs');
+  const result = trainerMod.runOnlineUpdateBatch({
+    batchId: 'batch-002',
+    checkpointId: 'ckpt-a',
+    applyUpdate: () => {
+      throw new Error('numerical instability');
+    },
+    trajectories: [],
+  });
+
+  assert.equal(result.status, 'update_failed');
+  assert.equal(result.batchId, 'batch-002');
+  assert.equal(result.checkpointId, 'ckpt-a');
+});

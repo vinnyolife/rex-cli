@@ -45,3 +45,23 @@ test('writeControlSnapshot persists and reloads the latest checkpoint snapshot',
   assert.equal(snapshot.last_stable_checkpoint_id, 'ckpt-a');
   assert.equal(snapshot.mode, 'collection');
 });
+
+test('writeControlSnapshot preserves frozen_failure mode for restart recovery', async () => {
+  const mod = await import('../lib/rl-shell-v1/control-state-store.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-shell-v1-control-store-'));
+  const store = await mod.createControlStateStore({ rootDir });
+
+  await mod.writeControlSnapshot(store, {
+    active_checkpoint_id: 'ckpt-b',
+    pre_update_ref_checkpoint_id: 'ckpt-a',
+    last_stable_checkpoint_id: 'ckpt-a',
+    mode: 'frozen_failure',
+    applied_event_ids: ['evt-001', 'evt-002'],
+    last_event_id: 'evt-002',
+  });
+
+  const snapshot = await mod.readControlSnapshot(store);
+  assert.equal(snapshot.mode, 'frozen_failure');
+  assert.equal(snapshot.active_checkpoint_id, 'ckpt-b');
+  assert.deepEqual(snapshot.applied_event_ids, ['evt-001', 'evt-002']);
+});

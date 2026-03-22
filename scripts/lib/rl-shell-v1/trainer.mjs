@@ -185,3 +185,99 @@ export function createReferencePolicyFrom(policy) {
     weights: clone(policy.weights),
   });
 }
+
+function summarizeBatchMetrics(metricsRows) {
+  if (!Array.isArray(metricsRows) || metricsRows.length === 0) {
+    return {
+      policy_loss: 0,
+      distill_loss: 0,
+      kl_loss: 0,
+      total_loss: 0,
+      trajectory_count: 0,
+    };
+  }
+
+  const totals = metricsRows.reduce((acc, row) => ({
+    policy_loss: acc.policy_loss + Number(row.policy_loss || 0),
+    distill_loss: acc.distill_loss + Number(row.distill_loss || 0),
+    kl_loss: acc.kl_loss + Number(row.kl_loss || 0),
+    total_loss: acc.total_loss + Number(row.total_loss || 0),
+  }), {
+    policy_loss: 0,
+    distill_loss: 0,
+    kl_loss: 0,
+    total_loss: 0,
+  });
+
+  return {
+    policy_loss: totals.policy_loss / metricsRows.length,
+    distill_loss: totals.distill_loss / metricsRows.length,
+    kl_loss: totals.kl_loss / metricsRows.length,
+    total_loss: totals.total_loss / metricsRows.length,
+    trajectory_count: metricsRows.length,
+  };
+}
+
+export function runOnlineUpdateBatch({
+  batchId,
+  checkpointId,
+  policy,
+  referencePolicy,
+  trajectories = [],
+  applyUpdate = applyPpoUpdate,
+  config = createTrainerConfig(),
+}) {
+  if (typeof batchId !== 'string' || batchId.trim().length === 0) {
+    throw new Error('batchId is required');
+  }
+  if (typeof checkpointId !== 'string' || checkpointId.trim().length === 0) {
+    throw new Error('checkpointId is required');
+  }
+  const activePolicy = policy && typeof policy === 'object' ? policy : createStudentPolicy({ seed: 0 });
+
+  let nextReferencePolicy = referencePolicy || createReferencePolicyFrom(activePolicy);
+  const metricsRows = [];
+  const trajectoriesToApply = Array.isArray(trajectories) && trajectories.length > 0
+    ? trajectories
+    : applyUpdate === applyPpoUpdate
+      ? []
+      : [{}];
+
+  try {
+    for (const trajectory of trajectoriesToApply) {
+      const result = applyUpdate({
+        policy: activePolicy,
+        referencePolicy: nextReferencePolicy,
+        trajectory,
+        config,
+      });
+      metricsRows.push(result.metrics || {});
+      nextReferencePolicy = maybeRefreshReferencePolicy({
+        policy: activePolicy,
+        referencePolicy: nextReferencePolicy,
+        updateCount: Number(activePolicy.updateCount || 0),
+        config,
+      });
+    }
+
+    const updateNumber = Number(activePolicy.onlineUpdateCount || 0) + 1;
+    activePolicy.onlineUpdateCount = updateNumber;
+
+    return {
+      status: 'ok',
+      batchId,
+      checkpointId,
+      nextCheckpointId: `${checkpointId}-u${updateNumber}`,
+      policy: activePolicy,
+      referencePolicy: nextReferencePolicy,
+      metrics: summarizeBatchMetrics(metricsRows),
+    };
+  } catch (error) {
+    return {
+      status: 'update_failed',
+      batchId,
+      checkpointId,
+      error: error.message,
+    };
+  }
+}

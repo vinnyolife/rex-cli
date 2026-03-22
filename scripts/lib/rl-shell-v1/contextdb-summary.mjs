@@ -42,8 +42,19 @@ async function defaultWriter({ rootDir, summary, sessionId, artifactPath }) {
   ], { cwd: rootDir });
 }
 
+function normalizeRunSummary(summary) {
+  return {
+    updates_completed: 0,
+    updates_failed: 0,
+    rollbacks_completed: 0,
+    replay_only_epochs: 0,
+    comparison_failed_count: 0,
+    ...summary,
+  };
+}
+
 export function buildRunSummaryPayload({ run, metrics, config }) {
-  return validateRunSummary({
+  return validateRunSummary(normalizeRunSummary({
     run_id: run.runId,
     spec_path: 'docs/superpowers/specs/2026-03-22-aios-shell-rl-v1-design.md',
     student_model_id: run.studentModelId || 'tiny-json-policy-v1',
@@ -57,11 +68,11 @@ export function buildRunSummaryPayload({ run, metrics, config }) {
     seed_results: config.seed_results || [],
     replay_pool_status: config.replay_pool_status,
     status: run.status || 'ok',
-  });
+  }));
 }
 
 export async function writeRunSummary({ rootDir, summary, sessionId = '', writer = defaultWriter }) {
-  const normalized = validateRunSummary(summary);
+  const normalized = validateRunSummary(normalizeRunSummary(summary));
   const artifactPath = path.join(rootDir, 'experiments', 'rl-shell-v1', 'runs', normalized.run_id, 'run-summary.json');
   await writeJson(artifactPath, normalized);
 
