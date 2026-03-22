@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +21,55 @@ function makeConfig(overrides = {}) {
   };
 }
 
+async function writeJson(filePath, value) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+async function writeText(filePath, value) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, value, 'utf8');
+}
+
+async function makeFixtureTaskRoot() {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-shell-v2-orch-'));
+  const repoSourcePath = path.join(rootDir, 'fixtures', 'task-repo');
+  await writeJson(path.join(repoSourcePath, 'package.json'), {
+    name: 'fixture-task',
+    private: true,
+    type: 'module',
+  });
+  await writeText(path.join(repoSourcePath, 'src', 'math.mjs'), 'export function add(a, b) {\n  return a - b;\n}\n');
+  await writeText(
+    path.join(repoSourcePath, 'tests', 'math.test.mjs'),
+    [
+      "import test from 'node:test';",
+      "import assert from 'node:assert/strict';",
+      "import { add } from '../src/math.mjs';",
+      '',
+      "test('addition returns the sum', () => {",
+      '  assert.equal(add(2, 3), 5);',
+      '});',
+      '',
+    ].join('\n')
+  );
+
+  return {
+    rootDir,
+    task: {
+      schema_version: 1,
+      task_id: 'fixture-task-v2',
+      repo_snapshot_id: 'fixture-task@v2',
+      repo_source_path: repoSourcePath,
+      split: 'train',
+      task_prompt: 'Fix the failing addition behavior.',
+      verification_command: 'node --test',
+      baseline_failing_tests: ['addition returns the sum'],
+      constraints: ['Do not edit tests'],
+    },
+  };
+}
+
 test('run orchestrator marks campaign as insufficient-valid-tasks when registry gates fail', async () => {
   const mod = await import('../lib/rl-shell-v1/run-orchestrator.mjs');
   const result = await mod.runCampaign({
@@ -31,6 +80,81 @@ test('run orchestrator marks campaign as insufficient-valid-tasks when registry 
   });
 
   assert.equal(result.status, 'insufficient-valid-tasks');
+});
+
+test('runTrainingRun persists a multi-step synthetic episode before trainer update', async () => {
+  const mod = await import('../lib/rl-shell-v1/run-orchestrator.mjs');
+  const { rootDir, task } = await makeFixtureTaskRoot();
+  let requestCount = 0;
+
+  const result = await mod.runTrainingRun({
+    config: makeConfig({
+      rootDir,
+      maxEpisodesPerRun: 1,
+      maxUpdatesPerRun: 1,
+      max_steps_per_episode: 4,
+    }),
+    seed: 17,
+    deps: {
+      registryLoader: async () => ({
+        valid: true,
+        trainTasks: [task],
+        heldOutTasks: [],
+      }),
+      requestStudentAction: async () => {
+        requestCount += 1;
+        if (requestCount === 1) {
+          return {
+            promptExcerpt: 'step 1',
+            rawOutputText: '{"action":"read","path":"src/math.mjs"}',
+            tokenIds: [1, 2, 3],
+            tokenLogprobs: [-0.1, -0.2, -0.3],
+            parsedAction: { action: 'read', path: 'src/math.mjs' },
+            stopReason: 'action_emitted',
+            featureKey: 'step-1',
+          };
+        }
+        if (requestCount === 2) {
+          return {
+            promptExcerpt: 'step 2',
+            rawOutputText: '{"action":"run","command":"node --test"}',
+            tokenIds: [4, 5, 6],
+            tokenLogprobs: [-0.1, -0.2, -0.3],
+            parsedAction: { action: 'run', command: 'node --test' },
+            stopReason: 'action_emitted',
+            featureKey: 'step-2',
+          };
+        }
+        return {
+          promptExcerpt: 'step 3',
+          rawOutputText: '{"action":"stop","message":"done"}',
+          tokenIds: [7, 8, 9],
+          tokenLogprobs: [-0.1, -0.2, -0.3],
+          parsedAction: { action: 'stop', message: 'done' },
+          stopReason: 'student_stop',
+          featureKey: 'step-3',
+        };
+      },
+      summaryWriter: async ({ rootDir: summaryRoot }) => {
+        const summaryPath = path.join(summaryRoot, 'summary.json');
+        await writeFile(summaryPath, '{}\n', 'utf8');
+        return { summaryPath };
+      },
+      heldOutEvaluator: async () => ({
+        results: [],
+        summary: {
+          successRate: 0,
+          regressionFreeFixRate: 0,
+          avgTokenCount: 0,
+        },
+      }),
+    },
+  });
+
+  assert.equal(result.episodesCompleted >= 1, true);
+  assert.equal(result.lastEpisode.student_steps.length > 1, true);
+  assert.equal(result.lastEpisode.student_steps[0].parsed_action.action, 'read');
+  assert.equal(result.lastEpisode.student_steps[1].parsed_action.action, 'run');
 });
 
 test('entrypoint train command prints run summary path', async () => {

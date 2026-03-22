@@ -9,11 +9,13 @@ function makeEpisodeRecordWithTruncatedStreams() {
     episode_id: 'episode-001',
     run_id: 'run-001',
     task_id: 'task-001',
+    task_source: 'synthetic',
     split: 'train',
     repo_snapshot_id: 'task-001@v1',
     student_model_id: 'tiny-json-policy-v1',
     teacher_backend_requested: 'codex-cli',
     teacher_backend_used: 'codex-cli',
+    attempt_id: null,
     seed: 17,
     start_ts: '2026-03-22T03:00:00.000Z',
     end_ts: '2026-03-22T03:00:05.000Z',
@@ -47,6 +49,25 @@ function makeEpisodeRecordWithTruncatedStreams() {
           },
         },
       },
+      {
+        step_index: 2,
+        prompt_excerpt: 'Fix the bug\nRecent trace:\n- run:error',
+        raw_output_text: '{"action":"stop","message":"done"}',
+        token_ids: [4, 5, 6],
+        token_logprobs: [-0.1, -0.2, -0.3],
+        parsed_action: { action: 'stop', message: 'done' },
+        observation_event: {
+          schema_version: 1,
+          step_index: 2,
+          action: { action: 'stop', message: 'done' },
+          status: 'ok',
+          error_code: null,
+          error_message: null,
+          payload: {
+            message: 'done',
+          },
+        },
+      },
     ],
     commands_executed: ['node --test'],
     files_read: ['src/math.mjs'],
@@ -60,6 +81,8 @@ function makeEpisodeRecordWithTruncatedStreams() {
     runtime_failures: [],
     timeout_flag: false,
     stop_reason: 'budget_exhausted',
+    stop_condition: 'max_steps_reached',
+    no_progress_window: 3,
     teacher_call_status: 'ok',
     teacher_latency_ms: 123,
     teacher_confidence: 0.7,
@@ -77,6 +100,8 @@ function makeEpisodeRecordWithTruncatedStreams() {
     fused_reward: 0.08,
     advantage: 0.08,
     return: 0.08,
+    replay_eligible: true,
+    replay_priority: 0.6,
     policy_loss: 0.1,
     distill_loss: 0.2,
     kl_loss: 0.01,
@@ -105,7 +130,9 @@ test('trajectory store writes one episode json plus full artifact files for trun
   assert.equal(record.stderrArtifactPath.endsWith('.log'), true);
   assert.equal(record.finalDiffArtifactPath.endsWith('.patch'), true);
   assert.equal(record.observationTraceArtifactPath.endsWith('.json'), true);
-  assert.match(await readFile(record.observationTraceArtifactPath, 'utf8'), /command_failed|step_index/);
+  const traceArtifact = await readFile(record.observationTraceArtifactPath, 'utf8');
+  assert.match(traceArtifact, /raw_output_text/);
+  assert.match(traceArtifact, /"step_index": 2/);
 });
 
 test('trajectory store appends metrics and keeps latest/best checkpoint metadata separate', async () => {

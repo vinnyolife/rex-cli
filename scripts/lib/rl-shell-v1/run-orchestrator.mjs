@@ -3,146 +3,138 @@ import path from 'node:path';
 
 import { loadTaskRegistry, sampleTrainingTask } from './task-registry.mjs';
 import { createStudentPolicy } from './student-policy.mjs';
-import { requestStudentAction } from './student-runner.mjs';
+import { buildStudentFeatureKey, requestStudentAction } from './student-runner.mjs';
 import { computeTerminalReward, fuseReward } from './reward-fusion.mjs';
 import { applyPpoUpdate, createReferencePolicyFrom, createTrainerConfig, maybeRefreshReferencePolicy } from './trainer.mjs';
-import { createRunLayout, persistEpisode, writeCheckpointMetadata } from './trajectory-store.mjs';
+import { appendMetrics, createRunLayout, persistEpisode, writeCheckpointMetadata } from './trajectory-store.mjs';
 import { runHeldOutEval, pickBestCheckpoint } from './eval-harness.mjs';
 import { buildRunSummaryPayload, writeRunSummary } from './contextdb-summary.mjs';
+import {
+  createDefaultExecutionPolicy,
+  createEpisodeWorkspace,
+  destroyEpisodeWorkspace,
+  executeAction,
+  getStopConditionCandidate,
+  runBaselineFailureCheck,
+  runVerification,
+} from './temp-runner.mjs';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function computeHash(value) {
-  let hash = 2166136261;
-  const text = String(value);
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function createSyntheticObservation(parsedAction, success) {
-  if (!parsedAction) {
-    return {
-      schema_version: 1,
-      step_index: 1,
-      action: { action: 'stop', message: 'parse_failed' },
-      status: 'error',
-      error_code: 'parse_failed',
-      error_message: 'Student action did not parse',
-      payload: { message: 'parse_failed' },
-    };
-  }
-
-  if (parsedAction.action === 'run') {
-    return {
-      schema_version: 1,
-      step_index: 1,
-      action: parsedAction,
-      status: success ? 'ok' : 'error',
-      error_code: success ? null : 'command_failed',
-      error_message: null,
-      payload: {
-        exit_code: success ? 0 : 1,
-        stdout_excerpt: success ? 'all tests passed' : '',
-        stderr_excerpt: success ? '' : '1 failing test',
-        stdout_truncated: false,
-        stderr_truncated: false,
-        files_touched: [],
-      },
-    };
-  }
-
-  if (parsedAction.action === 'read') {
-    return {
-      schema_version: 1,
-      step_index: 1,
-      action: parsedAction,
-      status: 'ok',
-      error_code: null,
-      error_message: null,
-      payload: {
-        path: parsedAction.path,
-        content_excerpt: 'placeholder content',
-        content_truncated: false,
-        bytes_read: 32,
-      },
-    };
-  }
-
-  if (parsedAction.action === 'patch') {
-    return {
-      schema_version: 1,
-      step_index: 1,
-      action: parsedAction,
-      status: success ? 'ok' : 'error',
-      error_code: success ? null : 'patch_failed',
-      error_message: null,
-      payload: {
-        applied: success,
-        files_touched: success ? ['src/math.mjs'] : [],
-        reject_reason: success ? null : 'patch_failed',
-        diff_excerpt: parsedAction.diff,
-      },
-    };
-  }
-
+function createTeacherFailureResponse(backend) {
   return {
-    schema_version: 1,
-    step_index: 1,
-    action: parsedAction,
-    status: 'ok',
-    error_code: null,
-    error_message: null,
-    payload: { message: parsedAction.message },
+    backend_used: backend,
+    call_status: 'failed_all_backends',
+    latency_ms: 0,
+    critique: null,
+    reference_solution: null,
+    shaping_score: 0,
+    confidence: 0,
   };
 }
 
-function buildEpisodeRecord({ runId, task, studentAction, observationEvent, rewardParts, teacherResponse, trainerMetrics, seed }) {
+function dedupe(items) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function buildEpisodeRecord({
+  runId,
+  task,
+  seed,
+  startedAt,
+  endedAt,
+  studentSteps,
+  baseline,
+  verification,
+  rewardParts,
+  teacherResponse,
+  trainerMetrics = {},
+  stopCondition,
+  stopReason,
+  executionPolicy,
+}) {
   const success = rewardParts.terminalReward > 0;
+  const commandsExecuted = [];
+  const filesRead = [];
+  const filesTouched = [];
+  const patchApplyResults = [];
+  const runtimeFailures = [];
+  let timeoutFlag = false;
+
+  for (const step of studentSteps) {
+    const action = step.parsed_action;
+    const observation = step.observation_event;
+    if (action?.action === 'run' && action.command) {
+      commandsExecuted.push(action.command);
+    }
+    if (action?.action === 'read' && action.path) {
+      filesRead.push(action.path);
+    }
+    if (Array.isArray(observation?.payload?.files_touched)) {
+      filesTouched.push(...observation.payload.files_touched);
+    }
+    if (action?.action === 'patch') {
+      patchApplyResults.push({
+        applied: observation?.payload?.applied === true,
+        reject_reason: observation?.payload?.reject_reason ?? null,
+      });
+      if (Array.isArray(observation?.payload?.files_touched)) {
+        filesTouched.push(...observation.payload.files_touched);
+      }
+    }
+    if (observation?.status === 'timeout') {
+      timeoutFlag = true;
+      runtimeFailures.push('command_timeout');
+    } else if (observation?.status === 'error' && observation?.error_code) {
+      runtimeFailures.push(observation.error_code);
+    } else if (observation?.status === 'rejected' && observation?.error_code) {
+      runtimeFailures.push(observation.error_code);
+    }
+  }
+
+  const finalDiff = studentSteps
+    .filter((step) => step.parsed_action?.action === 'patch')
+    .map((step) => step.parsed_action.diff || '')
+    .join('\n');
+
+  const finalObservation = verification.observation;
+  const replayPriority = success ? 0.7 : verification.tests_after.length < baseline.failingTests.length ? 0.5 : 0.3;
   return {
     episode_id: `${runId}-episode-001`,
     run_id: runId,
     task_id: task.task_id,
+    task_source: 'synthetic',
     split: task.split,
     repo_snapshot_id: task.repo_snapshot_id,
     student_model_id: 'tiny-json-policy-v1',
     teacher_backend_requested: teacherResponse.backend_used,
     teacher_backend_used: teacherResponse.backend_used,
+    attempt_id: null,
     seed,
-    start_ts: new Date().toISOString(),
-    end_ts: new Date().toISOString(),
-    status: success ? 'success' : 'failed',
+    start_ts: startedAt.toISOString(),
+    end_ts: endedAt.toISOString(),
+    status: timeoutFlag ? 'timeout' : success ? 'success' : 'failed',
     task_prompt: task.task_prompt,
     constraints: task.constraints,
-    baseline_failing_tests: task.baseline_failing_tests,
-    baseline_reproduced: true,
-    student_steps: [
-      {
-        step_index: 1,
-        prompt_excerpt: task.task_prompt,
-        raw_output_text: studentAction.rawOutputText,
-        token_ids: studentAction.tokenIds,
-        token_logprobs: studentAction.tokenLogprobs,
-        parsed_action: studentAction.parsedAction || { action: 'stop', message: 'parse_failed' },
-        observation_event: observationEvent,
-      },
-    ],
-    commands_executed: studentAction.parsedAction?.action === 'run' ? [studentAction.parsedAction.command] : [],
-    files_read: studentAction.parsedAction?.action === 'read' ? [studentAction.parsedAction.path] : [],
-    files_touched: success ? ['src/math.mjs'] : [],
-    patch_apply_results: [{ applied: success, reject_reason: success ? null : 'not_applied' }],
-    stdout_summary: success ? 'all tests passed' : '',
-    stderr_summary: success ? '' : '1 failing test',
-    final_diff: success ? '*** Begin Patch\n*** End Patch\n' : '',
-    tests_before: task.baseline_failing_tests,
-    tests_after: success ? [] : task.baseline_failing_tests,
-    runtime_failures: success ? [] : ['verification_failed'],
-    timeout_flag: false,
-    stop_reason: studentAction.stopReason,
+    baseline_failing_tests: baseline.failingTests,
+    baseline_reproduced: baseline.reproduced,
+    student_steps: studentSteps,
+    commands_executed: dedupe(commandsExecuted),
+    files_read: dedupe(filesRead),
+    files_touched: dedupe(filesTouched),
+    patch_apply_results: patchApplyResults,
+    stdout_summary: finalObservation.payload?.stdout_excerpt || '',
+    stderr_summary: finalObservation.payload?.stderr_excerpt || '',
+    final_diff: finalDiff,
+    tests_before: baseline.failingTests,
+    tests_after: verification.tests_after,
+    runtime_failures: dedupe(runtimeFailures),
+    timeout_flag: timeoutFlag,
+    stop_reason: stopReason,
+    stop_condition: stopCondition,
+    no_progress_window: Number(executionPolicy.no_progress_window || 3),
     teacher_call_status: teacherResponse.call_status,
     teacher_latency_ms: teacherResponse.latency_ms,
     teacher_confidence: teacherResponse.confidence,
@@ -154,11 +146,13 @@ function buildEpisodeRecord({ runId, task, studentAction, observationEvent, rewa
     terminal_reward: rewardParts.terminalReward,
     teacher_term: rewardParts.teacherTerm,
     fused_reward: rewardParts.fusedReward,
-    advantage: trainerMetrics.advantage,
-    return: trainerMetrics.return,
-    policy_loss: trainerMetrics.policy_loss,
-    distill_loss: trainerMetrics.distill_loss,
-    kl_loss: trainerMetrics.kl_loss,
+    advantage: Number(trainerMetrics.advantage || 0),
+    return: Number(trainerMetrics.return || 0),
+    replay_eligible: baseline.reproduced && stopCondition !== 'unsafe_runner_state',
+    replay_priority: replayPriority,
+    policy_loss: Number(trainerMetrics.policy_loss || 0),
+    distill_loss: Number(trainerMetrics.distill_loss || 0),
+    kl_loss: Number(trainerMetrics.kl_loss || 0),
     stdout_artifact_path: 'artifacts/stdout.log',
     stderr_artifact_path: 'artifacts/stderr.log',
     final_diff_artifact_path: 'artifacts/final.patch',
@@ -180,6 +174,19 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
   }
 
   const rootDir = config.rootDir || process.cwd();
+  const requestAction = deps.requestStudentAction || requestStudentAction;
+  const trainerUpdater = deps.trainerUpdater || applyPpoUpdate;
+  const heldOutEvaluator = deps.heldOutEvaluator || runHeldOutEval;
+  const summaryWriter = deps.summaryWriter || writeRunSummary;
+  const taskSampler = deps.taskSampler || sampleTrainingTask;
+  const persistEpisodeFn = deps.persistEpisode || persistEpisode;
+  const appendMetricsFn = deps.appendMetrics || appendMetrics;
+  const createWorkspace = deps.createWorkspace || createEpisodeWorkspace;
+  const destroyWorkspace = deps.destroyWorkspace || destroyEpisodeWorkspace;
+  const executeEpisodeAction = deps.executeAction || executeAction;
+  const runBaselineCheck = deps.runBaselineCheck || runBaselineFailureCheck;
+  const runFinalVerification = deps.runVerification || runVerification;
+  const stopConditionResolver = deps.getStopConditionCandidate || getStopConditionCandidate;
   const registryLoader = deps.registryLoader || (async () => await loadTaskRegistry({
     rootDir,
     configPath: config.configPath || 'experiments/rl-shell-v1/configs/benchmark-v1.json',
@@ -195,39 +202,110 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     runId,
   });
 
-  const task = sampleTrainingTask(registry, { seed, attempt: 0 });
+  const task = taskSampler(registry, { seed, attempt: 0 });
   const policy = deps.policyFactory ? await deps.policyFactory({ seed, config }) : createStudentPolicy({ seed });
   let referencePolicy = createReferencePolicyFrom(policy);
+  const executionPolicy = {
+    ...createDefaultExecutionPolicy(),
+    ...Object.fromEntries(
+      Object.entries(config).filter(([key]) =>
+        ['max_steps_per_episode', 'max_command_seconds', 'max_episode_seconds', 'max_output_bytes_per_stream', 'no_progress_window'].includes(key)
+      )
+    ),
+  };
 
-  const studentAction = await requestStudentAction({
-    policy,
-    trace: [{
+  const startedAt = new Date();
+  const workspace = await createWorkspace({ taskManifest: task, rootDir });
+  let baseline;
+  let verification;
+  let studentSteps = [];
+  let stopCondition = 'unsafe_runner_state';
+  let stopReason = 'unsafe_runner_state';
+
+  try {
+    baseline = await runBaselineCheck({
+      workspace,
+      verificationCommand: task.verification_command,
+      policy: executionPolicy,
+    });
+
+    const trace = [{
       task_prompt: task.task_prompt,
-      baseline_failing_tests: task.baseline_failing_tests,
-    }],
-    budget: { remainingSteps: 1 },
-  });
+      baseline_failing_tests: baseline.failingTests,
+    }];
+    const maxSteps = Number(config.max_steps_per_episode || executionPolicy.max_steps_per_episode);
 
-  const success = (computeHash(`${seed}:${task.task_id}`) % 100) >= 45;
-  const observationEvent = createSyntheticObservation(studentAction.parsedAction, success);
+    while (studentSteps.length < maxSteps) {
+      const studentAction = await requestAction({
+        policy,
+        trace,
+        budget: { remainingSteps: maxSteps - studentSteps.length },
+      });
+      const parsedAction = studentAction.parsedAction || { action: 'stop', message: 'parse_failed' };
+      const observationEvent = await executeEpisodeAction({
+        workspace,
+        action: parsedAction,
+        policy: executionPolicy,
+      });
+
+      studentSteps.push({
+        step_index: studentSteps.length + 1,
+        prompt_excerpt: studentAction.promptExcerpt || task.task_prompt,
+        raw_output_text: studentAction.rawOutputText,
+        token_ids: studentAction.tokenIds,
+        token_logprobs: studentAction.tokenLogprobs,
+        parsed_action: parsedAction,
+        observation_event: observationEvent,
+        feature_key: studentAction.featureKey,
+      });
+      trace.push({ observation_event: observationEvent });
+
+      const stopCandidate = stopConditionResolver({ workspace, policy: executionPolicy });
+      if (stopCandidate) {
+        stopCondition = stopCandidate;
+        stopReason = stopCandidate;
+        break;
+      }
+      if (parsedAction.action === 'stop') {
+        stopCondition = 'student_stop';
+        stopReason = studentAction.stopReason || 'student_stop';
+        break;
+      }
+    }
+
+    if (!stopCondition || stopCondition === 'unsafe_runner_state') {
+      stopCondition = studentSteps.length >= Number(config.max_steps_per_episode || executionPolicy.max_steps_per_episode)
+        ? 'max_steps_reached'
+        : stopCondition;
+      stopReason = stopCondition === 'max_steps_reached' ? 'budget_exhausted' : stopReason;
+    }
+
+    verification = await runFinalVerification({
+      workspace,
+      verificationCommand: task.verification_command,
+      policy: {
+        ...executionPolicy,
+        max_steps_per_episode: Number(executionPolicy.max_steps_per_episode || 0) + 1,
+      },
+    });
+    if (verification.verification_status === 'ok') {
+      stopCondition = 'verification_passed';
+      stopReason = 'verification_passed';
+    }
+  } finally {
+    await destroyWorkspace(workspace);
+  }
+
   const terminalReward = computeTerminalReward({
-    baselineFailures: task.baseline_failing_tests,
-    finalFailures: success ? [] : task.baseline_failing_tests,
-    newFailures: [],
-    verificationStatus: success ? 'ok' : 'ok',
+    baselineFailures: baseline.failingTests,
+    finalFailures: verification.tests_after,
+    newFailures: verification.new_failures,
+    verificationStatus: verification.verification_status,
   });
 
   const teacherResponse = deps.teacherCaller
-    ? await deps.teacherCaller({ task, studentAction, seed, config })
-    : {
-        backend_used: config.teacher_backend_requested,
-        call_status: 'failed_all_backends',
-        latency_ms: 0,
-        critique: null,
-        reference_solution: null,
-        shaping_score: 0,
-        confidence: 0,
-      };
+    ? await deps.teacherCaller({ task, studentSteps, verification, seed, config })
+    : createTeacherFailureResponse(config.teacher_backend_requested);
 
   const rewardParts = {
     terminalReward,
@@ -238,36 +316,72 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     }),
   };
 
-  const trainerResult = applyPpoUpdate({
+  const placeholderMetrics = {
+    advantage: 0,
+    return: 0,
+    policy_loss: 0,
+    distill_loss: 0,
+    kl_loss: 0,
+  };
+  const episode = buildEpisodeRecord({
+    runId,
+    task,
+    seed,
+    startedAt,
+    endedAt: new Date(),
+    studentSteps: studentSteps.map((step) => ({
+      step_index: step.step_index,
+      prompt_excerpt: step.prompt_excerpt,
+      raw_output_text: step.raw_output_text,
+      token_ids: step.token_ids,
+      token_logprobs: step.token_logprobs,
+      parsed_action: step.parsed_action,
+      observation_event: step.observation_event,
+    })),
+    baseline,
+    verification,
+    rewardParts,
+    teacherResponse,
+    trainerMetrics: placeholderMetrics,
+    stopCondition,
+    stopReason,
+    executionPolicy,
+  });
+  const persistedEpisode = await persistEpisodeFn({ runDir, episode });
+
+  const trainerConfig = createTrainerConfig();
+  const trainerResult = trainerUpdater({
     policy,
     referencePolicy,
     trajectory: {
-      featureKey: studentAction.featureKey,
-      tokenIds: studentAction.tokenIds,
-      fusedReward: rewardParts.fusedReward,
+      featureKey: buildStudentFeatureKey({ trace: [{ task_prompt: task.task_prompt, baseline_failing_tests: baseline.failingTests }] }),
+      stepFeatureKeys: studentSteps.map((step) => step.feature_key || 'default'),
+      stepTokenIds: studentSteps.map((step) => step.token_ids),
+      tokenIds: studentSteps.flatMap((step) => step.token_ids),
+      rewards: studentSteps.map((_, index) => (index === studentSteps.length - 1 ? rewardParts.fusedReward : 0)),
       distillationStatus: teacherResponse.reference_solution ? 'applied' : 'skipped',
       teacherTokenIds: [],
     },
-    config: createTrainerConfig(),
+    config: trainerConfig,
   });
   referencePolicy = maybeRefreshReferencePolicy({
     policy,
     referencePolicy,
     updateCount: policy.updateCount,
-    config: createTrainerConfig(),
+    config: trainerConfig,
   });
 
-  const episode = buildEpisodeRecord({
-    runId,
-    task,
-    studentAction,
-    observationEvent,
-    rewardParts,
-    teacherResponse,
-    trainerMetrics: trainerResult.metrics,
-    seed,
+  await appendMetricsFn({
+    runDir,
+    metric: {
+      step: policy.updateCount,
+      reward: rewardParts.fusedReward,
+      terminal_reward: rewardParts.terminalReward,
+      step_count: studentSteps.length,
+      stop_condition: stopCondition,
+      episode_path: persistedEpisode.episodePath,
+    },
   });
-  await persistEpisode({ runDir, episode });
 
   const checkpointPath = path.join(runDir.checkpointsDir, 'best', 'policy.json');
   await mkdir(path.dirname(checkpointPath), { recursive: true });
@@ -283,7 +397,7 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     metadata: { checkpointPath, seed, updateCount: policy.updateCount },
   });
 
-  const heldOutEval = await runHeldOutEval({
+  const heldOutEval = await heldOutEvaluator({
     checkpoint: policy,
     registry,
     policyFactory: (checkpoint) => checkpoint,
@@ -305,7 +419,6 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     },
   });
 
-  const summaryWriter = deps.summaryWriter || writeRunSummary;
   const summaryResult = await summaryWriter({
     rootDir,
     summary,
@@ -321,6 +434,18 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     bestCheckpointPath: checkpointPath,
     heldOutMetrics: heldOutEval.summary,
     referencePolicy,
+    episodesCompleted: 1,
+    updatesCompleted: Number(policy.updateCount || 0),
+    lastEpisode: {
+      ...episode,
+      ...trainerResult.metrics,
+      student_steps: episode.student_steps,
+      advantage: trainerResult.metrics.advantage,
+      return: trainerResult.metrics.return,
+      replay_eligible: episode.replay_eligible,
+      replay_priority: episode.replay_priority,
+      stop_condition: episode.stop_condition,
+    },
   };
 }
 

@@ -59,7 +59,7 @@ export async function persistEpisode({ runDir, episode }) {
   await writeFile(finalDiffArtifactPath, episodeRecord.final_diff, 'utf8');
   await writeJson(
     observationTraceArtifactPath,
-    episodeRecord.student_steps.map((step) => step.observation_event)
+    episodeRecord.student_steps
   );
 
   const episodePath = path.join(runDir.episodesDir, `${episodeRecord.episode_id}.json`);

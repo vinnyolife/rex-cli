@@ -64,21 +64,36 @@ export function computeAdvantages({ rewards, config = createTrainerConfig() }) {
 
 export function applyPpoUpdate({ policy, referencePolicy, trajectory, config = createTrainerConfig() }) {
   const featureKey = trajectory.featureKey || 'default';
-  const policyVector = ensureWeightVector(policy, featureKey);
-  const referenceVector = ensureWeightVector(referencePolicy, featureKey);
-  const tokenIds = Array.isArray(trajectory.tokenIds) ? trajectory.tokenIds : [];
+  const rewardSequence = Array.isArray(trajectory.rewards) && trajectory.rewards.length > 0
+    ? trajectory.rewards.map((value) => Number(value || 0))
+    : [Number(trajectory.fusedReward ?? trajectory.reward ?? 0)];
+  const { advantages, returns } = computeAdvantages({ rewards: rewardSequence, config });
+  const stepFeatureKeys = Array.isArray(trajectory.stepFeatureKeys) && trajectory.stepFeatureKeys.length > 0
+    ? trajectory.stepFeatureKeys
+    : rewardSequence.map(() => featureKey);
+  const stepTokenIds = Array.isArray(trajectory.stepTokenIds) && trajectory.stepTokenIds.length > 0
+    ? trajectory.stepTokenIds
+    : [Array.isArray(trajectory.tokenIds) ? trajectory.tokenIds : []];
+  const tokenIds = Array.isArray(trajectory.tokenIds)
+    ? trajectory.tokenIds
+    : stepTokenIds.flatMap((tokens) => (Array.isArray(tokens) ? tokens : []));
   const teacherTokenIds = Array.isArray(trajectory.teacherTokenIds) ? trajectory.teacherTokenIds : [];
-  const reward = Number(trajectory.fusedReward ?? trajectory.reward ?? 0);
-  const { advantages } = computeAdvantages({ rewards: [reward], config });
-  const advantage = Number(trajectory.advantage ?? advantages[0] ?? reward);
+  const advantage = Number(trajectory.advantage ?? returns[0] ?? rewardSequence[0] ?? 0);
 
-  for (const tokenId of tokenIds) {
-    if (Number.isInteger(tokenId) && tokenId >= 0 && tokenId < policyVector.length) {
-      policyVector[tokenId] += config.learning_rate * advantage;
+  for (let stepIndex = 0; stepIndex < stepTokenIds.length; stepIndex += 1) {
+    const currentFeatureKey = stepFeatureKeys[stepIndex] || featureKey;
+    const policyVector = ensureWeightVector(policy, currentFeatureKey);
+    const stepAdvantage = Number(advantages[Math.min(stepIndex, advantages.length - 1)] ?? advantage);
+    for (const tokenId of stepTokenIds[stepIndex] || []) {
+      if (Number.isInteger(tokenId) && tokenId >= 0 && tokenId < policyVector.length) {
+        policyVector[tokenId] += config.learning_rate * stepAdvantage;
+      }
     }
   }
 
   if (trajectory.distillationStatus === 'applied') {
+    const distillFeatureKey = stepFeatureKeys[stepFeatureKeys.length - 1] || featureKey;
+    const policyVector = ensureWeightVector(policy, distillFeatureKey);
     for (const tokenId of teacherTokenIds) {
       if (Number.isInteger(tokenId) && tokenId >= 0 && tokenId < policyVector.length) {
         policyVector[tokenId] += config.learning_rate * config.distill_loss_weight;
@@ -92,6 +107,8 @@ export function applyPpoUpdate({ policy, referencePolicy, trajectory, config = c
 
   const rlLoss = Math.max(0, -advantage);
   const distillLoss = teacherTokenIds.length === 0 ? 0 : mismatchCount / teacherTokenIds.length;
+  const referenceVector = ensureWeightVector(referencePolicy, stepFeatureKeys[stepFeatureKeys.length - 1] || featureKey);
+  const policyVector = ensureWeightVector(policy, stepFeatureKeys[stepFeatureKeys.length - 1] || featureKey);
   const klLoss = averageAbsoluteDifference(policyVector, referenceVector);
   const losses = computeLosses({
     rlLoss,
@@ -112,7 +129,9 @@ export function applyPpoUpdate({ policy, referencePolicy, trajectory, config = c
       total_loss: losses.totalLoss,
       distill_loss_weight: losses.distillLossWeight,
       advantage,
-      return: advantage,
+      return: returns[0] ?? advantage,
+      step_count: stepTokenIds.length,
+      step_advantages: advantages,
     },
   };
 }
