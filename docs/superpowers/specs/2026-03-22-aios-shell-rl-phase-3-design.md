@@ -12,7 +12,7 @@ The phase keeps the Phase 2 multi-step runtime and teacher interface, but change
 2. updates happen in micro-batches of `4` real trajectories,
 3. the updated checkpoint takes over the next real tasks immediately,
 4. the system continuously compares the updated checkpoint against the checkpoint that existed immediately before the update,
-5. continuous relative degradation triggers automatic rollback,
+5. three `worse` outcomes without an intervening `better` trigger automatic rollback,
 6. rollback-causing trajectories are preserved as negative replay assets rather than discarded.
 
 Phase 3 is successful only if real-task online updates produce a net positive effect on matched real-task outcomes while automatic rollback prevents sustained degradation.
@@ -40,7 +40,7 @@ Can real `aios` repository tasks train the student online, with immediate checkp
 5. Update the student only after accumulating `4` real trajectories into a live batch.
 6. Promote the updated checkpoint immediately to active status for subsequent real tasks.
 7. Detect relative degradation by comparing new real-task performance against the checkpoint that existed immediately before the update.
-8. Roll back automatically after `3` consecutive relative degradations.
+8. Roll back automatically after `3` `worse` outcomes without an intervening `better`.
 9. Preserve rollback-causing batches as negative replay evidence for later offline correction.
 
 ## Non-Goals
@@ -79,7 +79,7 @@ The following design decisions are fixed for Phase 3:
 2. Online updates happen after every `4` admitted real trajectories.
 3. The new checkpoint takes over immediately after the update.
 4. Rollback is automatic rather than human-triggered.
-5. Rollback is triggered by `3` consecutive relative degradations.
+5. Rollback is triggered by `3` `worse` outcomes without an intervening `better`.
 6. Relative degradation is measured against the checkpoint that existed immediately before the latest online update.
 7. Every real trajectory receives episode-level teacher `critique + reference + shaping`.
 8. Rollback-causing trajectories are retained in offline replay as negative evidence.
@@ -132,7 +132,7 @@ A real trajectory is admitted to the live update path only if all of the followi
 - the episode completed terminal verification,
 - the trajectory structure is valid and parseable,
 - worktree isolation succeeded without main-workspace contamination,
-- required teacher outputs are present.
+- `teacher_call_status=complete` and all required teacher payload fields are non-null.
 
 If any of these checks fail, the trajectory is still persisted, but it is excluded from the live batch and marked with a non-admitted `admission_status`.
 
@@ -156,8 +156,8 @@ Computes relative outcome comparisons between the current active checkpoint and 
 Responsibilities:
 
 - run matched shadow comparisons for each real task handled by the active checkpoint,
-- classify the outcome as `better`, `same`, or `worse`,
-- maintain the current consecutive-degradation streak,
+- record `comparison_status` and, when completed, `relative_outcome`,
+- maintain the current degradation streak,
 - emit a rollback signal when the streak reaches `3`.
 
 The degradation monitor is the only component allowed to decide whether a rollback is necessary.
@@ -190,9 +190,30 @@ Phase 3 runs the following checkpoint lifecycle:
 5. `degradation-tracking`
    The system runs matched comparisons between the post-update active checkpoint and `pre_update_ref_checkpoint_id`.
 6. `rollback`
-   If `3` consecutive relative degradations occur, the system restores `pre_update_ref_checkpoint_id` as active and preserves the failed batch for replay and diagnosis.
+   If `3` `worse` outcomes occur without an intervening `better`, the system restores `pre_update_ref_checkpoint_id` as active and preserves the failed batch for replay and diagnosis.
 
 The state machine is fully automatic. Phase 3 introduces no manual approval gate between update and promotion.
+
+## Update Epoch Model
+
+Phase 3 uses explicit update epochs so that the comparison baseline cannot be overwritten while a post-update checkpoint is still being evaluated.
+
+An `update_epoch` is defined as:
+
+1. one sealed live batch of `4` admitted real trajectories used to produce a new checkpoint,
+2. followed by the next `4` admitted real trajectories served by that new checkpoint,
+3. with matched comparison against the frozen `pre_update_ref_checkpoint_id` for those `4` post-update trajectories.
+
+Rules:
+
+- `pre_update_ref_checkpoint_id` is frozen for the entire update epoch,
+- the next online update may not overwrite `pre_update_ref_checkpoint_id` until the current epoch closes,
+- an epoch closes only when either:
+  - rollback has occurred, or
+  - all `4` post-update trajectories have completed matched comparison or been marked `comparison_failed`,
+- if the epoch closes without rollback, the `4` admitted post-update trajectories become the next sealed live batch.
+
+This makes the monitoring window finite, deterministic, and aligned with the `4`-trajectory update cadence.
 
 ## Real Task Episode Flow
 
@@ -222,10 +243,12 @@ For every real task served after an online update:
 1. the active checkpoint runs the task in its normal temporary worktree,
 2. the system then runs `pre_update_ref_checkpoint_id` against the same task in a separate comparison worktree,
 3. both runs are evaluated against the same task-family verification target,
-4. the degradation monitor compares the two results and assigns one of:
-   - `better`
-   - `same`
-   - `worse`
+4. if the comparison run completes, the degradation monitor records:
+   - `comparison_status=completed`
+   - `relative_outcome=better | same | worse`
+5. if the comparison run fails twice, the degradation monitor records:
+   - `comparison_status=comparison_failed`
+   - `relative_outcome=null`
 
 ### Primary Comparison Rules
 
@@ -233,20 +256,21 @@ Primary comparison is task-family specific and always takes priority over step-c
 
 For `failing_tests`:
 
-- fewer unresolved target failures is better,
-- fewer newly introduced failures is better,
+- fewer unresolved target failures from the structured verification result is better,
+- fewer newly introduced failures from the structured verification result is better,
 - introducing more regressions than `pre_update_ref_checkpoint_id` is worse.
 
 For `typecheck`:
 
 - `pass` beats `fail`,
-- if both fail, lower normalized error count is better,
-- if counts are unavailable, stable parseable terminal summaries must be used instead.
+- if both fail and the verification wrapper emits a numeric `error_count`, lower `error_count` is better,
+- if both fail and no numeric `error_count` is available, the primary outcome is a tie.
 
 For `build`:
 
 - `pass` beats `fail`,
-- if both fail, lower normalized error count or fewer blocking build-stage failures is better.
+- if both fail and the verification wrapper emits a numeric `blocking_error_count`, lower `blocking_error_count` is better,
+- if both fail and no numeric `blocking_error_count` is available, the primary outcome is a tie.
 
 ### Secondary Comparison Rules
 
@@ -262,8 +286,9 @@ Secondary rules may upgrade `same` to `better`, but they may not override a prim
 
 - `worse` increments the degradation streak by `1`,
 - `better` resets the streak,
-- `same` leaves the streak unchanged,
-- `3` consecutive `worse` outcomes trigger automatic rollback.
+- `same` leaves the streak unchanged and does not break the streak,
+- `comparison_failed` leaves the streak unchanged and does not break the streak,
+- `3` `worse` outcomes without an intervening `better` trigger automatic rollback.
 
 The rollback comparison baseline remains fixed to `pre_update_ref_checkpoint_id` for the entire post-update monitoring window. It does not drift with each task.
 
@@ -273,6 +298,7 @@ Every real trajectory receives teacher processing once per episode.
 
 Teacher outputs remain episode-level:
 
+- `teacher_call_status`,
 - `teacher_critique`,
 - `teacher_reference`,
 - `teacher_shaping`,
@@ -301,16 +327,18 @@ Phase 3 real trajectories must be persisted as full episode records. At minimum,
 - `pre_update_ref_checkpoint_id`
 - `teacher_backend`
 - `teacher_fallback_backend`
+- `teacher_call_status`
 - `trajectory_steps`
 - `files_read`
 - `files_modified`
 - `patch_summary`
 - `verification_before`
 - `verification_after`
-- `teacher_critique`
-- `teacher_reference`
-- `teacher_shaping`
+- `teacher_critique` (nullable)
+- `teacher_reference` (nullable)
+- `teacher_shaping` (nullable)
 - `terminal_result`
+- `comparison_status`
 - `relative_outcome`
 - `batch_id`
 - `rollback_batch`
@@ -408,7 +436,8 @@ Handling:
 - mark teacher call status and fallback behavior,
 - allow trajectory persistence even if teacher output is incomplete,
 - do not silently fabricate teacher fields,
-- reject the trajectory from online-update admission if required fields are missing.
+- store missing teacher payloads as explicit nulls,
+- reject the trajectory from online-update admission if `teacher_call_status != complete`.
 
 ### 3. Online update failure
 
@@ -455,13 +484,14 @@ Handling:
 
 ## Metrics and Success Criteria
 
-Phase 3 is successful only if all of the following are true over a repeated evaluation campaign:
+Phase 3 is successful only if all of the following are true over an evaluation campaign of at least `3` update epochs and at least `12` matched real-task comparisons:
 
-1. post-update active checkpoints show a net-positive `better / same / worse` distribution against `pre_update_ref_checkpoint_id`,
+1. `better_count > worse_count`,
 2. automatic rollback prevents sustained regression and recovers service after bad updates,
 3. no main-workspace contamination occurs,
 4. replay lanes remain populated with valid, reusable real trajectories,
-5. teacher shaping remains directionally aligned with real terminal verification often enough to be operationally useful.
+5. `comparison_failed_count / total_comparisons <= 0.10`,
+6. teacher shaping remains directionally aligned with real terminal verification for at least `70%` of trajectories whose teacher output is complete.
 
 ### Required Monitoring Metrics
 
@@ -469,6 +499,7 @@ Phase 3 is successful only if all of the following are true over a repeated eval
 - live batch count
 - online update count
 - `better / same / worse` counts
+- `comparison_failed` count
 - current and historical degradation streaks
 - rollback count
 - rollback recovery latency
@@ -483,7 +514,7 @@ Phase 3 should be considered ready for implementation planning only if the desig
 
 1. no direct main-workspace mutation path,
 2. deterministic live-batch boundary at `4` admitted trajectories,
-3. deterministic rollback trigger at `3` consecutive relative degradations,
+3. deterministic rollback trigger at `3` `worse` outcomes without an intervening `better`,
 4. explicit preservation of rollback-causing trajectories,
 5. checkpoint lineage sufficient to reconstruct any promotion and rollback decision.
 
