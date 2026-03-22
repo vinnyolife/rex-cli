@@ -143,6 +143,41 @@ export function maybeRefreshReferencePolicy({ policy, referencePolicy, updateCou
   return referencePolicy;
 }
 
+export function buildMixedReplayBatch({
+  pool,
+  batchSize = 5,
+  targetRealRatio = 0.6,
+  duplicationBackoffThreshold = 0.5,
+}) {
+  const realEpisodes = Array.isArray(pool?.realShadow?.episodes) ? pool.realShadow.episodes : [];
+  const syntheticEpisodes = Array.isArray(pool?.synthetic?.episodes) ? pool.synthetic.episodes : [];
+  const desiredReal = Math.min(realEpisodes.length, Math.round(batchSize * targetRealRatio));
+  const realUniqueRatio = realEpisodes.length === 0
+    ? 1
+    : new Set(realEpisodes.map((episode) => episode.episode_id)).size / realEpisodes.length;
+  const dedupeReal = realUniqueRatio < duplicationBackoffThreshold;
+  const realShadow = [];
+  const seenReal = new Set();
+
+  for (const episode of realEpisodes) {
+    if (realShadow.length >= desiredReal) {
+      break;
+    }
+    if (dedupeReal && seenReal.has(episode.episode_id)) {
+      continue;
+    }
+    realShadow.push(episode);
+    seenReal.add(episode.episode_id);
+  }
+
+  const synthetic = syntheticEpisodes.slice(0, Math.max(0, batchSize - realShadow.length));
+  return {
+    realShadow,
+    synthetic,
+    effectiveRealRatio: batchSize === 0 ? 0 : realShadow.length / batchSize,
+  };
+}
+
 export function createReferencePolicyFrom(policy) {
   return createStudentPolicy({
     seed: policy.seed,

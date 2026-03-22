@@ -73,3 +73,57 @@ test('trainer refreshes the frozen reference policy every 100 updates', async ()
   assert.notEqual(refreshed, reference);
   assert.deepEqual(refreshed.weights, policy.weights);
 });
+
+test('trainer prefers qualified real-shadow samples in replay batches', async () => {
+  const mod = await import('../lib/rl-shell-v1/trainer.mjs');
+  const batch = mod.buildMixedReplayBatch({
+    pool: {
+      realShadow: {
+        episodes: [
+          { episode_id: 'real-1', replay_priority: 0.9 },
+          { episode_id: 'real-2', replay_priority: 0.8 },
+          { episode_id: 'real-3', replay_priority: 0.7 },
+        ],
+      },
+      synthetic: {
+        episodes: [
+          { episode_id: 'synthetic-1', replay_priority: 0.6 },
+          { episode_id: 'synthetic-2', replay_priority: 0.5 },
+          { episode_id: 'synthetic-3', replay_priority: 0.4 },
+        ],
+      },
+    },
+    batchSize: 5,
+  });
+
+  assert.equal(batch.realShadow.length, 3);
+  assert.equal(batch.synthetic.length, 2);
+});
+
+test('trainer backs off toward synthetic when real-shadow replay is too duplicated', async () => {
+  const mod = await import('../lib/rl-shell-v1/trainer.mjs');
+  const batch = mod.buildMixedReplayBatch({
+    pool: {
+      realShadow: {
+        episodes: [
+          { episode_id: 'real-1', replay_priority: 0.9 },
+          { episode_id: 'real-1', replay_priority: 0.8 },
+          { episode_id: 'real-1', replay_priority: 0.7 },
+        ],
+      },
+      synthetic: {
+        episodes: [
+          { episode_id: 'synthetic-1', replay_priority: 0.6 },
+          { episode_id: 'synthetic-2', replay_priority: 0.5 },
+          { episode_id: 'synthetic-3', replay_priority: 0.4 },
+          { episode_id: 'synthetic-4', replay_priority: 0.3 },
+        ],
+      },
+    },
+    batchSize: 5,
+    duplicationBackoffThreshold: 0.5,
+  });
+
+  assert.equal(batch.realShadow.length, 1);
+  assert.equal(batch.synthetic.length, 4);
+});

@@ -5,7 +5,7 @@ import { loadTaskRegistry, sampleTrainingTask } from './task-registry.mjs';
 import { createStudentPolicy } from './student-policy.mjs';
 import { buildStudentFeatureKey, requestStudentAction } from './student-runner.mjs';
 import { computeTerminalReward, fuseReward } from './reward-fusion.mjs';
-import { applyPpoUpdate, createReferencePolicyFrom, createTrainerConfig, maybeRefreshReferencePolicy } from './trainer.mjs';
+import { applyPpoUpdate, buildMixedReplayBatch, createReferencePolicyFrom, createTrainerConfig, maybeRefreshReferencePolicy } from './trainer.mjs';
 import { appendMetrics, createRunLayout, persistEpisode, writeCheckpointMetadata } from './trajectory-store.mjs';
 import { runHeldOutEval, pickBestCheckpoint, summarizeRealShadowEval } from './eval-harness.mjs';
 import { buildRunSummaryPayload, writeRunSummary } from './contextdb-summary.mjs';
@@ -20,6 +20,7 @@ import {
 } from './temp-runner.mjs';
 import { collectRealTasks } from './real-task-registry.mjs';
 import { createEpisodeWorktree, destroyEpisodeWorktree } from './worktree-runner.mjs';
+import { loadReplayPool } from './replay-pool.mjs';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -372,6 +373,13 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     updateCount: policy.updateCount,
     config: trainerConfig,
   });
+  const replayPool = deps.replayPool || (config.phase === '2C' ? await loadReplayPool({ rootDir }) : null);
+  const replayBatch = replayPool
+    ? buildMixedReplayBatch({
+        pool: replayPool,
+        batchSize: Number(config.replayBatchSize || 5),
+      })
+    : { realShadow: [], synthetic: [], effectiveRealRatio: 0 };
 
   await appendMetricsFn({
     runDir,
@@ -382,6 +390,8 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
       step_count: studentSteps.length,
       stop_condition: stopCondition,
       episode_path: persistedEpisode.episodePath,
+      replay_real_count: replayBatch.realShadow.length,
+      replay_synthetic_count: replayBatch.synthetic.length,
     },
   });
 
@@ -438,6 +448,7 @@ export async function runTrainingRun({ config, seed, deps = {} }) {
     referencePolicy,
     episodesCompleted: 1,
     updatesCompleted: Number(policy.updateCount || 0),
+    replayBatch,
     lastEpisode: {
       ...episode,
       ...trainerResult.metrics,

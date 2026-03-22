@@ -46,6 +46,7 @@ export async function addReplayEpisode({ pool, episode }) {
   }
   const lane = episode.task_source === 'real_shadow' ? pool.realShadow : pool.synthetic;
   lane.episodes.push({
+    ...episode,
     episode_id: episode.episode_id,
     task_source: episode.task_source,
     replay_priority: Number(episode.replay_priority || 0),
