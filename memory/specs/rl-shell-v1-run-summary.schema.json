@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aios://memory/specs/rl-shell-v1-run-summary.schema.json",
+  "title": "AIOS Shell RL V1 Run Summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "spec_path",
+    "student_model_id",
+    "primary_teacher",
+    "fallback_order",
+    "train_split",
+    "held_out_split",
+    "best_checkpoint_path",
+    "best_metrics",
+    "seed_results",
+    "status"
+  ],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "spec_path": { "type": "string", "minLength": 1 },
+    "student_model_id": { "type": "string", "minLength": 1 },
+    "primary_teacher": { "type": "string", "minLength": 1 },
+    "fallback_order": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "train_split": { "type": "string", "minLength": 1 },
+    "held_out_split": { "type": "string", "minLength": 1 },
+    "best_checkpoint_path": { "type": "string", "minLength": 1 },
+    "best_metrics": { "type": "object" },
+    "seed_results": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "status": { "type": "string", "minLength": 1 }
+  }
+}
