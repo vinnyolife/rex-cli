@@ -200,3 +200,44 @@ test('contextdb summary writer validates required fields and keeps write failure
     })
   );
 });
+
+test('real-task shadow eval does not update trainer state and repeats tasks across seed-attempt pairs', async () => {
+  const mod = await import('../lib/rl-shell-v1/run-orchestrator.mjs');
+  let trainerUpdates = 0;
+
+  const result = await mod.runRealShadowEval({
+    config: makeConfig({
+      rootDir: REPO_ROOT,
+      acceptanceSeeds: [17, 29],
+      shadowAttemptsPerSeed: 2,
+    }),
+    deps: {
+      realTaskCollector: async () => ({
+        pool_status: 'limited-pool',
+        admitted_tasks: 1,
+        admitted: [
+          {
+            task_id: 'real-test-scripts',
+            task_prompt: 'Repair scripts test failure',
+            verification_command: 'npm run test:scripts',
+            baseline_failing_tests: ['not ok 1 - orchestrator manifest parse failure'],
+          },
+        ],
+      }),
+      shadowAttemptRunner: async ({ task, seed, attempt }) => ({
+        task_id: task.task_id,
+        seed,
+        attempt,
+        repaired: seed === 17 && attempt <= 2,
+        contaminated_main_worktree: false,
+      }),
+      trainerUpdater: async () => {
+        trainerUpdates += 1;
+      },
+    },
+  });
+
+  assert.equal(trainerUpdates, 0);
+  assert.equal(result.attempt_results.length, 4);
+  assert.equal(result.repeatability.stableRepairCount, 1);
+});

@@ -87,6 +87,29 @@ export function comparePhase2ABaseline({ currentSummary, multiStepBaselineSummar
   };
 }
 
+export function summarizeRealShadowEval({ pool_status, admitted_tasks, attempt_results }) {
+  const attempts = Array.isArray(attempt_results) ? attempt_results : [];
+  const byTask = new Map();
+  for (const attempt of attempts) {
+    const current = byTask.get(attempt.task_id) || { attempts: 0, repairs: 0 };
+    current.attempts += 1;
+    current.repairs += attempt.repaired ? 1 : 0;
+    byTask.set(attempt.task_id, current);
+  }
+
+  const stableRepairCount = [...byTask.values()].filter((entry) => entry.repairs >= 2).length;
+  return {
+    poolStatus: pool_status || 'limited-pool',
+    admittedTasks: Number(admitted_tasks || 0),
+    repeatedRepairRate: Number(admitted_tasks || 0) === 0 ? 0 : stableRepairCount / Number(admitted_tasks),
+    stableRepairCount,
+    perTaskAttemptCounts: Object.fromEntries(
+      [...byTask.entries()].map(([taskId, entry]) => [taskId, entry.attempts])
+    ),
+    mainWorktreeContaminationFailures: attempts.filter((attempt) => attempt.contaminated_main_worktree).length,
+  };
+}
+
 export function pickBestCheckpoint(checkpoints) {
   return [...checkpoints].sort((left, right) => {
     if (right.successRate !== left.successRate) {

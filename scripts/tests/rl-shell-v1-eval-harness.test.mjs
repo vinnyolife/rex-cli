@@ -121,3 +121,20 @@ test('held-out evaluation never mutates student weights or trainer counters', as
 
   assert.equal(JSON.stringify(policy), snapshot);
 });
+
+test('eval harness summarizes real-task shadow repeatability metrics', async () => {
+  const mod = await import('../lib/rl-shell-v1/eval-harness.mjs');
+  const summary = mod.summarizeRealShadowEval({
+    pool_status: 'limited-pool',
+    admitted_tasks: 2,
+    attempt_results: [
+      { task_id: 'task-a', repaired: true, contaminated_main_worktree: false },
+      { task_id: 'task-a', repaired: true, contaminated_main_worktree: false },
+      { task_id: 'task-b', repaired: false, contaminated_main_worktree: true },
+    ],
+  });
+
+  assert.equal(summary.repeatedRepairRate, 0.5);
+  assert.equal(summary.stableRepairCount, 1);
+  assert.equal(summary.mainWorktreeContaminationFailures, 1);
+});

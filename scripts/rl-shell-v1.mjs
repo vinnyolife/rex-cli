@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { generateBenchmark } from './lib/rl-shell-v1/task-registry.mjs';
-import { runTrainingRun, runCampaign } from './lib/rl-shell-v1/run-orchestrator.mjs';
+import { runTrainingRun, runCampaign, runRealShadowEval } from './lib/rl-shell-v1/run-orchestrator.mjs';
 import { loadPolicyCheckpoint } from './lib/rl-shell-v1/student-policy.mjs';
 import { loadTaskRegistry } from './lib/rl-shell-v1/task-registry.mjs';
 import { runHeldOutEval } from './lib/rl-shell-v1/eval-harness.mjs';
@@ -66,6 +66,16 @@ async function main() {
   if (command === 'eval') {
     const configPath = flags.config || 'experiments/rl-shell-v1/configs/benchmark-v1.json';
     const config = await loadConfig(rootDir, configPath, flags.teacher, flags.phase);
+    if (config.phase === '2B') {
+      const result = await runRealShadowEval({ config });
+      console.log(`pool_status=${result.pool_status}`);
+      console.log(`admitted_tasks=${result.admitted_tasks}`);
+      console.log(`repeated_repair_rate=${result.repeatability.repeatedRepairRate}`);
+      console.log(`stable_repair_count=${result.repeatability.stableRepairCount}`);
+      console.log(`main_worktree_contamination_failures=${result.repeatability.mainWorktreeContaminationFailures}`);
+      console.log(`shadow_artifact=${result.shadowArtifactPath}`);
+      return;
+    }
     const checkpoint = await loadPolicyCheckpoint(flags.checkpoint);
     const registry = await loadTaskRegistry({ rootDir, configPath });
     const result = await runHeldOutEval({

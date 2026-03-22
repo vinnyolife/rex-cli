@@ -111,6 +111,7 @@ export async function collectRealTasks({
       admission_status: admission.admission_status,
       baseline_reproduced: admission.baseline_reproduced,
       baseline_failure_signature: admission.stable_signature,
+      baseline_failing_tests: admission.stable_signature ? admission.stable_signature.split('\n').filter(Boolean) : [],
       baseline_attempts: admission.attempts,
     };
     if (admission.admission_status === 'admitted') {
