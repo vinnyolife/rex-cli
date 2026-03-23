@@ -84,6 +84,11 @@
       "repoTargets": ["codex", "claude"]
     },
     {
+      "relativeSkillPath": "harness-init-runner",
+      "installCatalogName": "harness-init-runner",
+      "repoTargets": ["codex", "claude", "gemini", "opencode"]
+    },
+    {
       "relativeSkillPath": ".system/skill-creator",
       "installCatalogName": null,
       "repoTargets": ["codex", "claude"],

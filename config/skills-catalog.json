@@ -122,6 +122,18 @@
       "tags": ["aios", "harness"]
     },
     {
+      "name": "harness-init-runner",
+      "description": "Initialize a lightweight Node.js harness runner (harness/ + .harness/) to drive codex/claude/gemini/opencode CLIs with logs + checkpoints.",
+      "source": "skill-sources/harness-init-runner",
+      "clients": ["codex", "claude", "gemini", "opencode"],
+      "scopes": ["global", "project"],
+      "defaultInstall": {
+        "global": false,
+        "project": false
+      },
+      "tags": ["harness", "bootstrap", "runner", "cli", "node", "agents"]
+    },
+    {
       "name": "contextdb-autopilot",
       "description": "Automatic ContextDB persistence workflow.",
       "source": "skill-sources/contextdb-autopilot",
