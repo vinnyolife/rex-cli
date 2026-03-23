@@ -1,6 +1,7 @@
 import runSummarySchema from '../../../memory/specs/rl-shell-v1-run-summary.schema.json' with { type: 'json' };
 
 const ACTION_TYPES = new Set(['read', 'run', 'patch', 'stop']);
+const EPISODE_ENVIRONMENTS = new Set(['shell']);
 const OBSERVATION_STATUS = new Set(['ok', 'rejected', 'error', 'timeout']);
 const TEACHER_CALL_STATUS = new Set(['ok', 'fallback_ok', 'invalid_response', 'failed_all_backends']);
 const SPLITS = new Set(['train', 'held_out']);
@@ -208,6 +209,22 @@ export function validateTeacherResponse(raw) {
   return raw;
 }
 
+export function readShellEpisodeForDiagnosis(raw) {
+  assertObject(raw, 'diagnostic shell episode');
+  const schemaVersion = raw.schema_version === 1 ? 'v1' : 'v0';
+  return {
+    ...raw,
+    schema_version: raw.schema_version ?? 0,
+    environment: raw.environment ?? 'shell',
+    safety_violation: raw.safety_violation ?? false,
+    safety_violation_reason: raw.safety_violation_reason ?? null,
+    legacyCompatibility: {
+      schemaVersion,
+      replayEligible: schemaVersion === 'v1',
+    },
+  };
+}
+
 function validateStudentStep(step, index) {
   assertObject(step, `episode.student_steps[${index}]`);
   assertNoUnknownKeys(step, ['step_index', 'prompt_excerpt', 'raw_output_text', 'token_ids', 'token_logprobs', 'parsed_action', 'observation_event'], `episode.student_steps[${index}]`);
@@ -229,6 +246,8 @@ export function validateEpisodeRecord(raw) {
   assertNoUnknownKeys(
     raw,
     [
+      'schema_version',
+      'environment',
       'episode_id',
       'run_id',
       'task_id',
@@ -288,6 +307,8 @@ export function validateEpisodeRecord(raw) {
       'replay_eligible',
       'replay_priority',
       'replay_route',
+      'safety_violation',
+      'safety_violation_reason',
       'policy_loss',
       'distill_loss',
       'kl_loss',
@@ -298,6 +319,11 @@ export function validateEpisodeRecord(raw) {
     ],
     'episode'
   );
+  assertInteger(raw.schema_version, 'episode.schema_version', { min: 1 });
+  if (raw.schema_version !== 1) {
+    throw new Error('episode.schema_version must equal 1');
+  }
+  assertEnum(raw.environment, EPISODE_ENVIRONMENTS, 'episode.environment');
   assertString(raw.episode_id, 'episode.episode_id');
   assertString(raw.run_id, 'episode.run_id');
   assertString(raw.task_id, 'episode.task_id');
@@ -373,6 +399,12 @@ export function validateEpisodeRecord(raw) {
   }
   assertBoolean(raw.replay_eligible, 'episode.replay_eligible');
   assertEnum(raw.replay_route, REPLAY_ROUTES, 'episode.replay_route');
+  assertBoolean(raw.safety_violation, 'episode.safety_violation');
+  if (raw.safety_violation) {
+    assertString(raw.safety_violation_reason, 'episode.safety_violation_reason');
+  } else if (raw.safety_violation_reason !== null) {
+    throw new Error('episode.safety_violation_reason must be null when safety_violation=false');
+  }
   for (const field of ['stdout_artifact_path', 'stderr_artifact_path', 'final_diff_artifact_path', 'observation_trace_artifact_path']) {
     assertString(raw[field], `episode.${field}`);
   }

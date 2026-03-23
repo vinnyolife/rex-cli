@@ -30,6 +30,33 @@ export function computeDegradationStreak(results = []) {
   return streak;
 }
 
+export function reduceDegradationStreak(results = [], { rollbackThreshold = 3 } = {}) {
+  let degradationStreak = 0;
+  let shouldRollback = false;
+
+  for (const result of results) {
+    if (result?.comparison_status === 'comparison_failed') {
+      degradationStreak += 1;
+    } else if (result?.comparison_status === 'completed') {
+      if (result.relative_outcome === 'better') {
+        degradationStreak = 0;
+      } else if (result.relative_outcome === 'worse') {
+        degradationStreak += 1;
+      }
+    }
+
+    if (degradationStreak >= rollbackThreshold) {
+      shouldRollback = true;
+      break;
+    }
+  }
+
+  return {
+    degradationStreak,
+    shouldRollback,
+  };
+}
+
 export function summarizeComparisonResults(results = []) {
   return results.reduce((summary, result) => {
     if (result.comparison_status === 'comparison_failed') {

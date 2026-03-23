@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  readShellEpisodeForDiagnosis,
   validateTaskManifest,
   validateObservationEvent,
   validateTeacherResponse,
@@ -11,6 +12,8 @@ import {
 
 function makeValidEpisodeRecord() {
   return {
+    schema_version: 1,
+    environment: 'shell',
     episode_id: 'episode-001',
     run_id: 'run-001',
     task_id: 'task-001',
@@ -98,6 +101,8 @@ function makeValidEpisodeRecord() {
     replay_eligible: true,
     replay_priority: 0.6,
     replay_route: 'negative',
+    safety_violation: false,
+    safety_violation_reason: null,
     policy_loss: 0.1,
     distill_loss: 0.2,
     kl_loss: 0.01,
@@ -165,6 +170,8 @@ test('validateTeacherResponse enforces failure defaults and call_status enum', (
 test('validateEpisodeRecord requires reward, distillation, and artifact fields', () => {
   const episode = makeValidEpisodeRecord();
   assert.doesNotThrow(() => validateEpisodeRecord(episode));
+  assert.throws(() => validateEpisodeRecord({ ...episode, schema_version: undefined }), /schema_version/i);
+  assert.throws(() => validateEpisodeRecord({ ...episode, environment: undefined }), /environment/i);
   assert.throws(() => validateEpisodeRecord({ ...episode, update_epoch_id: undefined }), /update_epoch_id/i);
   assert.throws(() => validateEpisodeRecord({ ...episode, verification_executed: undefined }), /verification_executed/i);
   assert.throws(() => validateEpisodeRecord({ ...episode, comparison_status: undefined }), /comparison_status/i);
@@ -179,6 +186,82 @@ test('validateEpisodeRecord requires reward, distillation, and artifact fields',
     replay_eligible: true,
     replay_priority: 0.6,
   }));
+});
+
+test('readShellEpisodeForDiagnosis treats missing schema_version as legacy v0 and replay-ineligible', () => {
+  const legacy = readShellEpisodeForDiagnosis({
+    episode_id: 'legacy-shell-1',
+    run_id: 'run-legacy',
+    task_id: 'task-legacy',
+    task_source: 'synthetic',
+    split: 'train',
+    repo_snapshot_id: 'task-legacy@v0',
+    student_model_id: 'tiny-json-policy-v1',
+    teacher_backend_requested: 'codex-cli',
+    teacher_backend_used: 'codex-cli',
+    attempt_id: null,
+    update_epoch_id: 'epoch-legacy',
+    batch_id: 'batch-legacy',
+    pre_update_ref_checkpoint_id: null,
+    seed: 1,
+    start_ts: '2026-03-22T03:00:00.000Z',
+    end_ts: '2026-03-22T03:00:01.000Z',
+    status: 'failed',
+    task_prompt: 'Legacy record',
+    constraints: [],
+    baseline_failing_tests: [],
+    baseline_reproduced: true,
+    student_steps: [],
+    commands_executed: [],
+    files_read: [],
+    files_touched: [],
+    patch_apply_results: [],
+    verification_executed: true,
+    verification_passed: false,
+    stdout_summary: '',
+    stderr_summary: '',
+    final_diff: '',
+    tests_before: [],
+    tests_after: [],
+    runtime_failures: [],
+    timeout_flag: false,
+    stop_reason: 'budget_exhausted',
+    stop_condition: 'max_steps_reached',
+    no_progress_window: 0,
+    teacher_call_status: 'ok',
+    teacher_latency_ms: 0,
+    teacher_confidence: 0,
+    teacher_critique: null,
+    teacher_reference_solution: null,
+    teacher_shaping_score: 0,
+    distillation_status: 'skipped',
+    distillation_skip_reason: 'legacy',
+    terminal_reward: 0,
+    teacher_term: 0,
+    fused_reward: 0,
+    advantage: 0,
+    return: 0,
+    comparison_status: 'completed',
+    relative_outcome: 'same',
+    rollback_batch: false,
+    admission_status: 'rejected',
+    admission_reason: 'legacy_v0',
+    replay_eligible: false,
+    replay_priority: 0,
+    replay_route: 'diagnostic_only',
+    policy_loss: 0,
+    distill_loss: 0,
+    kl_loss: 0,
+    stdout_artifact_path: 'artifacts/stdout.log',
+    stderr_artifact_path: 'artifacts/stderr.log',
+    final_diff_artifact_path: 'artifacts/final.patch',
+    observation_trace_artifact_path: 'artifacts/trace.json',
+  });
+
+  assert.deepEqual(legacy.legacyCompatibility, {
+    schemaVersion: 'v0',
+    replayEligible: false,
+  });
 });
 
 test('validateEpisodeRecord requires attempt_id for real shadow episodes', () => {

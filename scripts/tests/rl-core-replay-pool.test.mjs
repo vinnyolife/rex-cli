@@ -83,3 +83,26 @@ test('rl-core replay pool classifies replay routes from comparison and rollback 
     'neutral'
   );
 });
+
+test('rl-core replay pool keeps legacy shell v0 episodes in diagnostic-only lane', async () => {
+  const mod = await import('../lib/rl-core/replay-pool.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-core-replay-'));
+  const pool = await mod.createReplayPool({ rootDir, namespace: 'rl-core-test' });
+
+  const episode = {
+    task_source: 'synthetic',
+    replay_eligible: true,
+    replay_priority: 0.2,
+    episode_id: 'legacy-shell-v0',
+    legacy_compatibility: {
+      schemaVersion: 'v0',
+      replayEligible: false,
+    },
+  };
+
+  assert.equal(mod.classifyReplayRoute(episode), 'diagnostic_only');
+
+  const result = await mod.addReplayEpisode({ pool, episode });
+  assert.equal(result.admitted, false);
+  assert.equal(pool.synthetic.count, 0);
+});

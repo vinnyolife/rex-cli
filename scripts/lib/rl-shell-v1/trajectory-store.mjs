@@ -47,7 +47,11 @@ export async function persistEpisode({ runDir, episode }) {
   const observationTraceArtifactPath = path.join(runDir.artifactsDir, names.observationTrace);
 
   const episodeRecord = validateEpisodeRecord({
+    schema_version: episode.schema_version ?? 1,
+    environment: episode.environment ?? 'shell',
     ...episode,
+    safety_violation: episode.safety_violation ?? false,
+    safety_violation_reason: episode.safety_violation_reason ?? null,
     stdout_artifact_path: path.relative(runDir.runPath, stdoutArtifactPath),
     stderr_artifact_path: path.relative(runDir.runPath, stderrArtifactPath),
     final_diff_artifact_path: path.relative(runDir.runPath, finalDiffArtifactPath),

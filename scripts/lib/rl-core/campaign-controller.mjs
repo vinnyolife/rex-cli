@@ -1,5 +1,9 @@
 import { applyPointerTransition } from './checkpoint-registry.mjs';
-import { normalizeEpisodeComparison, computeDegradationStreak } from './comparison-engine.mjs';
+import {
+  normalizeEpisodeComparison,
+  reduceDegradationStreak as reduceDegradationStreakFromResults,
+  summarizeComparisonResults,
+} from './comparison-engine.mjs';
 import { createControlStateStore, applyControlEvent, readControlSnapshot, writeControlSnapshot } from './control-state-store.mjs';
 import { recordComparisonResults, reopenEpoch, seedEpoch } from './epoch-ledger.mjs';
 import { runOnlineUpdateBatch } from './trainer.mjs';
@@ -43,18 +47,99 @@ function createInitialSnapshot(initialCheckpointId) {
   };
 }
 
+export function computeEpochOutcome({
+  activeEnvironments = [],
+  betterCount = 0,
+  worseCount = 0,
+  comparisonFailedCount = 0,
+  coverageSatisfied = true,
+  shellSafetyGatePassed,
+  shellSafetyGate,
+  degradationStreak = 0,
+}) {
+  if (degradationStreak >= 3) {
+    return {
+      outcome: 'rollback',
+      shellSafetyGateCalled: false,
+      shellSafetyGatePassed: shellSafetyGatePassed ?? null,
+    };
+  }
+
+  if (!coverageSatisfied) {
+    return {
+      outcome: 'replay_only',
+      shellSafetyGateCalled: false,
+      shellSafetyGatePassed: shellSafetyGatePassed ?? null,
+    };
+  }
+
+  let gateCalled = false;
+  let gatePassed = shellSafetyGatePassed;
+  const promotionCandidate = betterCount > 0 && worseCount === 0 && comparisonFailedCount === 0;
+  if (promotionCandidate && activeEnvironments.includes('shell')) {
+    if (typeof shellSafetyGate === 'function') {
+      gateCalled = true;
+      gatePassed = Boolean(shellSafetyGate());
+    } else if (typeof gatePassed !== 'boolean') {
+      gatePassed = true;
+    }
+  }
+
+  if (promotionCandidate && activeEnvironments.includes('shell') && gatePassed === false) {
+    return {
+      outcome: 'replay_only',
+      shellSafetyGateCalled: gateCalled,
+      shellSafetyGatePassed: gatePassed,
+    };
+  }
+
+  if (comparisonFailedCount > 0) {
+    return {
+      outcome: 'replay_only',
+      shellSafetyGateCalled: gateCalled,
+      shellSafetyGatePassed: gatePassed ?? null,
+    };
+  }
+
+  if (promotionCandidate) {
+    return {
+      outcome: 'promotion_eligible',
+      shellSafetyGateCalled: gateCalled,
+      shellSafetyGatePassed: gatePassed ?? null,
+    };
+  }
+
+  return {
+    outcome: 'continue_monitoring',
+    shellSafetyGateCalled: gateCalled,
+    shellSafetyGatePassed: gatePassed ?? null,
+  };
+}
+
+export function reduceMonitoringDegradation(results, { rollbackThreshold = 3 } = {}) {
+  return reduceDegradationStreakFromResults(results, { rollbackThreshold });
+}
+
+export { reduceDegradationStreakFromResults as reduceDegradationStreak };
+
 export async function runOnlineCampaign({ config, deps = {} }) {
   const rootDir = config.rootDir || process.cwd();
   const namespace = config.namespace || 'rl-core';
   const maxTasks = Number(config.maxTasks || 0);
   const batchSize = Number(config.onlineBatchSize || 4);
   const rollbackThreshold = Number(config.rollbackThreshold || 3);
+  const idleBackoffBudget = Number(config.idleBackoffBudget || 0);
+  const activeEnvironments = Array.isArray(config.activeEnvironments) && config.activeEnvironments.length > 0
+    ? [...config.activeEnvironments]
+    : ['shell'];
   const initialCheckpointId = config.initialCheckpointId || 'ckpt-initial';
   const nextEpisode = deps.nextEpisode;
+  const sampleTask = deps.sampleTask;
   const onlineUpdater = deps.runOnlineUpdateBatch || runOnlineUpdateBatch;
   const performRollback = deps.performRollback;
+  const holdoutValidator = deps.holdoutValidator;
 
-  if (typeof nextEpisode !== 'function') {
+  if (typeof nextEpisode !== 'function' && typeof sampleTask !== 'function') {
     throw new Error('deps.nextEpisode is required');
   }
 
@@ -101,12 +186,50 @@ export async function runOnlineCampaign({ config, deps = {} }) {
   });
   let collectionEpisodes = [];
   let monitoringResults = [];
+  let idlePolls = 0;
 
   for (let taskIndex = 0; taskIndex < maxTasks; taskIndex += 1) {
     if (controlState.mode === 'frozen_failure') {
       break;
     }
 
+    if (typeof nextEpisode !== 'function' && typeof sampleTask === 'function') {
+      const task = await sampleTask({
+        taskIndex,
+        currentEpoch,
+        activeCheckpointId: controlState.active_checkpoint_id,
+        controlState,
+      });
+      if (task === null) {
+        idlePolls += 1;
+        if (idleBackoffBudget > 0 && idlePolls >= idleBackoffBudget) {
+          return {
+            status: 'no_work_available',
+            idlePolls,
+            activeEnvironments,
+            updatesCompleted,
+            updatesFailed,
+            replayOnlyEpochs,
+            rollbacksCompleted,
+            betterCount,
+            sameCount,
+            worseCount,
+            comparisonFailedCount,
+            duplicateEventApplications,
+            updatesAfterFreeze,
+            currentEpoch,
+            activeCheckpointId: controlState.active_checkpoint_id,
+            preUpdateRefCheckpointId: controlState.pre_update_ref_checkpoint_id,
+            lastStableCheckpointId: controlState.last_stable_checkpoint_id,
+            controlState,
+          };
+        }
+        continue;
+      }
+      throw new Error('deps.nextEpisode is required when sampleTask returns work');
+    }
+
+    idlePolls = 0;
     const episode = await nextEpisode({
       taskIndex,
       currentEpoch,
@@ -201,9 +324,10 @@ export async function runOnlineCampaign({ config, deps = {} }) {
       worseCount += 1;
     }
     currentEpoch.comparison_results = [...monitoringResults];
-    currentEpoch.degradation_streak = computeDegradationStreak(monitoringResults);
+    const degradation = reduceDegradationStreakFromResults(monitoringResults, { rollbackThreshold });
+    currentEpoch.degradation_streak = degradation.degradationStreak;
 
-    if (currentEpoch.degradation_streak < rollbackThreshold) {
+    if (!degradation.shouldRollback) {
       continue;
     }
 
@@ -254,8 +378,27 @@ export async function runOnlineCampaign({ config, deps = {} }) {
 
   if (controlState.mode !== 'frozen_failure' && currentEpoch.phase === 'monitoring' && monitoringResults.length > 0) {
     currentEpoch = recordComparisonResults(currentEpoch, monitoringResults);
+    const degradation = reduceDegradationStreakFromResults(monitoringResults, { rollbackThreshold });
+    currentEpoch.degradation_streak = degradation.degradationStreak;
+    const summary = summarizeComparisonResults(monitoringResults);
+    const holdoutResult = typeof holdoutValidator === 'function'
+      ? await holdoutValidator({
+        candidateCheckpointId: controlState.active_checkpoint_id,
+        baselineCheckpointId: controlState.last_stable_checkpoint_id,
+        currentEpoch,
+      })
+      : null;
+    const epochOutcome = computeEpochOutcome({
+      activeEnvironments,
+      betterCount: summary.betterCount,
+      worseCount: summary.worseCount,
+      comparisonFailedCount: summary.comparisonFailedCount,
+      coverageSatisfied: config.coverageSatisfied ?? true,
+      shellSafetyGatePassed: holdoutResult?.status !== 'failed',
+      degradationStreak: currentEpoch.degradation_streak,
+    });
 
-    if (currentEpoch.close_reason === 'replay_only') {
+    if (epochOutcome.outcome === 'replay_only') {
       replayOnlyEpochs += 1;
       const replayEvent = await applyTrackedEvent({
         event_id: `epoch-replay-only-${replayOnlyEpochs}`,
@@ -271,7 +414,7 @@ export async function runOnlineCampaign({ config, deps = {} }) {
         active_checkpoint_id: controlState.active_checkpoint_id,
         pre_update_ref_checkpoint_id: controlState.pre_update_ref_checkpoint_id,
       };
-    } else if (currentEpoch.promotion_eligible) {
+    } else if (epochOutcome.outcome === 'promotion_eligible' && currentEpoch.promotion_eligible) {
       const stablePatch = applyPointerTransition(
         buildPointerState(controlState, initialCheckpointId),
         {

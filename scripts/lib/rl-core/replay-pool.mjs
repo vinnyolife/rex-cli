@@ -43,7 +43,12 @@ function isTrainingAdmitted(episode) {
 }
 
 export function classifyReplayRoute(episode) {
-  if (episode?.comparison_status === 'comparison_failed' || episode?.lifecycle_status === 'update_failed') {
+  if (
+    episode?.comparison_status === 'comparison_failed' ||
+    episode?.lifecycle_status === 'update_failed' ||
+    episode?.safety_violation === true ||
+    episode?.legacy_compatibility?.replayEligible === false
+  ) {
     return 'diagnostic_only';
   }
   if (episode?.rollback_batch || episode?.relative_outcome === 'worse') {
@@ -79,7 +84,12 @@ export async function addReplayEpisode({ pool, episode }) {
     episode?.lifecycle_status !== undefined;
   const replayRoute = hasRoutingMetadata ? episode?.replay_route || classifyReplayRoute(episode) : null;
 
-  if (!episode?.replay_eligible || !isTrainingAdmitted(episode) || replayRoute === 'diagnostic_only') {
+  if (
+    !episode?.replay_eligible ||
+    !isTrainingAdmitted(episode) ||
+    episode?.legacy_compatibility?.replayEligible === false ||
+    replayRoute === 'diagnostic_only'
+  ) {
     return { admitted: false };
   }
 
