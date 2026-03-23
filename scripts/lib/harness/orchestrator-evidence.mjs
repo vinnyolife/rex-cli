@@ -6,6 +6,19 @@ import { withWorkItemArtifactRef } from './work-item-telemetry.mjs';
 
 export const ORCHESTRATION_DISPATCH_EVENT_KIND = 'orchestration.dispatch-run';
 
+export function compactRlDecisionEvidence(raw = {}) {
+  return {
+    context_state: raw.context_state || {},
+    decision_type: String(raw.decision_type || '').trim(),
+    decision_payload: raw.decision_payload || {},
+    executor_selected: String(raw.executor_selected || 'unknown'),
+    preflight_selected: raw.preflight_selected === true,
+    verification_result: String(raw.verification_result || 'failed'),
+    handoff_triggered: raw.handoff_triggered === true,
+    terminal_outcome: String(raw.terminal_outcome || 'failed'),
+  };
+}
+
 function formatArtifactTimestamp(ts = new Date()) {
   return ts.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
