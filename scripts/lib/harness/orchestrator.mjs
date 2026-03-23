@@ -12,6 +12,7 @@ import blueprintSpec from '../../../memory/specs/orchestrator-blueprints.json' w
 export const ORCHESTRATOR_ROLE_IDS = ['planner', 'implementer', 'reviewer', 'security-reviewer'];
 export const ORCHESTRATOR_BLUEPRINT_NAMES = ['feature', 'bugfix', 'refactor', 'security'];
 export const ORCHESTRATOR_FORMATS = ['text', 'json'];
+export const RL_ORCHESTRATOR_DECISION_TYPES = ['dispatch', 'retry', 'stop', 'handoff', 'preflight'];
 const DEFAULT_WORK_ITEM_LIMIT = 4;
 const WORK_ITEM_TYPE_PATTERNS = Object.freeze([
   { type: 'auth', pattern: /\b(auth|authentication|authorize|authorization|login|oauth|token|credential|secret)\b/i },

@@ -1,0 +1,10 @@
+export const ENVIRONMENTS = new Set(['shell', 'browser', 'orchestrator']);
+export const COMPARISON_STATUSES = new Set(['completed', 'comparison_failed']);
+export const RELATIVE_OUTCOMES = new Set(['better', 'same', 'worse']);
+export const REPLAY_ROUTES = new Set(['positive', 'neutral', 'negative', 'diagnostic_only']);
+export const CONTROL_MODES = new Set(['collection', 'monitoring', 'frozen_failure']);
+export const TEACHER_CALL_STATUSES = new Set(['complete', 'fallback_complete', 'invalid_response', 'failed_all_backends']);
+export const UPDATE_RESULT_STATUSES = new Set(['ok', 'update_failed']);
+export const HOLDOUT_VALIDATION_STATUSES = new Set(['passed', 'failed', 'not_requested']);
+export const EPOCH_OUTCOMES = new Set(['rollback', 'replay_only', 'promotion_eligible', 'no_work_available', 'continue_monitoring']);
+export const TEACHER_TRIGGER_REASONS = new Set(['failure', 'boundary']);

@@ -1,66 +1,22 @@
-function countFailures(value) {
-  if (Array.isArray(value)) {
-    return value.length;
-  }
-  return Number(value || 0);
-}
+import {
+  computeTerminalReward,
+  fuseReward as fuseCoreReward,
+  summarizeReward,
+} from '../rl-core/reward-engine.mjs';
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
+const SHELL_TO_CORE_CALL_STATUS = {
+  ok: 'complete',
+  fallback_ok: 'fallback_complete',
+  invalid_response: 'invalid_response',
+  failed_all_backends: 'failed_all_backends',
+};
 
-export function computeTerminalReward({ baselineFailures, finalFailures, newFailures, verificationStatus }) {
-  const baselineCount = countFailures(baselineFailures);
-  const finalCount = countFailures(finalFailures);
-  const newFailureCount = countFailures(newFailures);
-
-  if (verificationStatus && verificationStatus !== 'ok') {
-    return -1;
-  }
-  if (newFailureCount > 0) {
-    return -1;
-  }
-  if (finalCount === 0 && newFailureCount === 0) {
-    return 1;
-  }
-  if (finalCount < baselineCount && newFailureCount === 0) {
-    return 0.25;
-  }
-  if (finalCount === baselineCount && newFailureCount === 0) {
-    return 0;
-  }
-  return -1;
-}
+export { computeTerminalReward, summarizeReward };
 
 export function fuseReward({ terminalReward, shapingScore, callStatus }) {
-  const teacherAllowed = callStatus === 'ok' || callStatus === 'fallback_ok';
-  const teacherTerm = teacherAllowed ? clamp(Number(shapingScore || 0) * 0.2, -0.2, 0.2) : 0;
-  const rawFused = Number(terminalReward) + teacherTerm;
-
-  if (terminalReward > 0) {
-    return {
-      teacherTerm,
-      fusedReward: Math.max(0.05, rawFused),
-    };
-  }
-
-  if (terminalReward === 0) {
-    return {
-      teacherTerm,
-      fusedReward: clamp(rawFused, -0.2, 0.2),
-    };
-  }
-
-  return {
-    teacherTerm,
-    fusedReward: Math.min(-0.05, rawFused),
-  };
-}
-
-export function summarizeReward({ terminalReward, teacherTerm, fusedReward }) {
-  return {
+  return fuseCoreReward({
     terminalReward,
-    teacherTerm,
-    fusedReward,
-  };
+    shapingScore,
+    callStatus: SHELL_TO_CORE_CALL_STATUS[callStatus] || callStatus,
+  });
 }

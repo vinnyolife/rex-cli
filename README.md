@@ -584,8 +584,10 @@ Manual fallback (only if needed): remove the managed `# >>> contextdb-shell >>>`
 ## Experimental: Shell RL
 
 This repository includes an isolated shell/coding RL experiment runner under `scripts/rl-shell-v1.mjs`.
+Its shared control plane now lives under `scripts/lib/rl-core/`, which is the adapter-facing RL library for shell first and the future browser/orchestrator environments later.
 
 - Generate benchmark: `npm run rl-shell-v1:benchmark`
+- Run focused RL Core tests: `npm run test:rl-core`
 - Run Phase 2A synthetic training smoke: `npm run rl-shell-v1:train:2a`
 - Run Phase 2B real-task shadow eval: `npm run rl-shell-v1:eval:2b`
 - Run Phase 2C campaign: `npm run rl-shell-v1:campaign:2c`
@@ -596,6 +598,7 @@ This repository includes an isolated shell/coding RL experiment runner under `sc
 Phase 3 notes:
 
 - Real-task online RL stays isolated from the main workspace. Episodes must execute in temporary worktrees or temporary directories; the main worktree is never mutated directly.
+- `scripts/lib/rl-core/` owns shared checkpoint lineage, epoch bookkeeping, reward fusion, replay routing, trainer entry points, teacher normalization, comparison semantics, and the serialized online campaign controller.
 - The online controller seals one live update batch every `4` admitted trajectories, then promotes the new checkpoint immediately.
 - Three relative `worse` outcomes without an intervening `better` trigger automatic rollback to the pre-update reference checkpoint.
 - If rollback itself fails, the control plane enters `frozen_failure` mode and blocks further online updates until an operator intervenes.
@@ -603,3 +606,23 @@ Phase 3 notes:
   - `node scripts/rl-shell-v1.mjs phase3-train --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli --max-tasks 5 --initial-checkpoint ckpt-a`
   - `node scripts/rl-shell-v1.mjs phase3-resume --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli --max-tasks 5 --initial-checkpoint ckpt-a`
   - `node scripts/rl-shell-v1.mjs phase3-eval --summary experiments/rl-shell-v1/runs/<run-id>/run-summary.json`
+
+## Experimental: Mixed Browser + Orchestrator RL
+
+`scripts/lib/rl-browser-v1/` and `scripts/lib/rl-orchestrator-v1/` now adapt controlled browser flows and high-signal orchestrator control decisions into the shared `scripts/lib/rl-core/` learning surface. `scripts/lib/rl-mixed-v1/` composes shell, browser, and orchestrator under one checkpoint lineage.
+
+- Run browser adapter tests: `npm run test:rl-browser-v1`
+- Run orchestrator adapter tests: `npm run test:rl-orchestrator-v1`
+- Run mixed campaign tests: `npm run test:rl-mixed-v1`
+- Dry-run browser-only mixed surface: `npm run rl-mixed-v1:browser`
+- Dry-run orchestrator-only mixed surface: `npm run rl-mixed-v1:orchestrator`
+- Dry-run full mixed surface: `npm run rl-mixed-v1:mixed`
+- Emit the 30-episode validation artifact: `npm run rl-mixed-v1:eval`
+
+Mixed campaign expectations:
+
+- one shared checkpoint lineage spans shell/browser/orchestrator,
+- mixed batches preserve per-environment evidence and pairwise batch combinations,
+- rollback drill exposes a `rollback-completed-*` event and restored checkpoint lineage,
+- resume drill preserves `duplicateEventApplications === 0`,
+- validation output is written to `experiments/rl-mixed-v1/validation/latest.json`.
