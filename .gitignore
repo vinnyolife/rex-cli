@@ -25,6 +25,11 @@ images/
 download/
 cover-image.png
 *.png
+# 否定规则必须在 *.png 之后才能覆盖它
+!aios/images/
+!aios/images/**/*.png
+!blog-site/assets/
+!blog-site/assets/**/*.png
 *.jpg
 *.jpeg
 *.gif
