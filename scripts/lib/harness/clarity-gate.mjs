@@ -2,6 +2,7 @@ import { runContextDbCli } from '../contextdb-cli.mjs';
 
 const CLARITY_GATE_EVENT_KIND = 'orchestration.human-gate';
 const MAX_SIGNAL_SAMPLES = 8;
+const CLARITY_NEEDS_INPUT_FAILURE_CATEGORY = 'clarity-needs-input';
 const SENSITIVE_COMMAND_PATTERNS = Object.freeze([
   { id: 'sudo', label: 'sudo command', pattern: /\bsudo\s+\S+/i },
   { id: 'rm-rf', label: 'rm -rf command', pattern: /\brm\s+-rf\b/i },
@@ -77,6 +78,54 @@ function collectPayloadSnippets(dispatchRun = null) {
     }
   }
   return snippets;
+}
+
+function collectBoundarySnippets(dispatchRun = null) {
+  const snippets = [];
+  for (const jobRun of Array.isArray(dispatchRun?.jobRuns) ? dispatchRun.jobRuns : []) {
+    const payload = jobRun?.output?.payload;
+    const candidates = [
+      payload?.taskTitle,
+      ...(Array.isArray(payload?.openQuestions) ? payload.openQuestions : []),
+      jobRun?.output?.error,
+    ];
+    for (const item of candidates) {
+      const normalized = normalizeSnippet(item);
+      if (normalized) {
+        snippets.push(normalized);
+      }
+    }
+  }
+  return snippets;
+}
+
+function getFailureCategoryCount(learnEvalReport = null, category = '') {
+  const target = normalizeText(category).toLowerCase();
+  if (!target) {
+    return 0;
+  }
+  const failureTop = Array.isArray(learnEvalReport?.signals?.failures?.top) ? learnEvalReport.signals.failures.top : [];
+  for (const item of failureTop) {
+    const failureCategory = normalizeText(item?.category).toLowerCase();
+    if (failureCategory !== target) {
+      continue;
+    }
+    const count = Number(item?.count);
+    return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  }
+  return 0;
+}
+
+function resolveBlockedCheckpointMetrics(learnEvalReport = null) {
+  const blockedCheckpointsTotal = Number(learnEvalReport?.status?.counts?.blocked || 0);
+  const clarityExcludedRaw = getFailureCategoryCount(learnEvalReport, CLARITY_NEEDS_INPUT_FAILURE_CATEGORY);
+  const blockedCheckpointsExcluded = Math.max(0, Math.min(blockedCheckpointsTotal, clarityExcludedRaw));
+  const blockedCheckpoints = Math.max(0, blockedCheckpointsTotal - blockedCheckpointsExcluded);
+  return {
+    blockedCheckpoints,
+    blockedCheckpointsTotal,
+    blockedCheckpointsExcluded,
+  };
 }
 
 function collectPatternSignals(snippets = [], patterns = []) {
@@ -156,6 +205,8 @@ function buildEvidenceText(gate, eventId = '') {
   }
   parts.push(`needsHuman=${gate.needsHuman ? 'true' : 'false'}`);
   parts.push(`blockedCheckpoints=${gate.metrics.blockedCheckpoints}`);
+  parts.push(`blockedCheckpointsTotal=${gate.metrics.blockedCheckpointsTotal}`);
+  parts.push(`blockedCheckpointsExcluded=${gate.metrics.blockedCheckpointsExcluded}`);
   parts.push(`conflictingRecommendations=${gate.metrics.conflictingRecommendations ? 'true' : 'false'}`);
   parts.push(`filesTouched=${gate.metrics.filesTouched}`);
   parts.push(`riskSignals=${gate.metrics.riskSignalCount || 0}`);
@@ -178,20 +229,25 @@ export function evaluateClarityGate(
 ) {
   const blockedThreshold = normalizePositiveInteger(blockedCheckpointThreshold, 2);
   const fileThreshold = normalizePositiveInteger(maxFilesTouched, 25);
-  const blockedCheckpoints = Number(learnEvalReport?.status?.counts?.blocked || 0);
+  const blockedCheckpointMetrics = resolveBlockedCheckpointMetrics(learnEvalReport);
+  const blockedCheckpoints = blockedCheckpointMetrics.blockedCheckpoints;
   const fixRecommendations = Array.isArray(learnEvalReport?.recommendations?.fix) ? learnEvalReport.recommendations.fix.length : 0;
   const promoteRecommendations = Array.isArray(learnEvalReport?.recommendations?.promote) ? learnEvalReport.recommendations.promote.length : 0;
   const conflictingRecommendations = fixRecommendations > 0 && promoteRecommendations > 0;
   const filesTouchedList = collectFilesTouched(dispatchRun);
   const filesTouched = filesTouchedList.length;
   const payloadSnippets = collectPayloadSnippets(dispatchRun);
+  const boundarySnippets = collectBoundarySnippets(dispatchRun);
   const sensitiveCommandSignals = collectPatternSignals(payloadSnippets, SENSITIVE_COMMAND_PATTERNS);
   const externalWriteSignals = collectExternalWriteSignals(filesTouchedList);
-  const boundaryCrossingSignals = collectPatternSignals(payloadSnippets, BOUNDARY_PATTERNS);
+  const boundaryCrossingSignals = collectPatternSignals(boundarySnippets, BOUNDARY_PATTERNS);
   const reasons = [];
 
   if (blockedCheckpoints >= blockedThreshold) {
-    reasons.push(`blocked checkpoints (${blockedCheckpoints}) reached threshold (${blockedThreshold})`);
+    const blockedReasonSuffix = blockedCheckpointMetrics.blockedCheckpointsExcluded > 0
+      ? ` after excluding clarity checkpoints (${blockedCheckpointMetrics.blockedCheckpointsExcluded})`
+      : '';
+    reasons.push(`blocked checkpoints (${blockedCheckpoints}) reached threshold (${blockedThreshold})${blockedReasonSuffix}`);
   }
   if (conflictingRecommendations) {
     reasons.push(`learn-eval has conflicting fix (${fixRecommendations}) and promote (${promoteRecommendations}) recommendations`);
@@ -217,6 +273,8 @@ export function evaluateClarityGate(
     reasons,
     metrics: {
       blockedCheckpoints,
+      blockedCheckpointsTotal: blockedCheckpointMetrics.blockedCheckpointsTotal,
+      blockedCheckpointsExcluded: blockedCheckpointMetrics.blockedCheckpointsExcluded,
       conflictingRecommendations,
       fixRecommendations,
       promoteRecommendations,
@@ -225,6 +283,7 @@ export function evaluateClarityGate(
       blockedCheckpointThreshold: blockedThreshold,
       maxFilesTouched: fileThreshold,
       payloadSnippetCount: payloadSnippets.length,
+      boundarySnippetCount: boundarySnippets.length,
       sensitiveCommandSignals,
       externalWriteSignals,
       boundaryCrossingSignals,

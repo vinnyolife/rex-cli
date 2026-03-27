@@ -492,6 +492,85 @@ test('evaluateClarityGate flags external write targets outside repo scope', () =
   assert.equal(gate.metrics.externalWriteSignals.length >= 2, true);
 });
 
+test('evaluateClarityGate ignores boundary terms in narrative findings and recommendations', () => {
+  const gate = evaluateClarityGate({
+    sessionId: 'narrative-session',
+    learnEvalReport: {
+      status: { counts: { blocked: 0 } },
+      recommendations: { fix: [], promote: [] },
+    },
+    dispatchRun: {
+      jobRuns: [
+        {
+          output: {
+            payload: {
+              taskTitle: 'Operational follow-up',
+              contextSummary: 'No explicit risky action requested.',
+              findings: [
+                'Prior auth/payment/policy incidents were already triaged.',
+              ],
+              openQuestions: [
+                'Who will run the pending Windows PowerShell wrapper validation?',
+              ],
+              recommendations: [
+                'Keep historical privacy/legal notes in the runbook timeline.',
+              ],
+              filesTouched: [],
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(gate.needsHuman, false);
+  assert.equal(gate.metrics.boundaryCrossingSignals.length, 0);
+  assert.equal(gate.reasons.some((item) => /auth\/payment\/policy boundary signals/i.test(item)), false);
+});
+
+test('evaluateClarityGate excludes clarity-needs-input checkpoints from blocked threshold metric', () => {
+  const gate = evaluateClarityGate(
+    {
+      sessionId: 'clarity-loop-session',
+      learnEvalReport: {
+        status: { counts: { blocked: 6 } },
+        signals: {
+          failures: {
+            top: [
+              { category: 'clarity-needs-input', count: 5 },
+              { category: 'dispatch-runtime-blocked', count: 1 },
+            ],
+          },
+        },
+        recommendations: { fix: [], promote: [] },
+      },
+      dispatchRun: {
+        jobRuns: [
+          {
+            output: {
+              payload: {
+                taskTitle: 'Operational telemetry pass',
+                contextSummary: 'Capture evidence without applying risky actions.',
+                findings: [],
+                openQuestions: [],
+                recommendations: [],
+                filesTouched: [],
+              },
+            },
+          },
+        ],
+      },
+    },
+    { blockedCheckpointThreshold: 2 }
+  );
+
+  assert.equal(gate.needsHuman, false);
+  assert.equal(gate.metrics.blockedCheckpoints, 1);
+  assert.equal(gate.metrics.blockedCheckpointsTotal, 6);
+  assert.equal(gate.metrics.blockedCheckpointsExcluded, 5);
+  assert.equal(gate.reasons.some((item) => /blocked checkpoints/i.test(item)), false);
+});
+
 test('dispatch runtime registry lists the local dry-run runtime', async () => {
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
