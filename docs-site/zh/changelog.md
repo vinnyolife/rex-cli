@@ -51,7 +51,7 @@ description: 版本历史、升级说明与文档变更入口。
 
 ## 相关阅读
 
-- [博客：Skills 安装体验更新](blog/2026-03-rexcli-skills-install-experience.md)
+- [博客：Skills 安装体验更新](https://cli.rexai.top/blog/zh/2026-03-rexcli-skills-install-experience/)
 - [快速开始](getting-started.md)
 - [ContextDB](contextdb.md)
 - [故障排查](troubleshooting.md)

@@ -30,6 +30,8 @@ cover-image.png
 !aios/images/**/*.png
 !blog-site/assets/
 !blog-site/assets/**/*.png
+!docs-site/assets/
+!docs-site/assets/**/*.png
 *.jpg
 *.jpeg
 *.gif
