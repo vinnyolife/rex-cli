@@ -10,6 +10,8 @@ Since launching `aios orchestrate` live execution, we've been building something
 
 This post explains what we built, why we built it that way, and what it unlocks.
 
+![RL Training System Architecture](../assets/rl-training/rl-architecture-hero.png)
+
 ## The Problem with Per-Environment RL
 
 Before RL, the system had one "student" — an implicit behavioral prior that lived in skill prompts, dispatch policies, and harness heuristics. Each new capability required hand-tuning. The path from "works in demo" to "works reliably in production" was long and manual.
@@ -86,6 +88,8 @@ active ────────────── current policy in use
 
 This gives us **safe exploration with automatic rollback** — the core guarantee that makes online learning tractable.
 
+![Checkpoint Lineage: Three-Pointer Model](../assets/rl-training/rl-checkpoint-lineage.png)
+
 ## Replay Pool: Four Lanes
 
 Instead of storing every episode, we route them into lanes by comparison outcome:
@@ -98,6 +102,8 @@ Instead of storing every episode, we route them into lanes by comparison outcome
 | `diagnostic_only` | teacher-judged boundary cases | analysis, not training |
 
 The routing is deterministic — based on comparison result, not a learned router. This keeps the system simple and debuggable.
+
+![Replay Pool: Four Lanes](../assets/rl-training/rl-replay-pool.png)
 
 ## Mixed-Environment Campaigns
 
