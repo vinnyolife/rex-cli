@@ -14,7 +14,7 @@ tags: [RexCli, Windows, Cost Tracking, OpenCode, AI Development]
 RexCli 现在完全支持 Windows 环境！我们解决了路径处理、命令行参数分割等 Windows 特有的问题，让 Windows 开发者也能享受流畅的 AI 辅助开发体验。
 
 **关键改进：**
-- 原生 Windows 路径处理（`C:\\Users\\...` 格式）
+- 原生 Windows 路径处理（`C:\Users\...` 格式）
 - 修复 cmd 环境下的 CLI 启动问题
 - 避免 Windows Codex 参数分割错误
 - 非 git 工作区的优雅降级支持

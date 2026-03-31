@@ -42,6 +42,8 @@ memory/context-db/
 - `opt-in`：仅含 `.contextdb-enable` 的工作区启用
 - `off`：关闭包装
 
+如果需要严格按项目控制，使用 `opt-in`。
+
 ## Harness 层（AIOS）
 
 AIOS 在 ContextDB 之上提供面向运营的 harness：

@@ -43,3 +43,5 @@ aios privacy ollama-on
 
 チームは生の設定をプロンプトに貼り付けてシークレットを漏らしがちです。
 Privacy Guard は危険な読み取りを再現可能な安全なデフォルトに変えます。
+
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=case_privacy_footer_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="case_privacy_footer" data-rex-target="github_star" }

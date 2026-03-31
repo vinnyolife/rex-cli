@@ -9,9 +9,27 @@ description: 일반적인 설치/런타임 문제 및 직접 수정 방법.
 
 대부분의 실패는 설정 문제입니다 (MCP 런타임 누락, 래퍼 미로드, 또는 잘못된 랩 모드). 먼저 doctor 스크립트를 실행하고 래퍼 스코프를 확인하세요.
 
+## better-sqlite3 / ContextDB가 Node 전환 후 실패
+
+RexCLI는 **Node 22 LTS**를 지원합니다. shell이 Node 25 또는 이전 ABI 비호환 설치에서 실행 중인 경우 ContextDB 관련 명령이 실패할 수 있습니다.
+
+빠른 수정:
+
+```bash
+node -v
+source ~/.nvm/nvm.sh && nvm use 22
+cd mcp-server && npm rebuild better-sqlite3
+```
+
+재시도:
+
+```bash
+npm run test:scripts
+```
+
 ## Browser MCP 도구 이용 불가
 
-**대부분의 경우**: Playwright MCP가 설치되지 않았거나, `~/.config/codex/` (또는 `~/.config/claude/` 등)의 MCP 설정에 `puppeteer-stealth` 앨리어스가 없습니다.
+**대부분의 경우**: Playwright MCP가 설치되지 않았거나, `~/.config/codex/` (또는 `~/.config/claude/` etc.)의 MCP 설정에 `puppeteer-stealth` 앨리어스가 없습니다.
 
 Doctor 스크립트로 확인하세요:
 
@@ -40,47 +58,16 @@ Doctor 스크립트로 확인하세요:
 }
 ```
 
-## 명령어가 랩되지 않음
+## `EXTRA_ARGS[@]: unbound variable`
 
-`codex` / `claude` / `gemini`를 입력해도 랩되지 않는 경우:
+원인: 이전 `ctx-agent.sh`에서 `bash set -u` 빈 배열 전개 경계 케이스 오류.
 
-1. `source ~/.zshrc` (또는 `~/.bashrc`)를 실행하여 래퍼를 다시 로드
-2. `echo $CTXDB_WRAP_MODE`로 래퍼 스코프 확인 (`opt-in`인 경우 `.contextdb-enable` 마커 필요)
-3. 랩 대상 디렉터리로 `cd` (`.contextdb-enable` 파일 존재 확인)
-4. 새 터미널 세션 열기
+수정:
 
-## 래퍼가 로드되었지만 비활성화하고 싶음
+1. 최신 `main`을 pull하세요.
+2. 셸을 다시 열고 `claude`/`codex`/`gemini`를 재시도하세요.
 
-래퍼를 영구적으로 비활성화하려면:
-
-```zsh
-export CTXDB_WRAP_MODE=off
-```
-
-특정 명령만 패스스루하려면 `CTXDB_WRAP_MODE=passthrough`를 사용:
-
-```zsh
-export CTXDB_WRAP_MODE=passthrough
-# 이렇게 하면 codex/claude/gemini가 직접 실행됨
-```
-
-## better-sqlite3 / ContextDB가 Node 전환 후 실패
-
-RexCLI는 **Node 22 LTS**를 지원합니다. shell이 Node 25 또는 이전 ABI 비호환 설치에서 실행 중인 경우 ContextDB 관련 명령이 실패할 수 있습니다.
-
-빠른 수정:
-
-```bash
-node -v
-source ~/.nvm/nvm.sh && nvm use 22
-cd mcp-server && npm rebuild better-sqlite3
-```
-
-재시도:
-
-```bash
-npm run test:scripts
-```
+최신 버전은 셸과 Node 래퍼 모두에 unified 런타임 코어 (`ctx-agent-core.mjs`)를 사용하여 이 드리프트를 해소했습니다.
 
 ## `search`가 사이드카 손실 후 빈 결과 반환
 
@@ -113,7 +100,7 @@ aios quality-gate pre-pr --profile strict
 
 ## `/new` (Codex) 또는 `/clear` (Claude/Gemini) 후 컨텍스트 사라짐
 
-이러한 명령은 **CLI 내부 대화 상태**를 리셋합니다. ContextDB 데이터는 디스크에 남아 있지만 래퍼가 컨텍스트 패킷을 주입하는 것은 **CLI 프로세스 시작 시**뿐입니다.
+이러한 명령은 **CLI 내부 대화 상태**를 리셋합니다. ContextDB는 디스크에 남아 있지만 래퍼가 컨텍스트 패킷을 주입하는 것은 **CLI 프로세스 시작 시**뿐입니다.
 
 복구 방법:
 
@@ -127,22 +114,106 @@ aios quality-gate pre-pr --profile strict
 
 ## `aios orchestrate --execute live`가 블록/실패함
 
-`AIOS_EXECUTE_LIVE`와 `AIOS_SUBAGENT_CLIENT`가 설정되어 있는지 확인하세요:
+라이브 오케스트레이션은 옵트인입니다.
+
+1. 라이브 실행 게이트 활성화:
 
 ```bash
 export AIOS_EXECUTE_LIVE=1
-export AIOS_SUBAGENT_CLIENT=codex-cli  # 필수 (live는 현재 codex-cli만 지원)
 ```
 
-`codex` v0.114+를 사용하면 `codex exec` 구조화 출력을 활용합니다. 구버전은 stdout 파싱으로 폴백합니다.
+2. codex-cli 전용 서브에이전트 클라이언트 설정 (필수):
 
-## `ctx-agent` 실행 오류: `claude: command not found`
+```bash
+export AIOS_SUBAGENT_CLIENT=codex-cli
+```
 
-이전 `ctx-agent.sh`를 사용 중입니다. `main`을 최신화하세요.
+3. `codex`가 PATH에 있고 인증되었는지 확인 (예: `codex --version`).
 
-최신 버전은 `ctx-agent-core.mjs`에 실행 로직을 통합하여 sh/mjs 구현 차분을 해소했습니다.
+Windows 빠른 확인 (PowerShell):
 
-## RexCLI 소스 레포 내에서 `--scope project`가 실패함
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\doctor-contextdb-shell.ps1
+codex --version
+codex
+```
+
+예상 동작: TTY 오류(`stdout is not a terminal` 등) 없음, 인터랙티브 `codex` 세션이 터미널에 정상적으로 연결.
+
+팁 (codex-cli): Codex CLI v0.114+는 `codex exec` 구조화 출력 지원 (`--output-schema`, `--output-last-message`, stdin). AIOS는 사용 가능할 때 안정적인 JSON handoff를 위해 이를 활용합니다.
+
+팁: 모델 콜 없이 DAG를 검증하려면 `--execute dry-run` 사용 (또는 라이브 런타임 어댑터 시뮬레이션용 `AIOS_SUBAGENT_SIMULATE=1`).
+
+일반적인 실패 시그니처:
+
+- `type: upstream_error` / `server_error`: 상류 불안정. 나중에 재시도 (AIOS는 자동으로 몇 번 재시도함).
+- `Timed out after 600000 ms`: `AIOS_SUBAGENT_TIMEOUT_MS` 증가 (예: `900000`) 또는 `AIOS_SUBAGENT_CONTEXT_LIMIT` / `AIOS_SUBAGENT_CONTEXT_TOKEN_BUDGET`로 컨텍스트 패킷 축소.
+- `invalid_json_schema` (`param: text.format.schema`): 백엔드가 구조화 출력 스키마를 거부함. 최신 `main`을 pull하고 재시도. AIOS는 스키마 거부를 감지하면 `--output-schema` 없이 재시도.
+
+최소 구조화 출력 스모크 체크 (macOS/Linux):
+
+```bash
+printf '%s' 'Return a JSON object matching the schema.' | codex exec --output-schema memory/specs/agent-handoff.schema.json -
+```
+
+## 명령어가 랩되지 않음
+
+랩되지 않는 경우:
+
+- git 레포 내부에 있는지 확인: `git rev-parse --show-toplevel`이 작동하는지
+- `ROOTPATH/scripts/contextdb-shell.zsh`가 존재하고 source되었는지 확인
+- `CTXDB_WRAP_MODE`가 현재 레포를 허용하는지 확인 (`opt-in`은 `.contextdb-enable` 필요)
+
+먼저 래퍼 doctor 실행:
+
+```bash
+scripts/doctor-contextdb-shell.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\doctor-contextdb-shell.ps1
+```
+
+## `CODEX_HOME points to ".codex"` 오류
+
+원인: `CODEX_HOME`이 상대 경로로 설정됨.
+
+수정:
+
+```bash
+export CODEX_HOME="$HOME/.codex"
+mkdir -p "$CODEX_HOME"
+```
+
+최신 래퍼 스크립트는 명령 실행 시 상대 `CODEX_HOME`을 자동으로 정규화합니다.
+
+## 래퍼가 로드되었지만 비활성화하고 싶음
+
+영구적으로 비활성화하려면:
+
+```zsh
+export CTXDB_WRAP_MODE=off
+```
+
+## Skills가 잘못된 레포 디렉터리에 저장됨
+
+canonical skill source tree는 이제 다음 위치에 있습니다:
+
+- `<repo>/skill-sources`
+
+생성된 repo-local 검색 가능 출력은 다음 위치에 있습니다:
+
+- `<repo>/.codex/skills`
+- `<repo>/.claude/skills`
+
+`SKILL.md`를 `.baoyu-skills/`와 같은 병렬 디렉터리에 저장하면 Codex / Claude는 이를 스킬로 검색하지 못합니다.
+
+- `.baoyu-skills/`는 `EXTEND.md`와 같은 확장 설정에만 사용하세요
+- 실제 canonical skill 소스 파일은 `skill-sources/<name>/SKILL.md`로 이동하세요
+- `node scripts/sync-skills.mjs`로 각 클라이언트의 호환 디렉터리를 다시 생성하세요
+- `scripts/doctor-contextdb-skills.sh --client all`로 미지원 스킬 루트 디렉터리를 감지하세요
+
+## `--scope project`가 RexCLI 소스 레포 내에서 실패함
 
 canonical skill source tree 마이그레이션 후 발생합니다. 이는 의도적인 동작입니다:
 
@@ -195,21 +266,3 @@ GitHub 설정에서 수정:
 ### `codex`를 입력해도 컨텍스트가 주입되지 않는 이유는 무엇인가요?
 
 일반적으로 래퍼가 로드되지 않았거나, `CTXDB_WRAP_MODE`가 현재 워크스페이스를 커버하지 않거나, 명령어가 패스스루 관리 서브커맨드인 경우입니다.
-
-## Skills가 잘못된 디렉터리에 저장됨
-
-canonical skill source tree는 이제 다음 위치에 있습니다:
-
-- `<repo>/skill-sources`
-
-생성된 repo-local 검색 가능 출력은 다음 위치에 있습니다:
-
-- `<repo>/.codex/skills`
-- `<repo>/.claude/skills`
-
-`SKILL.md`를 `.baoyu-skills/`와 같은 병렬 디렉터리에 저장하면 Codex / Claude는 이를 스킬로 검색하지 못합니다.
-
-- `.baoyu-skills/`는 `EXTEND.md`와 같은 확장 설정에만 사용하세요
-- 실제 canonical skill 소스 파일은 `skill-sources/<name>/SKILL.md`로 이동하세요
-- `node scripts/sync-skills.mjs`로 각 클라이언트의 호환 디렉터리를 다시 생성하세요
-- `scripts/doctor-contextdb-skills.sh --client all`로 미지원 스킬 루트 디렉터리를 감지하세요

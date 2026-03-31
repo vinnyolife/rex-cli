@@ -45,3 +45,5 @@ browser_snapshot {"profile":"default","includeAx":true}
 
 信頼できる自動化は盲目的な自動化ではありません。
 このフローはポリシーに関連するステップを明示的に human-gated に保ち、共有ブラウザ状態で再開します。
+
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=case_authwall_footer_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="case_authwall_footer" data-rex-target="github_star" }

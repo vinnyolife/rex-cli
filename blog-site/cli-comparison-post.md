@@ -1,133 +1,139 @@
-# 장거리 작업에서 Codex, Claude, Gemini到底怎么选？
+---
+title: "Long-Task Showdown: Codex vs Claude vs Gemini — Which One Actually Wins?"
+publish_date: 2026-03-10
+description: "After using all three tools, my conclusion: there's no best tool, only the best fit for each scenario."
+---
 
-세 가지 도구를 써본 후 내 결론은: **가장 좋은 도구는 없고, 가장 맞는 상황이 있다.**
+# Long-Task Showdown: Codex vs Claude vs Gemini — Which One Actually Wins?
 
-근데 문제—많은 사람들은 어떤 상황에 뭘 써야할지 모른다.
+After trying all three tools, my conclusion: **there's no best tool — only the best fit for each situation.**
 
-오늘은虚饰せず、直接教える。
+But here's the problem — most people don't know which tool to reach for in which scenario.
+
+Today, no fluff. I'll tell you straight.
 
 ---
 
-## 01. 결론先上
+## 01. Quick Verdict
 
-| 작업タイプ | 추천 도구 | 이유 |
-|------------|-----------|------|
-| 복잡한 코드 리팩토링 | Claude Code | 컨텍스트 이해 가장 강 |
-| 브라우저 자동화 | Codex | 박스에서 꺼내서 바로 사용, 안정 |
-| 빠른 자료 검색 | Gemini | Google 검색 통합 |
-| **全部都要** | **RexCLI** |跨 도구 협업, 전환OK |
+| Task Type | Recommended Tool | Why |
+|-----------|------------------|-----|
+| Complex code refactoring | Claude Code | Strongest context understanding |
+| Browser automation | Codex | Out of the box, stable |
+| Quick research | Gemini | Deep Google search integration |
+| **All of the above** | **RexCLI** | Cross-tool collaboration, seamless switching |
 
 ---
 
-## 02.维度 비교
+## 02. Side-by-Side Comparison
 
-###维度1: 컨텍스트 연속성
+### Dimension 1: Context Continuity
 
 **Claude Code**: ⭐⭐⭐⭐⭐
 
-제일誇张的是 これ 使った、代码改了、中间3天放置。再启动的时候居然记得上次重构到第几个函数了。
+I refactored 2000 lines of legacy code, put it aside for 3 days, and when I came back — it remembered exactly which function I was on.
 
 **Codex**: ⭐⭐⭐⭐
 
-되지만跨파일 추적能力는稍弱。
+Good context too, but cross-file tracking is slightly weaker than Claude.
 
 **Gemini**: ⭐⭐⭐
 
-장거리 작업容易"失忆"。
+Tends to "forget" during long tasks.
 
 ---
 
-###维度2: 브라우저 자동화
+### Dimension 2: Browser Automation
 
 **Claude Code**: ⭐⭐⭐
 
-MCP 직접 설정 필요, 설정 30분,运行时偶爾抽风。
+Requires manual MCP setup. Took 30 minutes. Occasionally unstable.
 
 **Codex**: ⭐⭐⭐⭐⭐
 
-`browser_*` 도구 네이티브 지원, 스크린샷, 클릭, 입력 일괄. 3달 运行没翻车。
+Native `browser_*` tool support: screenshots, clicks, form fill, batch. Used it for 3 months without a single incident.
 
 **Gemini**: ⭐⭐⭐
 
-기술 디버깅용, 일상 자동화엔 부적합.
+Good for technical debugging, not suited for daily automation.
 
 ---
 
-###维度3: 도구 경험
+### Dimension 3: Tool Experience
 
 **Claude Code**: ⭐⭐⭐⭐⭐
 
-가장流畅, 미슐랭 레스토랑 같다.
+Smoothest interaction. Like a Michelin-starred restaurant.
 
 **Codex**: ⭐⭐⭐⭐
 
-빠른 서브웨이 같다.
+Fast and efficient. Like fast food — gets the job done.
 
 **Gemini**: ⭐⭐⭐
 
-직원 식당, 기대는 없지만 먹을만함.
+Functional but rough around the edges.
 
 ---
 
-###维度4: 장애 복구
+### Dimension 4: Fault Recovery
 
 **Claude Code**: ⭐⭐⭐⭐⭐
 
-컴퓨터 전기 끊겼을 때, 껴서 재시작했더니 브레이크포인트에서 계속 해줬다.
+My laptop ran out of power mid-refactor. Plugged it in, rebooted — it picked up exactly where it left off.
 
 **Codex**: ⭐⭐⭐⭐
 
-기본적으로 되는데细则不如Claude.
+Basic recovery, but less detailed than Claude.
 
 **Gemini**: ⭐⭐⭐
 
-장거리 작업 중단하면 잘 뻑남.
+Long tasks that get interrupted often fail to resume cleanly.
 
 ---
 
-## 03. 실제 상황에서 뭘 고르지?
+## 03. What Would You Pick?
 
-### 상황: 小红书运营 자동화
+### Scenario: Xiaohongshu operations automation
 
-- **Codex 고르기**: 박스에서 꺼내 바로 사용, 안정可靠
+- **Go with Codex**: out of the box, stable, works every day.
 
-### 상황: 2000+줄 레거시 코드 리팩토링
+### Scenario: Large-scale code refactoring
 
-- **Claude Code 고르기**: 컨텍스트 이해 가장 강
+- **Go with Claude Code**: strongest context understanding.
 
-### 상황: 빠른 스크립트 작성
+### Scenario: Quick script writing
 
-- **Codex 고르기**: 딱 좋음, 빠름
+- **Go with Codex**: just right, fast.
 
-### 상황: API 문서 검색
+### Scenario: API documentation research
 
-- **Gemini 고르기**: Google 검색 통합
-
----
-
-## 04.更好的方案 有?
-
- 有. RexCLI 사용.
-
-세 가지 도구 협업시키고, 전환해도 끊기지 않게.
-
-홈페이지: [rexai.top](https://rexai.top)
+- **Go with Gemini**: deep Google integration.
 
 ---
 
-## 05.まとめ
+## 04. Is There a Better Way?
 
-| 니 상황 | 추천 |
-|--------|------|
-| 핵심 코드 작성 | Claude Code |
-| 브라우저 자동화 | Codex |
-| 자료 검색 | Gemini |
-| 부드러운 전환 | RexCLI |
+Yes. RexCLI.
 
-도구는 목적 bukan手段.
+One tool to make them all work together — without losing context when you switch.
 
-**핵심은 어느 도구를 고르는 게 아니라 workflow가 끊기지 않는 것이다.**
+Website: [rexai.top](https://rexai.top)
 
 ---
 
-了解更多: [rexai.top](https://rexai.top)
+## 05. Summary
+
+| Your situation | Recommended |
+|----------------|-------------|
+| Core code writing | Claude Code |
+| Browser automation | Codex |
+| Research | Gemini |
+| Seamless switching | RexCLI |
+
+Tools are a means, not an end.
+
+**The real win is a workflow that doesn't break when you switch gears.**
+
+---
+
+Learn more: [rexai.top](https://rexai.top)

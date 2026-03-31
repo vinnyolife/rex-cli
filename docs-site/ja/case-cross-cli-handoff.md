@@ -46,3 +46,5 @@ ls memory/context-db/exports | tail -n 5
 
 共有レイヤーなしでは、クロース agent handoff はしばしばコピー/ペーストコンテキストに退化します。
 RexCLI では、すべての agent が同じプロジェクトコンテキストパスと checkpoint ストリームを読み書きします。
+
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=case_handoff_footer_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="case_handoff_footer" data-rex-target="github_star" }

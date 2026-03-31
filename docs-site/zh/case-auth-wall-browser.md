@@ -45,3 +45,5 @@ browser_snapshot {"profile":"default","includeAx":true}
 
 可靠的自动化不是盲目自动化。
 此流程确保对政策敏感的操作由人工明确门控，然后使用共享浏览器状态恢复。
+
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=case_authwall_footer_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="case_authwall_footer" data-rex-target="github_star" }

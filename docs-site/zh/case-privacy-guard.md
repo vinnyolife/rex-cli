@@ -43,3 +43,5 @@ aios privacy ollama-on
 
 团队经常通过将原始配置粘贴到 prompts 来泄露密钥。
 Privacy Guard 将有风险的读取转变为可重复的安全默认。
+
+[Star on GitHub](https://github.com/rexleimo/rex-cli?utm_source=cli_rexai_top&utm_medium=docs&utm_campaign=english_growth&utm_content=case_privacy_footer_star){ .md-button .md-button--primary data-rex-track="cta_click" data-rex-location="case_privacy_footer" data-rex-target="github_star" }

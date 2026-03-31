@@ -1,145 +1,151 @@
-# 드디어 등장! AI 프로그래밍 도구들의 "싸움"을 해결하는 RexCLI를 만들었습니다
+---
+title: "I Finally Built the Tool That Ends the 'Which AI Coding Tool Is Better' Debate"
+publish_date: 2026-03-10
+description: "The story behind RexCLI — a workflow layer that unifies Claude Code, Codex, and Gemini without replacing any of them."
+---
 
-솔직히 말하면, 전에 세 개의 AI 프로그래밍 도구로 인해 지옥을 보았다.
+# I Finally Built the Tool That Ends the 'Which AI Coding Tool Is Better' Debate
 
-Claude Code는 코딩은強 لكن 브라우저 자동화 설정이 귀찮았다.
-Codex 자동화는爽 하지만 복잡한 코드 리팩토링은 그저 그럼.
-Gemini 자료 조사는 좋은데 일시키면 자꾸 뻑난다.
+Honestly? I used to get completely wrecked by three AI coding tools.
 
-"왜 하나의 도구로全部 못 담지?" 계속 이상했다.
+Claude Code is great at coding but browser automation setup is a pain.
+Codex automation is satisfying but it falls short on complex code refactoring.
+Gemini is good at research but goes off the rails when you actually put it to work.
 
- 그래서 내가 만들었다.
+"Why can't one tool do everything?" — I kept wondering.
+
+So I built it myself.
 
 ---
 
-## 01. 어떤 문제에 마주쳤나?
+## 01. What Problems Was I Running Into?
 
-### 상황1: 브라우저自动化
+### Scenario 1: Browser Automation
 
-小红书 자동 게시물想让.
+I wanted to auto-post to Xiaohongshu.
 
-Claude Code 쓸까? 먼저 MCP 설정. 3시간 걸려漸烫 돌아감. 그런데 다음 날—계정이 风控됨.
+Use Claude Code? Okay, first configure MCP. 3 hours later, it finally works. Wake up next morning — account got flagged.
 
-Codex 쓸까? 박스에서 꺼내자마자 써 Pilgun. 근데途中でClaude에게 코드 최적화시키고 싶었으면—**컨텍스트全部 삭제** 처음부터.
+Use Codex? Out of the box, works great. But halfway through, wanted Claude to optimize the code — switched tools and — **all context gone**, start from scratch.
 
-### 상황2: 장타스크 중단
+### Scenario 2: Long Task Interruption
 
-2000줄 이상 코드 리팩토링 작업 중. 회의 하고 와서 계속—
+Running a code refactoring task, 2000+ lines. Had a meeting, came back to continue —
 
-Claude: 어디까지 했지, 기억은 하는데细节 잊은.
-Codex: 어디까지 했지, 리팩토링思路 빗나감.
-Gemini: 나是谁, 어디야?
+Claude: I remember roughly where I was, but forgot the details.
+Codex: I remember roughly where I was, but the refactoring direction drifted.
+Gemini: Who am I, where am I?
 
-**그게 그때 일상: 도구 바꾸거나, 설정 다시 하거나.**
+**That was my daily life: either switching tools or re-configuring everything.**
 
 ---
 
-## 02. RexCLI 뭐야?
+## 02. What Is RexCLI?
 
-**RexCLI = Claude Code + Codex + Gemini协作**
+**RexCLI = Claude Code + Codex + Gemini working together, without fighting each other.**
 
-### 핵심 기능
+### Core Capabilities
 
-| 기능 | 의미 |
-|------|------|
-| 통일 브라우저 자동화 | 어느 CLI든 같은 `browser_*` 명령어 |
-|跨CLI 컨텍스트 메모리| 도구 바꿔도 진행 상황 저장 |
-| Privacy Guard | 설정 파일 자동 탈敏, API Key 유출 방지 |
+| Capability | What It Means |
+|-----------|---------------|
+| Unified browser automation | Any CLI, same `browser_*` commands |
+| Cross-CLI context memory | Tool switch without losing progress |
+| Privacy Guard | Auto-redacts config files, prevents API key leaks |
 
-### 원리
+### How It Works
 
 ```
-codex/claude/gemini 입력
+You type codex/claude/gemini
        ↓
-RexCLI가 자동 가로채기
+RexCLI intercepts automatically
        ↓
-판단: 래핑할까 통과시킬까?
+Decision: wrap or pass through?
        ↓
-래핑: ContextDB + Browser MCP 연결
-통과: 원본 도구에 직접 전달
+Wrap: connect ContextDB + Browser MCP
+Pass-through: deliver to native tool
 ```
 
-**작업 습관 바꿀 필요 없음.** 지금까지처럼 쓰면 됨.
+**You don't need to change any habits.** Keep using the same commands as before.
 
 ---
 
-## 03. 실제 효과
+## 03. Real Results
 
-### 효과1: 브라우저自动化
+### Result 1: Browser Automation
 
 ```bash
-# 전에: Codex 씀
+# Before: using Codex
 codex
 
-# 지금: Codex 씀 but 능력 다름
+# Now: still using Codex, but with superpowers
 codex
 ```
 
-차이점은 이제 통일된 `browser_*` 도구能用:
-- `browser_navigate` - 페이지 열기
-- `browser_click` - 요소 클릭
-- `browser_snapshot` - 페이지 콘텐츠 가져오기
-- `browser_screenshot` - 스크린샷
+The difference is now you have unified `browser_*` tools:
+- `browser_navigate` — open a page
+- `browser_click` — click an element
+- `browser_snapshot` — get page content
+- `browser_screenshot` — take a screenshot
 
-**어느 CLI로 바뀌든 이 명령어들 사용 가능.**
+**No matter which CLI you switch to, these commands work.**
 
-### 효과2: 브레이크포인트 续跑
+### Result 2: Resume from Breakpoint
 
-작업의 절반 하고 도구 바꾸면?
+What if you're halfway through a task and want to switch tools?
 
 ```bash
-# Codex로 절반 실행
+# Ran half the task with Codex
 codex
 
-# Claude로 바꿔서 계속, 컨텍스트 자동 동기화
+# Switch to Claude to continue, context syncs automatically
 claude
 ```
 
-**복사＆붙여넣기 필요 없음, 작업 다시 설명 필요 없음.**
+**No copy-pasting, no re-explaining the task.**
 
 ---
 
-## 04. 설치 방법
+## 04. How to Install
 
 ```bash
-# 1. 클론
+# 1. Clone
 git clone https://github.com/rexleimo/rex-cli.git
 
-# 2. 설치
+# 2. Install
 cd rex-cli
 ./scripts/setup-all.sh --components all
 
-# 3. 실행
+# 3. Launch
 codex
 ```
 
-홈페이지: [rexai.top](https://rexai.top)
-문서: [cli.rexai.top](https://cli.rexai.top)
+Website: [rexai.top](https://rexai.top)
+Docs: [cli.rexai.top](https://cli.rexai.top)
 
 ---
 
-## 05. 왜 오픈소스?
+## 05. Why Open Source?
 
-알잖아. 이렇게 많은 도구 있는데 왜 ainda 만드는 거야?
+I know what you're thinking: with so many tools out there, why build another one?
 
-**因为他们，比我 更懂这种"工具分裂"的痛.**
+**Because nobody understands the pain of tool fragmentation better than I do.**
 
-매일 세 개의 도구를 바꿔가며 컨텍스트消失、설정 重复、密钥风险...这些问题折磨了我太久。
+Every day I was switching between three tools — losing context, duplicating config, risking key leaks... these problems had been grinding me down for too long.
 
-与其忍耐，不如自己动手。
+Rather than endure it, I built a solution.
 
-**RexCLI는 내 개인 작품，也是我每天都在用的工具。**
+**RexCLI is my personal project, and it's the tool I use every single day.**
 
 ---
 
-## 06. 마무리
+## 06. Closing Thoughts
 
-**RexCLI 不是要替代 Claude Code 或 Codex.**
+**RexCLI isn't trying to replace Claude Code or Codex.**
 
-只是一个"粘合剂"，让现有的工具更好地协同工作。
+It's just a "glue layer" that helps existing tools work better together.
 
-만약 같은痛점이 있으면試해보세요. 도움이 되면 좋아요해서更多人 구출되길.
+If you feel the same pain, give it a try. If it helps, like and share — so more people can benefit.
 
-**홈페이지: [rexai.top](https://rexai.top)**
+**Website: [rexai.top](https://rexai.top)**
 
-질문 있으면? 댓글에.
+Questions? Drop them in the comments.
