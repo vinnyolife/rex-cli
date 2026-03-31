@@ -15,6 +15,8 @@ description: 版本历史、升级说明与文档变更入口。
 ## 最近版本
 
 - `main`（未发布）：
+  - **多环境强化学习训练系统**：统一的 `rl-core` 控制平面，支持 shell、browser、orchestrator 三种环境适配器；三指针 checkpoint lineage；四车道 replay pool；PPO + teacher distillation 训练
+  - **Mixed-environment campaigns**（`rl-mixed-v1`）：一次 live batch 可跨越 shell + browser + orchestrator episode，统一 rollback 决策
   - ContextDB `search` 默认走 SQLite FTS5 + `bm25(...)` 排序；当 FTS 不可用时自动回退 lexical 检索
   - ContextDB 语义重排改为基于当前 query 的 lexical 候选集执行，降低旧但精确命中的误丢失
   - `aios orchestrate` 上线 `subagent-runtime` live 执行（需 `AIOS_EXECUTE_LIVE=1`）
@@ -29,6 +31,10 @@ description: 版本历史、升级说明与文档变更入口。
   - TUI skill picker 新增 `Core` / `Optional` 分组，并对长描述做终端友好截断
   - `doctor` 会提示同名 skill 的 `project` 安装覆盖 `global` 安装
   - Node 运行时口径统一到 22 LTS
+- `0.17.0`（2026-03-17）：
+  - TUI 卸载选择器在小终端中可滚动，`-Select all` / `Clear all` / `Done` 按钮固定在底部
+  - 卸载光标选择现在与渲染后的分组列表保持对齐
+  - setup/update skill 选择器对已安装技能标注 `(installed)` 标签
 - `0.16.0`（2026-03-10）：新增 orchestrator agent catalog 与生成器
 - `0.15.0`（2026-03-10）：`orchestrate live` 默认门禁（`AIOS_EXECUTE_LIVE`）
 - `0.14.0`（2026-03-10）：新增 `subagent-runtime` 运行时适配器（stub）
