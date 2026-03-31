@@ -54,8 +54,9 @@ $forward = @()
 if ($PSBoundParameters.ContainsKey('Command') -and $Command) {
   $forward += $Command
 }
-if ($Args) {
-  $forward += $Args
+# Filter out empty strings to avoid passing blank arguments
+if ($Args -and @($Args).Count -gt 0) {
+  $forward += @($Args) | Where-Object { $_ -and $_.Trim() }
 }
 
 & $nodePath $ScriptPath @forward
