@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/components/ScrollableSelect.tsx
+import React from 'react';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';

@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { register } from 'node:module';
-
-// Register tsx for TypeScript support
-register('tsx/esm', import.meta.url);
 
 import { parseArgs } from './lib/cli/parse-args.mjs';
 import { getCommandHelpText, getInternalHelpText, getRootHelpText } from './lib/cli/help.mjs';
@@ -111,34 +107,22 @@ async function main() {
       return;
     }
 
-    const { runInteractiveSession } = await import('./lib/tui-ink/index.tsx');
-    await runInteractiveSession({
-      rootDir,
-      onRun: async (action, options) => {
-        if (action === 'setup') {
-          const { runSetup } = await import('./lib/lifecycle/setup.mjs');
-          await runSetup(options, { rootDir, projectRoot });
-          return;
-        }
-        if (action === 'update') {
-          const { runUpdate } = await import('./lib/lifecycle/update.mjs');
-          await runUpdate(options, { rootDir, projectRoot });
-          return;
-        }
-        if (action === 'uninstall') {
-          const { runUninstall } = await import('./lib/lifecycle/uninstall.mjs');
-          await runUninstall(options, { rootDir, projectRoot });
-          return;
-        }
-        if (action === 'doctor') {
-          const { runDoctor } = await import('./lib/lifecycle/doctor.mjs');
-          await runDoctor(options, { rootDir });
-          return;
-        }
+    // Use dynamic import with tsx loader via wrapper
+    const { execSync } = await import('node:child_process');
+    const cliPath = path.join(rootDir, 'scripts/lib/tui-ink/cli.tsx');
 
-        process.stdout.write(`[warn] unknown interactive action: ${action}\n`);
-      },
-    });
+    // Run tsx as a subprocess with proper TTY handling
+    process.env.AIOS_ROOT_DIR = rootDir;
+    process.env.AIOS_PROJECT_ROOT = projectRoot;
+
+    try {
+      execSync(`npx tsx "${cliPath}"`, {
+        stdio: 'inherit',
+        env: process.env,
+      });
+    } catch (err) {
+      process.exitCode = 1;
+    }
     return;
   }
 

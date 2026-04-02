@@ -1,6 +1,6 @@
 // scripts/lib/tui-ink/App.tsx
 
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router';
 import { Box, Text } from 'ink';
 import { MainScreen } from './screens/MainScreen';

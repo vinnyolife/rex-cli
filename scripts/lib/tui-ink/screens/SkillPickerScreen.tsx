@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/screens/SkillPickerScreen.tsx
+import React from 'react';
 
 import { useNavigate, useSearchParams } from 'react-router';
 import { Box, Text } from 'ink';

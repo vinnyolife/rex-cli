@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/components/Header.tsx
+import React from 'react';
 
 import { Box, Text } from 'ink';
 

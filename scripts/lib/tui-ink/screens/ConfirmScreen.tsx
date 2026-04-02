@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/screens/ConfirmScreen.tsx
+import React from 'react';
 
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';

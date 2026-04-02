@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/screens/UpdateScreen.tsx
+import React from 'react';
 
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';

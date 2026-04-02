@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/components/Footer.tsx
+import React from 'react';
 
 import { Box, Text } from 'ink';
 

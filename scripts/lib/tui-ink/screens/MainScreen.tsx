@@ -1,4 +1,5 @@
 // scripts/lib/tui-ink/screens/MainScreen.tsx
+import React from 'react';
 
 import { useNavigate } from 'react-router';
 import { Box, Text } from 'ink';
