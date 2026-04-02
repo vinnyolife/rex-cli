@@ -69,6 +69,24 @@ Use this only when you explicitly want unreleased `main` branch behavior. This i
 Download `rex-cli.tar.gz` (macOS/Linux) or `rex-cli.zip` (Windows) from Releases and extract to `~/.rexcil/`.
 Then run `scripts/aios.sh` / `scripts/aios.ps1`.
 
+### TUI Welcome Banner
+
+When you start the TUI with `aios`, you'll see a cyan ASCII art banner:
+
+```
+  ╔══════════════════════════════════════════╗
+  ║   ██████╗ ██╗  ██╗██╗██████╗  ██████╗    ║
+  ║   ██╔══██╗██║ ██╔╝██║██╔══██╗██╔════╝    ║
+  ║   ██████╔╝█████╔╝ ██║██████╔╝██║         ║
+  ║   ██╔══██╗██╔═██╗ ██║██╔══██╗██║         ║
+  ║   ██║  ██║██║  ██╗██║██║  ██║╚██████╗    ║
+  ║   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝    ║
+  ║          Hello, Rex CLI!                 ║
+  ╚══════════════════════════════════════════╝
+```
+
+This confirms the TUI is ready and shows the repository location below the banner.
+
 ### Recommended: finish setup in the TUI
 
 After install, use the TUI as the main onboarding path for this release:
