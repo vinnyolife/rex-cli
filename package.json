@@ -5,6 +5,12 @@
   "engines": {
     "node": ">=22 <23"
   },
+  "dependencies": {
+    "ink": "^4.4.1",
+    "@inkjs/ui": "^1.0.0",
+    "react": "^18.3.1",
+    "react-router": "^7.1.1"
+  },
   "scripts": {
     "aios": "node scripts/aios.mjs",
     "check:site-sync": "node scripts/check-site-sync.mjs",
