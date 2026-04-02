@@ -8,6 +8,26 @@ import { render } from 'ink';
 import { App } from './App';
 import type { CatalogSkill, InstalledSkills, Client } from './types';
 
+// ASCII art banner
+const REX_CLI_BANNER = `
+  ╔══════════════════════════════════════════╗
+  ║                                          ║
+  ║   ██████╗ ██╗  ██╗██╗██████╗  ██████╗    ║
+  ║   ██╔══██╗██║ ██╔╝██║██╔══██╗██╔════╝    ║
+  ║   ██████╔╝█████╔╝ ██║██████╔╝██║         ║
+  ║   ██╔══██╗██╔═██╗ ██║██╔══██╗██║         ║
+  ║   ██║  ██║██║  ██╗██║██║  ██║╚██████╗    ║
+  ║   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝    ║
+  ║                                          ║
+  ║          Hello, Rex CLI!                 ║
+  ║                                          ║
+  ╚══════════════════════════════════════════╝
+`;
+
+function printBanner(): void {
+  console.log('\x1b[36m' + REX_CLI_BANNER + '\x1b[0m'); // cyan color
+}
+
 const rootDir = process.env.AIOS_ROOT_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const projectRoot = process.env.AIOS_PROJECT_ROOT || process.cwd();
 
@@ -111,6 +131,9 @@ export async function runInteractiveSession({
 
 // Main entry point when run directly
 async function main() {
+  // Print welcome banner first
+  printBanner();
+
   const onRun = async (action: string, options: unknown) => {
     // Import lifecycle modules
     if (action === 'setup') {
