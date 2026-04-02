@@ -9,6 +9,9 @@ auth.json
 token.json
 secrets.json
 
+# Dependencies
+node_modules/
+
 # 临时文件
 *.tmp
 *.log
