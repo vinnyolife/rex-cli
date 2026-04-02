@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { register } from 'node:module';
+
+// Register tsx for TypeScript support
+register('tsx/esm', import.meta.url);
 
 import { parseArgs } from './lib/cli/parse-args.mjs';
 import { getCommandHelpText, getInternalHelpText, getRootHelpText } from './lib/cli/help.mjs';
@@ -107,7 +111,7 @@ async function main() {
       return;
     }
 
-    const { runInteractiveSession } = await import('./lib/tui/session.mjs');
+    const { runInteractiveSession } = await import('./lib/tui-ink/index.tsx');
     await runInteractiveSession({
       rootDir,
       onRun: async (action, options) => {

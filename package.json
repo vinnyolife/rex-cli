@@ -6,8 +6,8 @@
     "node": ">=22 <23"
   },
   "dependencies": {
-    "ink": "^4.4.1",
     "@inkjs/ui": "^1.0.0",
+    "ink": "^4.4.1",
     "react": "^18.3.1",
     "react-router": "^7.1.1"
   },
@@ -31,5 +31,8 @@
     "rl-mixed-v1:orchestrator": "node scripts/rl-mixed-v1.mjs orchestrator-only --dry-run",
     "rl-mixed-v1:mixed": "node scripts/rl-mixed-v1.mjs mixed --dry-run",
     "rl-mixed-v1:eval": "node scripts/rl-mixed-v1.mjs mixed-eval --window 30 --json-output experiments/rl-mixed-v1/validation/latest.json"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
   }
 }
