@@ -15,8 +15,11 @@ interface SetupScreenProps {
   options: SetupOptions;
   onToggleComponent: (component: keyof ComponentsConfig) => void;
   onCycleWrapMode: () => void;
+  onCycleWrapModePrevious: () => void;
   onCycleScope: () => void;
+  onCycleScopePrevious: () => void;
   onCycleClient: () => void;
+  onCycleClientPrevious: () => void;
   onToggleSkipPlaywright: () => void;
   onToggleSkipDoctor: () => void;
   onSelectSkills: () => void;
@@ -37,8 +40,11 @@ export function SetupScreen({
   options,
   onToggleComponent,
   onCycleWrapMode,
+  onCycleWrapModePrevious,
   onCycleScope,
+  onCycleScopePrevious,
   onCycleClient,
+  onCycleClientPrevious,
   onToggleSkipPlaywright,
   onToggleSkipDoctor,
   onSelectSkills,
@@ -55,7 +61,7 @@ export function SetupScreen({
           setCursor(prev => Math.max(0, prev - 1));
         } else if (key.downArrow) {
           setCursor(prev => Math.min(maxCursor, prev + 1));
-        } else if (input === ' ' || key.rightArrow) {
+        } else if (input === ' ') {
           if (cursor >= 0 && cursor <= 4) {
             onToggleComponent(COMPONENTS_KEYS[cursor]);
           } else if (cursor === 5) {
@@ -69,6 +75,28 @@ export function SetupScreen({
           } else if (cursor === 9) {
             onToggleSkipDoctor();
           }
+        } else if (key.rightArrow) {
+          if (cursor >= 0 && cursor <= 4) {
+            onToggleComponent(COMPONENTS_KEYS[cursor]);
+          } else if (cursor === 5) {
+            onCycleWrapMode();
+          } else if (cursor === 6) {
+            onCycleScope();
+          } else if (cursor === 7) {
+            onCycleClient();
+          } else if (cursor === 8) {
+            onToggleSkipPlaywright();
+          } else if (cursor === 9) {
+            onToggleSkipDoctor();
+          }
+        } else if (key.leftArrow) {
+          if (cursor === 5) {
+            onCycleWrapModePrevious();
+          } else if (cursor === 6) {
+            onCycleScopePrevious();
+          } else if (cursor === 7) {
+            onCycleClientPrevious();
+          }
         } else if (key.return) {
           if (cursor === 10) {
             onSelectSkills();
@@ -81,7 +109,21 @@ export function SetupScreen({
           navigate('/');
         }
       },
-      [cursor, onToggleComponent, onCycleWrapMode, onCycleScope, onCycleClient, onToggleSkipPlaywright, onToggleSkipDoctor, onSelectSkills, onRun, navigate]
+      [
+        cursor,
+        onToggleComponent,
+        onCycleWrapMode,
+        onCycleWrapModePrevious,
+        onCycleScope,
+        onCycleScopePrevious,
+        onCycleClient,
+        onCycleClientPrevious,
+        onToggleSkipPlaywright,
+        onToggleSkipDoctor,
+        onSelectSkills,
+        onRun,
+        navigate,
+      ]
     )
   );
 

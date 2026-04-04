@@ -7,7 +7,7 @@ interface FooterProps {
   hints?: string[];
 }
 
-export function Footer({ hints = ['↑/↓ Navigate', 'Space Toggle', 'Enter Confirm', 'B Back', 'Q Quit'] }: FooterProps) {
+export function Footer({ hints = ['↑/↓ Navigate', '←/→ Cycle', 'Space Toggle', 'Enter Confirm', 'B Back', 'Q Quit'] }: FooterProps) {
   return (
     <Box marginTop={1}>
       <Text dimColor>

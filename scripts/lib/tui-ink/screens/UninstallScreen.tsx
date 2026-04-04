@@ -15,7 +15,9 @@ interface UninstallScreenProps {
   options: UninstallOptions;
   onToggleComponent: (component: keyof ComponentsConfig) => void;
   onCycleScope: () => void;
+  onCycleScopePrevious: () => void;
   onCycleClient: () => void;
+  onCycleClientPrevious: () => void;
   onSelectSkills: () => void;
   onRun: () => void;
 }
@@ -34,7 +36,9 @@ export function UninstallScreen({
   options,
   onToggleComponent,
   onCycleScope,
+  onCycleScopePrevious,
   onCycleClient,
+  onCycleClientPrevious,
   onSelectSkills,
   onRun,
 }: UninstallScreenProps) {
@@ -49,13 +53,27 @@ export function UninstallScreen({
           setCursor(prev => Math.max(0, prev - 1));
         } else if (key.downArrow) {
           setCursor(prev => Math.min(maxCursor, prev + 1));
-        } else if (input === ' ' || key.rightArrow) {
+        } else if (input === ' ') {
           if (cursor >= 0 && cursor <= 4) {
             onToggleComponent(COMPONENTS_KEYS[cursor]);
           } else if (cursor === 5) {
             onCycleScope();
           } else if (cursor === 6) {
             onCycleClient();
+          }
+        } else if (key.rightArrow) {
+          if (cursor >= 0 && cursor <= 4) {
+            onToggleComponent(COMPONENTS_KEYS[cursor]);
+          } else if (cursor === 5) {
+            onCycleScope();
+          } else if (cursor === 6) {
+            onCycleClient();
+          }
+        } else if (key.leftArrow) {
+          if (cursor === 5) {
+            onCycleScopePrevious();
+          } else if (cursor === 6) {
+            onCycleClientPrevious();
           }
         } else if (key.return) {
           if (cursor === 7) {
@@ -69,7 +87,17 @@ export function UninstallScreen({
           navigate('/');
         }
       },
-      [cursor, onToggleComponent, onCycleScope, onCycleClient, onSelectSkills, onRun, navigate]
+      [
+        cursor,
+        onToggleComponent,
+        onCycleScope,
+        onCycleScopePrevious,
+        onCycleClient,
+        onCycleClientPrevious,
+        onSelectSkills,
+        onRun,
+        navigate,
+      ]
     )
   );
 

@@ -302,6 +302,7 @@ TUI 可见变化提示：
 - `Setup`/`Update` 默认勾选 `Native enhancements`，并显示实时的 native 预览区块。
 - `Confirm` 页面会重复展示 native 分层和受管输出，并给出运行后校验提示。
 - `Doctor` 页面在开启 `Native only` 时会显示模式说明。
+- `Client` / `Skills scope` / `Mode` 字段支持 `←/→` 前后切换。
 
 ### 3) 高级模式：分组件脚本
 

@@ -14,10 +14,12 @@ import type {
 const MODE_OPTIONS: WrapMode[] = ['all', 'repo-only', 'opt-in', 'off'];
 const CLIENT_OPTIONS: Client[] = ['all', 'codex', 'claude', 'gemini', 'opencode'];
 const SCOPE_OPTIONS: Scope[] = ['global', 'project'];
+type CycleDirection = 'next' | 'prev';
 
-function cycle<T>(list: T[], current: T): T {
+function cycle<T>(list: T[], current: T, direction: CycleDirection = 'next'): T {
   const index = list.indexOf(current);
-  return list[(index + 1) % list.length];
+  const delta = direction === 'next' ? 1 : -1;
+  return list[(index + delta + list.length) % list.length];
 }
 
 function getDefaultSelectedSkills(
@@ -68,19 +70,19 @@ export function useSetupOptions(
     },
   }));
 
-  const cycleWrapMode = useCallback((action: 'setup' | 'update') => {
+  const cycleWrapMode = useCallback((action: 'setup' | 'update', direction: CycleDirection = 'next') => {
     setOptions(prev => ({
       ...prev,
       [action]: {
         ...prev[action],
-        wrapMode: cycle(MODE_OPTIONS, prev[action].wrapMode as WrapMode),
+        wrapMode: cycle(MODE_OPTIONS, prev[action].wrapMode as WrapMode, direction),
       },
     }));
   }, []);
 
-  const cycleScope = useCallback((action: 'setup' | 'update' | 'uninstall') => {
+  const cycleScope = useCallback((action: 'setup' | 'update' | 'uninstall', direction: CycleDirection = 'next') => {
     setOptions(prev => {
-      const newScope = cycle(SCOPE_OPTIONS, prev[action].scope as Scope);
+      const newScope = cycle(SCOPE_OPTIONS, prev[action].scope as Scope, direction);
       const newSelectedSkills = action === 'uninstall'
         ? []
         : getDefaultSelectedSkills(catalogSkills, prev[action].client as Client, newScope);
@@ -95,9 +97,9 @@ export function useSetupOptions(
     });
   }, [catalogSkills]);
 
-  const cycleClient = useCallback((action: 'setup' | 'update' | 'uninstall') => {
+  const cycleClient = useCallback((action: 'setup' | 'update' | 'uninstall', direction: CycleDirection = 'next') => {
     setOptions(prev => {
-      const newClient = cycle(CLIENT_OPTIONS, prev[action].client as Client);
+      const newClient = cycle(CLIENT_OPTIONS, prev[action].client as Client, direction);
       const newSelectedSkills = action === 'uninstall'
         ? []
         : getDefaultSelectedSkills(catalogSkills, newClient, prev[action].scope as Scope);

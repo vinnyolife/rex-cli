@@ -303,6 +303,7 @@ TUI visibility tip:
 - `Setup`/`Update` now include `Native enhancements` by default and show a live native preview panel.
 - `Confirm` now repeats the native tier + managed outputs and prints a post-run verify hint.
 - `Doctor` now shows a mode hint when `Native only` is enabled.
+- `Client` / `Skills scope` / `Mode` fields now support `←/→` for previous/next cycling.
 
 ### 3) Advanced: component-specific scripts
 

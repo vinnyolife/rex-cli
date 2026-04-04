@@ -69,9 +69,12 @@ function AppContent({
             rootDir={rootDir}
             options={options.setup}
             onToggleComponent={(comp) => toggleComponent('setup', comp as keyof ComponentsConfig)}
-            onCycleWrapMode={() => cycleWrapMode('setup')}
-            onCycleScope={() => cycleScope('setup')}
-            onCycleClient={() => cycleClient('setup')}
+            onCycleWrapMode={() => cycleWrapMode('setup', 'next')}
+            onCycleWrapModePrevious={() => cycleWrapMode('setup', 'prev')}
+            onCycleScope={() => cycleScope('setup', 'next')}
+            onCycleScopePrevious={() => cycleScope('setup', 'prev')}
+            onCycleClient={() => cycleClient('setup', 'next')}
+            onCycleClientPrevious={() => cycleClient('setup', 'prev')}
             onToggleSkipPlaywright={() => toggleSkipFlag('setup', 'skipPlaywrightInstall')}
             onToggleSkipDoctor={() => toggleSkipFlag('setup', 'skipDoctor')}
             onSelectSkills={() => handleSelectSkills('setup')}
@@ -86,9 +89,12 @@ function AppContent({
             rootDir={rootDir}
             options={options.update}
             onToggleComponent={(comp) => toggleComponent('update', comp as keyof ComponentsConfig)}
-            onCycleWrapMode={() => cycleWrapMode('update')}
-            onCycleScope={() => cycleScope('update')}
-            onCycleClient={() => cycleClient('update')}
+            onCycleWrapMode={() => cycleWrapMode('update', 'next')}
+            onCycleWrapModePrevious={() => cycleWrapMode('update', 'prev')}
+            onCycleScope={() => cycleScope('update', 'next')}
+            onCycleScopePrevious={() => cycleScope('update', 'prev')}
+            onCycleClient={() => cycleClient('update', 'next')}
+            onCycleClientPrevious={() => cycleClient('update', 'prev')}
             onToggleWithPlaywright={() => toggleSkipFlag('update', 'withPlaywrightInstall')}
             onToggleSkipDoctor={() => toggleSkipFlag('update', 'skipDoctor')}
             onSelectSkills={() => handleSelectSkills('update')}
@@ -103,8 +109,10 @@ function AppContent({
             rootDir={rootDir}
             options={options.uninstall}
             onToggleComponent={(comp) => toggleComponent('uninstall', comp as keyof ComponentsConfig)}
-            onCycleScope={() => cycleScope('uninstall')}
-            onCycleClient={() => cycleClient('uninstall')}
+            onCycleScope={() => cycleScope('uninstall', 'next')}
+            onCycleScopePrevious={() => cycleScope('uninstall', 'prev')}
+            onCycleClient={() => cycleClient('uninstall', 'next')}
+            onCycleClientPrevious={() => cycleClient('uninstall', 'prev')}
             onSelectSkills={() => handleSelectSkills('uninstall')}
             onRun={() => handleRunConfirm('uninstall')}
           />
