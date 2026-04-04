@@ -273,15 +273,15 @@ aios privacy ollama-on
 如果你更需要直接脚本控制，可用下面这些非交互示例：
 
 ```bash
-# 只安装 shell 包装 + skills + superpowers
-scripts/setup-all.sh --components shell,skills,superpowers --mode opt-in
+# 安装 shell 包装 + skills + native + superpowers
+scripts/setup-all.sh --components shell,skills,native,superpowers --mode opt-in
 
 # 只安装 browser MCP
 scripts/setup-all.sh --components browser
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components shell,skills,superpowers -Mode opt-in
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components shell,skills,native,superpowers -Mode opt-in
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components browser
 ```
 
@@ -296,6 +296,12 @@ scripts/uninstall-all.sh --components shell,skills
 powershell -ExecutionPolicy Bypass -File .\scripts\update-all.ps1 -Components all -Mode opt-in
 powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-all.ps1 -Components shell,skills
 ```
+
+TUI 可见变化提示：
+
+- `Setup`/`Update` 默认勾选 `Native enhancements`，并显示实时的 native 预览区块。
+- `Confirm` 页面会重复展示 native 分层和受管输出，并给出运行后校验提示。
+- `Doctor` 页面在开启 `Native only` 时会显示模式说明。
 
 ### 3) 高级模式：分组件脚本
 
@@ -465,6 +471,13 @@ node scripts/aios.mjs doctor --native
 node scripts/sync-native.mjs
 node scripts/check-native-sync.mjs
 ```
+
+TUI 快速自检：
+
+1. 运行 `aios`，进入 `Setup`（或 `Update`）。
+2. 保持 `Native enhancements` 勾选，切换 `Client`。
+3. 确认 native 预览区块会随 client/tier 变化。
+4. 执行后再跑 `node scripts/aios.mjs doctor --native`。
 
 冲突策略：
 

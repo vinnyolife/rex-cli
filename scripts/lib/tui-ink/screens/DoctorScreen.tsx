@@ -76,6 +76,13 @@ export function DoctorScreen({
         {renderActionItem('Run doctor', 3)}
         {renderActionItem('Back', 4)}
       </Box>
+      <Box marginBottom={1}>
+        <Text dimColor>
+          {options.nativeOnly
+            ? 'Native only mode checks repo-local native surfaces only.'
+            : 'Full doctor mode includes native plus shell, skills, browser, and superpowers gates.'}
+        </Text>
+      </Box>
       <Footer />
     </Box>
   );

@@ -274,15 +274,15 @@ aios privacy ollama-on
 Need direct script control instead? Use these non-interactive examples:
 
 ```bash
-# only shell + skills + superpowers
-scripts/setup-all.sh --components shell,skills,superpowers --mode opt-in
+# shell + skills + native + superpowers
+scripts/setup-all.sh --components shell,skills,native,superpowers --mode opt-in
 
 # only browser MCP
 scripts/setup-all.sh --components browser
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components shell,skills,superpowers -Mode opt-in
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components shell,skills,native,superpowers -Mode opt-in
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-all.ps1 -Components browser
 ```
 
@@ -297,6 +297,12 @@ scripts/uninstall-all.sh --components shell,skills
 powershell -ExecutionPolicy Bypass -File .\scripts\update-all.ps1 -Components all -Mode opt-in
 powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-all.ps1 -Components shell,skills
 ```
+
+TUI visibility tip:
+
+- `Setup`/`Update` now include `Native enhancements` by default and show a live native preview panel.
+- `Confirm` now repeats the native tier + managed outputs and prints a post-run verify hint.
+- `Doctor` now shows a mode hint when `Native only` is enabled.
 
 ### 3) Advanced: component-specific scripts
 
@@ -466,6 +472,13 @@ node scripts/aios.mjs doctor --native
 node scripts/sync-native.mjs
 node scripts/check-native-sync.mjs
 ```
+
+TUI quick check:
+
+1. Run `aios` and open `Setup` (or `Update`).
+2. Keep `Native enhancements` checked and switch `Client`.
+3. Confirm that the native preview block changes with client/tier.
+4. After running, execute `node scripts/aios.mjs doctor --native`.
 
 Conflict policy:
 

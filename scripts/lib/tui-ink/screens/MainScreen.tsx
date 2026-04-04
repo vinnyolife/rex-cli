@@ -40,6 +40,9 @@ export function MainScreen({ rootDir, onExit }: MainScreenProps) {
           options={MENU_OPTIONS}
           onChange={handleSelect}
         />
+        <Box marginTop={1}>
+          <Text dimColor>Tip: setup/update enable native enhancements by default; use doctor with Native only for a fast check.</Text>
+        </Box>
       </Box>
       <Footer />
     </Box>

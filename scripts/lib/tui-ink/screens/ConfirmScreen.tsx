@@ -6,7 +6,8 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { Box, Text } from 'ink';
 import { ConfirmInput } from '@inkjs/ui';
 import { Header } from '../components/Header';
-import type { Action, AllOptions } from '../types';
+import { getNativePreview } from '../native-preview';
+import type { Action, AllOptions, Client } from '../types';
 
 interface ConfirmScreenProps {
   rootDir: string;
@@ -44,6 +45,17 @@ export function ConfirmScreen({ rootDir, options, onRun }: ConfirmScreenProps) {
   }
 
   const actionOptions = options[action];
+  const nativeEnabled = Boolean(
+    actionOptions
+      && 'components' in actionOptions
+      && (actionOptions.components as Record<string, boolean>).native
+  );
+  const nativeClient = (
+    actionOptions && 'client' in actionOptions
+      ? actionOptions.client
+      : 'all'
+  ) as Client;
+  const nativePreview = nativeEnabled ? getNativePreview(nativeClient) : null;
 
   const handleConfirm = async () => {
     setStatus('running');
@@ -124,6 +136,15 @@ export function ConfirmScreen({ rootDir, options, onRun }: ConfirmScreenProps) {
         )}
         {actionOptions && 'selectedSkills' in actionOptions && (
           <Text>Selected skills: {formatSkills(actionOptions.selectedSkills as string[])}</Text>
+        )}
+        {nativePreview && (
+          <>
+            <Text>Native tier: {nativePreview.tier}</Text>
+            {nativePreview.lines.map((line, idx) => (
+              <Text key={`${idx}:${line}`}>Native: {line}</Text>
+            ))}
+            <Text dimColor>Verify after run: node scripts/aios.mjs doctor --native</Text>
+          </>
         )}
         {action === 'doctor' && (
           <>

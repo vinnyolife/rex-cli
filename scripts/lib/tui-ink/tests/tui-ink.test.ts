@@ -42,6 +42,12 @@ test('screens can be imported', async () => {
   assert.ok(confirm.ConfirmScreen, 'ConfirmScreen should be exported');
 });
 
+test('native preview helper can be imported', async () => {
+  const preview = await import('../native-preview.ts');
+  assert.ok(preview.getNativePreview, 'getNativePreview should be exported');
+  assert.equal(typeof preview.getNativePreview, 'function', 'getNativePreview should be a function');
+});
+
 test('App and runInteractiveSession can be imported', async () => {
   const app = await import('../App.tsx');
   const index = await import('../index.tsx');

@@ -7,6 +7,7 @@ import { Box, Text, useInput } from 'ink';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
 import { Checkbox } from '../components/Checkbox';
+import { getNativePreview } from '../native-preview';
 import type { SetupOptions, ComponentsConfig } from '../types';
 
 interface SetupScreenProps {
@@ -99,6 +100,7 @@ export function SetupScreen({
   const selectedSkillsDisplay = options.selectedSkills.length <= 3
     ? options.selectedSkills.join(', ') || '<none>'
     : `${options.selectedSkills.length} selected`;
+  const nativePreview = getNativePreview(options.client);
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -129,6 +131,18 @@ export function SetupScreen({
         {renderValueItem('Selected skills', selectedSkillsDisplay, 10)}
         {renderActionItem('Run setup', 11)}
         {renderActionItem('Back', 12)}
+      </Box>
+      <Box flexDirection="column">
+        {options.components.native ? (
+          <>
+            <Text color="green">Native preview ({nativePreview.tier})</Text>
+            {nativePreview.lines.map((line, idx) => (
+              <Text key={`${idx}:${line}`} dimColor>  {line}</Text>
+            ))}
+          </>
+        ) : (
+          <Text dimColor>Native enhancements are disabled for this run.</Text>
+        )}
       </Box>
       <Footer />
     </Box>
