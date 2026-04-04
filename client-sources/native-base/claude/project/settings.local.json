@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [
+      "node scripts/aios.mjs doctor --native"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node scripts/aios.mjs doctor --native"
+  }
+}

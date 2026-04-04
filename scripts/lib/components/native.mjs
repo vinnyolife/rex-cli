@@ -1,4 +1,46 @@
-function summarize(client = 'all') {
+import { syncNativeEnhancements } from '../native/sync.mjs';
+
+export async function installNativeEnhancements({
+  rootDir,
+  client = 'all',
+  io = console,
+} = {}) {
+  const result = await syncNativeEnhancements({ rootDir, client, mode: 'install', io });
+  for (const item of result.results) {
+    io.log(`[done] native ${item.client} -> installed=${item.installed} updated=${item.updated} reused=${item.reused} removed=${item.removed}`);
+  }
+  return result;
+}
+
+export async function updateNativeEnhancements({
+  rootDir,
+  client = 'all',
+  io = console,
+} = {}) {
+  const result = await syncNativeEnhancements({ rootDir, client, mode: 'install', io });
+  for (const item of result.results) {
+    io.log(`[done] native ${item.client} -> installed=${item.installed} updated=${item.updated} reused=${item.reused} removed=${item.removed}`);
+  }
+  return result;
+}
+
+export async function uninstallNativeEnhancements({
+  rootDir,
+  client = 'all',
+  io = console,
+} = {}) {
+  const result = await syncNativeEnhancements({ rootDir, client, mode: 'uninstall', io });
+  for (const item of result.results) {
+    io.log(`[done] native ${item.client} -> removed=${item.removed} reused=${item.reused}`);
+  }
+  return result;
+}
+
+export async function doctorNativeEnhancements({
+  client = 'all',
+  io = console,
+} = {}) {
+  io.log(`[info] native doctor scaffold active for client=${client}`);
   return {
     ok: true,
     client,
@@ -7,36 +49,4 @@ function summarize(client = 'all') {
     removed: 0,
     effectiveWarnings: 0,
   };
-}
-
-export async function installNativeEnhancements({
-  client = 'all',
-  io = console,
-} = {}) {
-  io.log(`[info] native enhancements scaffold active for client=${client}`);
-  return summarize(client);
-}
-
-export async function updateNativeEnhancements({
-  client = 'all',
-  io = console,
-} = {}) {
-  io.log(`[info] native enhancements scaffold update active for client=${client}`);
-  return summarize(client);
-}
-
-export async function uninstallNativeEnhancements({
-  client = 'all',
-  io = console,
-} = {}) {
-  io.log(`[info] native enhancements scaffold uninstall active for client=${client}`);
-  return summarize(client);
-}
-
-export async function doctorNativeEnhancements({
-  client = 'all',
-  io = console,
-} = {}) {
-  io.log(`[info] native enhancements scaffold doctor active for client=${client}`);
-  return summarize(client);
 }

@@ -1,0 +1,280 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+import { syncCanonicalAgents } from '../agents/sync.mjs';
+import { syncGeneratedSkills } from '../skills/sync.mjs';
+import {
+  buildNativeSyncMetadata,
+} from './install-metadata.mjs';
+import { renderClaudeNativeOutputs } from './emitters/claude.mjs';
+import { renderCodexNativeOutputs } from './emitters/codex.mjs';
+import { renderGeminiNativeOutputs } from './emitters/gemini.mjs';
+import { renderOpencodeNativeOutputs } from './emitters/opencode.mjs';
+import {
+  AIOS_NATIVE_BEGIN_MARK,
+  AIOS_NATIVE_END_MARK,
+  hasManagedMarkdownBlock,
+  mergeManagedJsonFragment,
+  parseJsonObject,
+  removeManagedJsonFragment,
+  removeManagedMarkdownBlock,
+  stringifyJsonObject,
+  upsertManagedMarkdownBlock,
+  wrapManagedMarkdown,
+} from './emitters/shared.mjs';
+import { buildNativeOutputPlan, loadNativeSyncManifest, resolveNativeClients } from './source-tree.mjs';
+
+const EMITTERS = {
+  codex: renderCodexNativeOutputs,
+  claude: renderClaudeNativeOutputs,
+  gemini: renderGeminiNativeOutputs,
+  opencode: renderOpencodeNativeOutputs,
+};
+
+function createDefaultFsOps() {
+  return {
+    async readTextTarget(targetPath) {
+      try {
+        return await fs.readFile(targetPath, 'utf8');
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+          return '';
+        }
+        throw error;
+      }
+    },
+    async writeTextTarget(targetPath, content) {
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.writeFile(targetPath, content, 'utf8');
+    },
+    async removeTarget(targetPath) {
+      await fs.rm(targetPath, { recursive: true, force: true });
+    },
+  };
+}
+
+function normalizeText(content) {
+  return String(content || '').replace(/\r\n/g, '\n');
+}
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function backupTarget(targetPath, fsOps, backups) {
+  if (backups.has(targetPath)) {
+    return;
+  }
+  const exists = await pathExists(targetPath);
+  backups.set(targetPath, {
+    exists,
+    content: exists ? await fsOps.readTextTarget(targetPath) : '',
+  });
+}
+
+async function rollbackTargets(backups, fsOps) {
+  const entries = Array.from(backups.entries()).reverse();
+  for (const [targetPath, backup] of entries) {
+    if (backup.exists) {
+      await fsOps.writeTextTarget(targetPath, backup.content);
+    } else {
+      await fsOps.removeTarget(targetPath);
+    }
+  }
+}
+
+function summarizeMutation(existsBefore, changed) {
+  if (!changed) {
+    return 'reused';
+  }
+  return existsBefore ? 'updated' : 'installed';
+}
+
+async function applyMarkdownBlockOperation(targetPath, content, fsOps, backups) {
+  const previous = await fsOps.readTextTarget(targetPath);
+  const existsBefore = previous.length > 0 || await pathExists(targetPath);
+  const next = upsertManagedMarkdownBlock(previous, content);
+  if (normalizeText(previous) === normalizeText(next)) {
+    return 'reused';
+  }
+  await backupTarget(targetPath, fsOps, backups);
+  await fsOps.writeTextTarget(targetPath, next);
+  return summarizeMutation(existsBefore, true);
+}
+
+async function applyManagedFileOperation(targetPath, content, fsOps, backups) {
+  const previous = await fsOps.readTextTarget(targetPath);
+  const existsBefore = previous.length > 0 || await pathExists(targetPath);
+  const next = wrapManagedMarkdown(content);
+
+  if (previous) {
+    if (!hasManagedMarkdownBlock(previous)) {
+      throw new Error(`unmanaged conflict: ${path.basename(targetPath)}`);
+    }
+    if (normalizeText(previous) === normalizeText(next)) {
+      return 'reused';
+    }
+  }
+
+  await backupTarget(targetPath, fsOps, backups);
+  await fsOps.writeTextTarget(targetPath, next);
+  return summarizeMutation(existsBefore, true);
+}
+
+async function applyJsonMergeOperation(targetPath, fragment, fsOps, backups) {
+  const previous = await fsOps.readTextTarget(targetPath);
+  const existsBefore = previous.length > 0 || await pathExists(targetPath);
+  const parsed = parseJsonObject(previous, targetPath);
+  const next = stringifyJsonObject(mergeManagedJsonFragment(parsed, fragment));
+  if (normalizeText(previous) === normalizeText(next)) {
+    return 'reused';
+  }
+  await backupTarget(targetPath, fsOps, backups);
+  await fsOps.writeTextTarget(targetPath, next);
+  return summarizeMutation(existsBefore, true);
+}
+
+async function removeOperation(targetPath, kind, fsOps, backups) {
+  const previous = await fsOps.readTextTarget(targetPath);
+  if (!previous && !(await pathExists(targetPath))) {
+    return 'reused';
+  }
+
+  if (kind === 'markdown-block') {
+    if (!previous || !hasManagedMarkdownBlock(previous)) {
+      return 'reused';
+    }
+    const next = removeManagedMarkdownBlock(previous);
+    await backupTarget(targetPath, fsOps, backups);
+    if (next) {
+      await fsOps.writeTextTarget(targetPath, next);
+    } else {
+      await fsOps.removeTarget(targetPath);
+    }
+    return 'removed';
+  }
+
+  if (kind === 'managed-file') {
+    if (!previous || !hasManagedMarkdownBlock(previous)) {
+      return 'reused';
+    }
+    await backupTarget(targetPath, fsOps, backups);
+    await fsOps.removeTarget(targetPath);
+    return 'removed';
+  }
+
+  const parsed = parseJsonObject(previous, targetPath);
+  if (!(parsed && typeof parsed === 'object' && 'aiosNative' in parsed)) {
+    return 'reused';
+  }
+  const nextObject = removeManagedJsonFragment(parsed);
+  const nextText = Object.keys(nextObject).length > 0 ? stringifyJsonObject(nextObject) : '';
+  await backupTarget(targetPath, fsOps, backups);
+  if (nextText) {
+    await fsOps.writeTextTarget(targetPath, nextText);
+  } else {
+    await fsOps.removeTarget(targetPath);
+  }
+  return 'removed';
+}
+
+function resultBucket(client, tier) {
+  return {
+    client,
+    tier,
+    installed: 0,
+    updated: 0,
+    reused: 0,
+    skipped: 0,
+    removed: 0,
+  };
+}
+
+async function applyRenderedOperations({ rootDir, client, mode, rendered, plan, fsOps }) {
+  const backups = new Map();
+  const result = resultBucket(client, plan.tier);
+  try {
+    for (const operation of rendered.operations) {
+      const targetPath = path.join(rootDir, operation.targetPath);
+      let status = 'reused';
+
+      if (mode === 'uninstall') {
+        status = await removeOperation(targetPath, operation.kind, fsOps, backups);
+      } else if (operation.kind === 'markdown-block') {
+        status = await applyMarkdownBlockOperation(targetPath, operation.content, fsOps, backups);
+      } else if (operation.kind === 'managed-file') {
+        status = await applyManagedFileOperation(targetPath, operation.content, fsOps, backups);
+      } else if (operation.kind === 'json-merge') {
+        status = await applyJsonMergeOperation(targetPath, operation.content, fsOps, backups);
+      } else {
+        throw new Error(`unsupported native operation: ${operation.kind}`);
+      }
+
+      result[status] += 1;
+    }
+
+    if (mode === 'uninstall') {
+      const metadataPath = plan.metadataPath;
+      await backupTarget(metadataPath, fsOps, backups);
+      await fsOps.removeTarget(metadataPath);
+    } else {
+      const metadataPath = plan.metadataPath;
+      const metadataText = stringifyJsonObject(buildNativeSyncMetadata({
+        client,
+        tier: plan.tier,
+        managedTargets: rendered.managedTargets,
+      }));
+      await backupTarget(metadataPath, fsOps, backups);
+      await fsOps.writeTextTarget(metadataPath, metadataText);
+    }
+  } catch (error) {
+    await rollbackTargets(backups, fsOps);
+    throw error;
+  }
+
+  return result;
+}
+
+export async function syncNativeEnhancements({
+  rootDir,
+  client = 'all',
+  mode = 'install',
+  io = console,
+  fsOps,
+} = {}) {
+  const manifest = loadNativeSyncManifest(rootDir);
+  const selectedClients = resolveNativeClients(client);
+  const ops = fsOps ? { ...createDefaultFsOps(), ...fsOps } : createDefaultFsOps();
+  const results = [];
+
+  for (const currentClient of selectedClients) {
+    if (mode !== 'uninstall') {
+      await syncGeneratedSkills({ rootDir, io, surfaces: [currentClient] });
+      if (currentClient === 'codex' || currentClient === 'claude') {
+        await syncCanonicalAgents({ rootDir, io, targets: [currentClient], mode: 'install' });
+      }
+    }
+
+    const plan = buildNativeOutputPlan({ rootDir, manifest, client: currentClient });
+    const rendered = EMITTERS[currentClient]({ rootDir, manifest });
+    const result = await applyRenderedOperations({
+      rootDir,
+      client: currentClient,
+      mode,
+      rendered,
+      plan,
+      fsOps: ops,
+    });
+    results.push(result);
+  }
+
+  return {
+    ok: true,
+    results,
+  };
+}
