@@ -6,6 +6,7 @@ export function normalizeDoctorOptions(rawOptions = {}) {
   return {
     strict: Boolean(rawOptions.strict ?? defaults.strict),
     globalSecurity: Boolean(rawOptions.globalSecurity ?? defaults.globalSecurity),
+    nativeOnly: Boolean(rawOptions.nativeOnly ?? defaults.nativeOnly),
     profile: normalizeHarnessProfile(rawOptions.profile ?? defaults.profile),
   };
 }
@@ -15,6 +16,7 @@ export function planDoctor(rawOptions = {}) {
   const args = ['doctor'];
   if (options.strict) args.push('--strict');
   if (options.globalSecurity) args.push('--global-security');
+  if (options.nativeOnly) args.push('--native');
   if (options.profile !== 'standard') args.push('--profile', options.profile);
   return {
     command: 'doctor',

@@ -14,6 +14,7 @@ interface DoctorScreenProps {
   options: DoctorOptions;
   onToggleStrict: () => void;
   onToggleGlobalSecurity: () => void;
+  onToggleNativeOnly: () => void;
   onRun: () => void;
 }
 
@@ -22,11 +23,12 @@ export function DoctorScreen({
   options,
   onToggleStrict,
   onToggleGlobalSecurity,
+  onToggleNativeOnly,
   onRun,
 }: DoctorScreenProps) {
   const navigate = useNavigate();
   const [cursor, setCursor] = useState(0);
-  const maxCursor = 3;
+  const maxCursor = 4;
 
   useInput(
     useCallback(
@@ -40,18 +42,20 @@ export function DoctorScreen({
             onToggleStrict();
           } else if (cursor === 1) {
             onToggleGlobalSecurity();
+          } else if (cursor === 2) {
+            onToggleNativeOnly();
           }
         } else if (key.return) {
-          if (cursor === 2) {
+          if (cursor === 3) {
             onRun();
-          } else if (cursor === 3) {
+          } else if (cursor === 4) {
             navigate('/');
           }
         } else if (input === 'b' || input === 'B') {
           navigate('/');
         }
       },
-      [cursor, onToggleStrict, onToggleGlobalSecurity, onRun, navigate]
+      [cursor, onToggleStrict, onToggleGlobalSecurity, onToggleNativeOnly, onRun, navigate]
     )
   );
 
@@ -68,8 +72,9 @@ export function DoctorScreen({
       <Box flexDirection="column" marginY={1}>
         <Checkbox label="Strict" checked={options.strict} active={cursor === 0} />
         <Checkbox label="Global security scan" checked={options.globalSecurity} active={cursor === 1} />
-        {renderActionItem('Run doctor', 2)}
-        {renderActionItem('Back', 3)}
+        <Checkbox label="Native only" checked={options.nativeOnly} active={cursor === 2} />
+        {renderActionItem('Run doctor', 3)}
+        {renderActionItem('Back', 4)}
       </Box>
       <Footer />
     </Box>

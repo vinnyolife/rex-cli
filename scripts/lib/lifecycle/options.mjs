@@ -1,6 +1,6 @@
 import { HARNESS_PROFILE_NAMES, normalizeHarnessProfile } from '../harness/profile.mjs';
 
-export const COMPONENT_NAMES = ['browser', 'shell', 'skills', 'agents', 'superpowers'];
+export const COMPONENT_NAMES = ['browser', 'shell', 'skills', 'native', 'agents', 'superpowers'];
 export const WRAP_MODES = ['all', 'repo-only', 'opt-in', 'off'];
 export const CLIENT_NAMES = ['all', 'codex', 'claude', 'gemini', 'opencode'];
 export const SKILL_SCOPE_NAMES = ['global', 'project'];
@@ -156,7 +156,7 @@ export function hasComponent(components, needle) {
 
 export function createDefaultSetupOptions() {
   return {
-    components: [...COMPONENT_NAMES],
+    components: ['browser', 'shell', 'skills', 'native', 'superpowers'],
     wrapMode: 'opt-in',
     client: 'all',
     scope: 'global',
@@ -169,7 +169,7 @@ export function createDefaultSetupOptions() {
 
 export function createDefaultUpdateOptions() {
   return {
-    components: [...COMPONENT_NAMES],
+    components: ['browser', 'shell', 'skills', 'native', 'superpowers'],
     wrapMode: 'opt-in',
     client: 'all',
     scope: 'global',
@@ -194,6 +194,7 @@ export function createDefaultDoctorOptions() {
     strict: false,
     globalSecurity: false,
     profile: 'standard',
+    nativeOnly: false,
   };
 }
 

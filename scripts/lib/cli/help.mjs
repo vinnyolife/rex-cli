@@ -18,9 +18,9 @@ Commands:
 
 Examples:
   node scripts/aios.mjs setup --components all --mode opt-in --client all
-  node scripts/aios.mjs update --components shell,skills --skip-doctor
-  node scripts/aios.mjs uninstall --components shell,skills
-  node scripts/aios.mjs doctor --strict --profile standard
+  node scripts/aios.mjs update --components shell,skills,native --skip-doctor
+  node scripts/aios.mjs uninstall --components shell,skills,native
+  node scripts/aios.mjs doctor --strict --native --profile standard
   node scripts/aios.mjs memo add "note #tag"
   node scripts/aios.mjs quality-gate pre-pr --profile strict
   node scripts/aios.mjs orchestrate feature --task "Ship orchestrator blueprints"
@@ -37,7 +37,7 @@ export function getCommandHelpText(command) {
   node scripts/aios.mjs setup [options]
 
 Options:
-  --components <list>            Comma list: browser,shell,skills,agents,superpowers (default: browser,shell,skills,agents,superpowers)
+  --components <list>            Comma list: browser,shell,skills,native,agents,superpowers (default: browser,shell,skills,native,superpowers)
   --mode <all|repo-only|opt-in|off>
   --client <all|codex|claude|gemini|opencode>
   --scope <global|project>       Skills install scope (default: global)
@@ -52,7 +52,7 @@ Options:
   node scripts/aios.mjs update [options]
 
 Options:
-  --components <list>            Comma list: browser,shell,skills,agents,superpowers (default: browser,shell,skills,agents,superpowers)
+  --components <list>            Comma list: browser,shell,skills,native,agents,superpowers (default: browser,shell,skills,native,superpowers)
   --mode <all|repo-only|opt-in|off>
   --client <all|codex|claude|gemini|opencode>
   --scope <global|project>       Skills install scope (default: global)
@@ -67,7 +67,7 @@ Options:
   node scripts/aios.mjs uninstall [options]
 
 Options:
-  --components <list>            Comma list: shell,skills,agents,browser,superpowers (default: shell,skills)
+  --components <list>            Comma list: shell,skills,native,agents,browser,superpowers (default: shell,skills)
   --client <all|codex|claude|gemini|opencode>
   --scope <global|project>       Skills uninstall scope (default: global)
   --skills <list>                Comma list of skill names to uninstall
@@ -80,6 +80,7 @@ Options:
 Options:
   --strict
   --global-security
+  --native
   --profile <minimal|standard|strict>
   -h, --help
 `;
@@ -182,6 +183,12 @@ export function getInternalHelpText(target, action) {
   if (target === 'skills' && (action === 'uninstall' || action === 'doctor')) {
     return `Usage:
   node scripts/aios.mjs internal skills ${action} [--client <all|codex|claude|gemini|opencode>] [--scope <global|project>] [--skills <list>]
+`;
+  }
+
+  if (target === 'native' && (action === 'install' || action === 'update' || action === 'uninstall' || action === 'doctor')) {
+    return `Usage:
+  node scripts/aios.mjs internal native ${action} [--client <all|codex|claude|gemini|opencode>]
 `;
   }
 

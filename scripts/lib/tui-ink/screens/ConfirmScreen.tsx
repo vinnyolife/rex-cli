@@ -129,6 +129,7 @@ export function ConfirmScreen({ rootDir, options, onRun }: ConfirmScreenProps) {
           <>
             <Text>Strict: {options.doctor.strict ? 'true' : 'false'}</Text>
             <Text>Global security: {options.doctor.globalSecurity ? 'true' : 'false'}</Text>
+            <Text>Native only: {options.doctor.nativeOnly ? 'true' : 'false'}</Text>
           </>
         )}
       </Box>

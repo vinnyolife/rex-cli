@@ -76,6 +76,34 @@ test('parseArgs accepts install mode for skills workflows', () => {
   assert.equal(internalResult.options.installMode, 'link');
 });
 
+test('parseArgs accepts native component, internal native target, and native-only doctor', () => {
+  const setupResult = parseArgs([
+    'setup',
+    '--components',
+    'shell,native',
+    '--client',
+    'claude',
+  ]);
+  assert.equal(setupResult.command, 'setup');
+  assert.deepEqual(setupResult.options.components, ['shell', 'native']);
+  assert.equal(setupResult.options.client, 'claude');
+
+  const internalResult = parseArgs([
+    'internal',
+    'native',
+    'install',
+    '--client',
+    'codex',
+  ]);
+  assert.equal(internalResult.command, 'internal');
+  assert.equal(internalResult.options.target, 'native');
+  assert.equal(internalResult.options.client, 'codex');
+
+  const doctorResult = parseArgs(['doctor', '--native']);
+  assert.equal(doctorResult.command, 'doctor');
+  assert.equal(doctorResult.options.nativeOnly, true);
+});
+
 test('parseArgs rejects invalid install mode', () => {
   assert.throws(() => parseArgs(['setup', '--install-mode', 'portable']), /--install-mode must be one of/);
 });
@@ -89,6 +117,7 @@ test('parseArgs accepts doctor strict mode', () => {
   assert.equal(result.command, 'doctor');
   assert.equal(result.options.strict, true);
   assert.equal(result.options.globalSecurity, false);
+  assert.equal(result.options.nativeOnly, false);
 });
 
 test('parseArgs rejects invalid mode', () => {
@@ -141,6 +170,7 @@ test('aios CLI prints help', () => {
   assert.match(result.stdout, /AIOS unified entry/i);
   assert.match(result.stdout, /setup/);
   assert.match(result.stdout, /doctor/);
+  assert.match(result.stdout, /native/);
 });
 
 test('aios memo prints help', () => {

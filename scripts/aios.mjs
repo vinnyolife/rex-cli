@@ -61,6 +61,14 @@ async function runInternal(options) {
     if (action === 'doctor') return module.doctorContextDbSkills({ rootDir, projectRoot, client: options.client ?? 'all', scope: options.scope ?? 'global', selectedSkills: options.skills ?? [] });
   }
 
+  if (target === 'native') {
+    const module = await import('./lib/components/native.mjs');
+    if (action === 'install') return module.installNativeEnhancements({ rootDir, projectRoot, client: options.client ?? 'all' });
+    if (action === 'update') return module.updateNativeEnhancements({ rootDir, projectRoot, client: options.client ?? 'all' });
+    if (action === 'uninstall') return module.uninstallNativeEnhancements({ rootDir, projectRoot, client: options.client ?? 'all' });
+    if (action === 'doctor') return module.doctorNativeEnhancements({ rootDir, projectRoot, client: options.client ?? 'all' });
+  }
+
   if (target === 'superpowers') {
     const module = await import('./lib/components/superpowers.mjs');
     if (action === 'install') return module.installSuperpowers({ repoUrl: options.repoUrl, update: Boolean(options.update), force: Boolean(options.force) });

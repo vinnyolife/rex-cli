@@ -19,11 +19,12 @@ interface UninstallScreenProps {
   onRun: () => void;
 }
 
-const COMPONENTS_KEYS: (keyof ComponentsConfig)[] = ['browser', 'shell', 'skills', 'superpowers'];
+const COMPONENTS_KEYS: (keyof ComponentsConfig)[] = ['browser', 'shell', 'skills', 'native', 'superpowers'];
 const COMPONENTS_LABELS: Record<keyof ComponentsConfig, string> = {
   browser: 'Browser MCP',
   shell: 'Shell wrappers',
   skills: 'Skills',
+  native: 'Native enhancements',
   superpowers: 'Superpowers',
 };
 
@@ -38,7 +39,7 @@ export function UninstallScreen({
 }: UninstallScreenProps) {
   const navigate = useNavigate();
   const [cursor, setCursor] = useState(0);
-  const maxCursor = 8;
+  const maxCursor = 9;
 
   useInput(
     useCallback(
@@ -48,19 +49,19 @@ export function UninstallScreen({
         } else if (key.downArrow) {
           setCursor(prev => Math.min(maxCursor, prev + 1));
         } else if (input === ' ' || key.rightArrow) {
-          if (cursor >= 0 && cursor <= 3) {
+          if (cursor >= 0 && cursor <= 4) {
             onToggleComponent(COMPONENTS_KEYS[cursor]);
-          } else if (cursor === 4) {
-            onCycleScope();
           } else if (cursor === 5) {
+            onCycleScope();
+          } else if (cursor === 6) {
             onCycleClient();
           }
         } else if (key.return) {
-          if (cursor === 6) {
+          if (cursor === 7) {
             onSelectSkills();
-          } else if (cursor === 7) {
-            onRun();
           } else if (cursor === 8) {
+            onRun();
+          } else if (cursor === 9) {
             navigate('/');
           }
         } else if (input === 'b' || input === 'B') {
@@ -100,11 +101,11 @@ export function UninstallScreen({
             active={cursor === idx}
           />
         ))}
-        {renderValueItem('Skills scope', options.scope, 4)}
-        {renderValueItem('Client', options.client, 5)}
-        {renderValueItem('Selected skills', selectedSkillsDisplay, 6)}
-        {renderActionItem('Run uninstall', 7)}
-        {renderActionItem('Back', 8)}
+        {renderValueItem('Skills scope', options.scope, 5)}
+        {renderValueItem('Client', options.client, 6)}
+        {renderValueItem('Selected skills', selectedSkillsDisplay, 7)}
+        {renderActionItem('Run uninstall', 8)}
+        {renderActionItem('Back', 9)}
       </Box>
       <Footer />
     </Box>

@@ -7,6 +7,7 @@ import {
   normalizeSkillScope,
 } from './options.mjs';
 import { uninstallOrchestratorAgents } from '../components/agents.mjs';
+import { uninstallNativeEnhancements } from '../components/native.mjs';
 import { uninstallContextDbShell } from '../components/shell.mjs';
 import { uninstallContextDbSkills } from '../components/skills.mjs';
 
@@ -46,6 +47,10 @@ export async function runUninstall(rawOptions = {}, { io = console, rootDir, pro
 
   if (hasComponent(options.components, 'skills')) {
     await uninstallContextDbSkills({ rootDir, projectRoot, client: options.client, scope: options.scope, selectedSkills: options.skills, io });
+  }
+
+  if (hasComponent(options.components, 'native')) {
+    await uninstallNativeEnhancements({ rootDir, projectRoot, client: options.client, io });
   }
 
   if (hasComponent(options.components, 'agents')) {

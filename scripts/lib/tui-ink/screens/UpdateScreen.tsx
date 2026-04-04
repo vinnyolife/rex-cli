@@ -22,11 +22,12 @@ interface UpdateScreenProps {
   onRun: () => void;
 }
 
-const COMPONENTS_KEYS: (keyof ComponentsConfig)[] = ['browser', 'shell', 'skills', 'superpowers'];
+const COMPONENTS_KEYS: (keyof ComponentsConfig)[] = ['browser', 'shell', 'skills', 'native', 'superpowers'];
 const COMPONENTS_LABELS: Record<keyof ComponentsConfig, string> = {
   browser: 'Browser MCP',
   shell: 'Shell wrappers',
   skills: 'Skills',
+  native: 'Native enhancements',
   superpowers: 'Superpowers',
 };
 
@@ -44,7 +45,7 @@ export function UpdateScreen({
 }: UpdateScreenProps) {
   const navigate = useNavigate();
   const [cursor, setCursor] = useState(0);
-  const maxCursor = 11;
+  const maxCursor = 12;
 
   useInput(
     useCallback(
@@ -54,25 +55,25 @@ export function UpdateScreen({
         } else if (key.downArrow) {
           setCursor(prev => Math.min(maxCursor, prev + 1));
         } else if (input === ' ' || key.rightArrow) {
-          if (cursor >= 0 && cursor <= 3) {
+          if (cursor >= 0 && cursor <= 4) {
             onToggleComponent(COMPONENTS_KEYS[cursor]);
-          } else if (cursor === 4) {
-            onCycleWrapMode();
           } else if (cursor === 5) {
-            onCycleScope();
+            onCycleWrapMode();
           } else if (cursor === 6) {
-            onCycleClient();
+            onCycleScope();
           } else if (cursor === 7) {
-            onToggleWithPlaywright();
+            onCycleClient();
           } else if (cursor === 8) {
+            onToggleWithPlaywright();
+          } else if (cursor === 9) {
             onToggleSkipDoctor();
           }
         } else if (key.return) {
-          if (cursor === 9) {
+          if (cursor === 10) {
             onSelectSkills();
-          } else if (cursor === 10) {
-            onRun();
           } else if (cursor === 11) {
+            onRun();
+          } else if (cursor === 12) {
             navigate('/');
           }
         } else if (input === 'b' || input === 'B') {
@@ -112,22 +113,22 @@ export function UpdateScreen({
             active={cursor === idx}
           />
         ))}
-        {renderValueItem('Mode', options.wrapMode, 4)}
-        {renderValueItem('Skills scope', options.scope, 5)}
-        {renderValueItem('Client', options.client, 6)}
+        {renderValueItem('Mode', options.wrapMode, 5)}
+        {renderValueItem('Skills scope', options.scope, 6)}
+        {renderValueItem('Client', options.client, 7)}
         <Checkbox
           label="With Playwright install"
           checked={options.withPlaywrightInstall}
-          active={cursor === 7}
+          active={cursor === 8}
         />
         <Checkbox
           label="Skip doctor"
           checked={options.skipDoctor}
-          active={cursor === 8}
+          active={cursor === 9}
         />
-        {renderValueItem('Selected skills', selectedSkillsDisplay, 9)}
-        {renderActionItem('Run update', 10)}
-        {renderActionItem('Back', 11)}
+        {renderValueItem('Selected skills', selectedSkillsDisplay, 10)}
+        {renderActionItem('Run update', 11)}
+        {renderActionItem('Back', 12)}
       </Box>
       <Footer />
     </Box>

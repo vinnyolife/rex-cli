@@ -11,6 +11,7 @@ import {
 import { installOrchestratorAgents } from '../components/agents.mjs';
 import { installBrowserMcp } from '../components/browser.mjs';
 import { doctorBrowserMcp } from '../components/browser.mjs';
+import { installNativeEnhancements } from '../components/native.mjs';
 import { doctorContextDbShell, installContextDbShell, installPrivacyGuard } from '../components/shell.mjs';
 import { doctorContextDbSkills, installContextDbSkills } from '../components/skills.mjs';
 import { doctorSuperpowers, installSuperpowers } from '../components/superpowers.mjs';
@@ -81,6 +82,15 @@ export async function runSetup(rawOptions = {}, { rootDir, projectRoot = rootDir
     if (!options.skipDoctor) {
       await doctorContextDbSkills({ rootDir, projectRoot, client: options.client, scope: options.scope, selectedSkills: options.skills, io });
     }
+  }
+
+  if (hasComponent(options.components, 'native')) {
+    await installNativeEnhancements({
+      rootDir,
+      projectRoot,
+      client: options.client,
+      io,
+    });
   }
 
   if (hasComponent(options.components, 'agents')) {

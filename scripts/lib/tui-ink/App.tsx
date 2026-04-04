@@ -118,6 +118,7 @@ function AppContent({
             options={options.doctor}
             onToggleStrict={() => toggleSkipFlag('doctor', 'strict')}
             onToggleGlobalSecurity={() => toggleSkipFlag('doctor', 'globalSecurity')}
+            onToggleNativeOnly={() => toggleSkipFlag('doctor', 'nativeOnly')}
             onRun={() => handleRunConfirm('doctor')}
           />
         }

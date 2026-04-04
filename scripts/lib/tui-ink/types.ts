@@ -9,6 +9,7 @@ export interface ComponentsConfig {
   browser: boolean;
   shell: boolean;
   skills: boolean;
+  native: boolean;
   superpowers: boolean;
 }
 
@@ -42,6 +43,7 @@ export interface UninstallOptions {
 export interface DoctorOptions {
   strict: boolean;
   globalSecurity: boolean;
+  nativeOnly: boolean;
 }
 
 export interface CatalogSkill {

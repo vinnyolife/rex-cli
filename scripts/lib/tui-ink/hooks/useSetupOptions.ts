@@ -38,7 +38,7 @@ export function useSetupOptions(
 ) {
   const [options, setOptions] = useState<AllOptions>(() => ({
     setup: {
-      components: { browser: true, shell: true, skills: true, superpowers: true },
+      components: { browser: true, shell: true, skills: true, native: true, superpowers: true },
       wrapMode: 'opt-in',
       scope: 'global',
       client: 'all',
@@ -47,7 +47,7 @@ export function useSetupOptions(
       skipDoctor: false,
     },
     update: {
-      components: { browser: true, shell: true, skills: true, superpowers: true },
+      components: { browser: true, shell: true, skills: true, native: true, superpowers: true },
       wrapMode: 'opt-in',
       scope: 'global',
       client: 'all',
@@ -56,7 +56,7 @@ export function useSetupOptions(
       skipDoctor: false,
     },
     uninstall: {
-      components: { browser: false, shell: true, skills: true, superpowers: false },
+      components: { browser: false, shell: true, skills: true, native: false, superpowers: false },
       scope: 'global',
       client: 'all',
       selectedSkills: [],
@@ -64,6 +64,7 @@ export function useSetupOptions(
     doctor: {
       strict: false,
       globalSecurity: false,
+      nativeOnly: false,
     },
   }));
 
@@ -122,7 +123,7 @@ export function useSetupOptions(
         // Ensure at least one component selected for setup/update
         if ((action === 'setup' || action === 'update') &&
             !newComponents.browser && !newComponents.shell &&
-            !newComponents.skills && !newComponents.superpowers) {
+            !newComponents.skills && !newComponents.native && !newComponents.superpowers) {
           newComponents.shell = true;
         }
         return {

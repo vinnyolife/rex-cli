@@ -24,7 +24,7 @@ import {
 } from '../lifecycle/options.mjs';
 import { normalizeOrchestratorBlueprint, normalizeOrchestratorFormat } from '../harness/orchestrator.mjs';
 
-const INTERNAL_TARGETS = new Set(['shell', 'skills', 'superpowers', 'browser', 'privacy']);
+const INTERNAL_TARGETS = new Set(['shell', 'skills', 'native', 'superpowers', 'browser', 'privacy']);
 const PRIVACY_MODES = new Set(['regex', 'ollama', 'hybrid']);
 
 function takeValue(argv, index, flag) {
@@ -256,6 +256,12 @@ function parseTopLevelArgs(command, argv) {
         break;
       case '--global-security':
         options.globalSecurity = true;
+        break;
+      case '--native':
+        if (command !== 'doctor') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.nativeOnly = true;
         break;
       case '--profile':
         options.profile = normalizeHarnessProfile(takeValue(rest, index, '--profile'));
