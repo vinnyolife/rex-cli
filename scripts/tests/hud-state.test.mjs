@@ -235,6 +235,67 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
   assert.match(rendered, /FixHint: \[runbook\.dispatch-merge-triage\]/);
 });
 
+test('readHudState caches latest checkpoint tail until file changes', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-checkpoint-cache-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'checkpoint-cache-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+  const checkpointPath = path.join(sessionDir, 'l1-checkpoints.jsonl');
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T00:00:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), { sessionId, status: 'running' });
+  await writeJsonLines(checkpointPath, [
+    {
+      seq: 1,
+      ts: '2026-04-06T00:00:00.000Z',
+      status: 'running',
+      summary: 'First checkpoint',
+      nextActions: [],
+      artifacts: [],
+    },
+  ]);
+
+  const originalOpen = fs.open;
+  let openCount = 0;
+  fs.open = async (filePath, flags, ...rest) => {
+    if (String(filePath) === checkpointPath && String(flags) === 'r') {
+      openCount += 1;
+    }
+    return await originalOpen(filePath, flags, ...rest);
+  };
+
+  try {
+    const first = await readHudState({ rootDir, sessionId });
+    const second = await readHudState({ rootDir, sessionId });
+
+    assert.equal(first.latestCheckpoint?.seq, 1);
+    assert.equal(second.latestCheckpoint?.seq, 1);
+    assert.equal(openCount, 1);
+
+    await fs.appendFile(
+      checkpointPath,
+      `${JSON.stringify({
+        seq: 2,
+        ts: '2026-04-06T00:00:01.000Z',
+        status: 'running',
+        summary: 'Second checkpoint',
+        nextActions: [],
+        artifacts: [],
+      })}\n`,
+      'utf8'
+    );
+
+    const third = await readHudState({ rootDir, sessionId });
+    assert.equal(third.latestCheckpoint?.seq, 2);
+    assert.equal(openCount, 2);
+  } finally {
+    fs.open = originalOpen;
+  }
+});
+
 test('readHudDispatchSummary includes latest dispatch, hindsight, and fix hint', async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-summary-'));
   const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');

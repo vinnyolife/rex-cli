@@ -18,6 +18,8 @@ const AGENT_PROVIDER_MAP = Object.freeze(
 
 const DEFAULT_SESSION_SCAN_LIMIT = 200;
 const DEFAULT_CHECKPOINT_TAIL_BYTES = 1_000_000;
+const CHECKPOINT_TAIL_CACHE_MAX_ENTRIES = 32;
+const CHECKPOINT_TAIL_CACHE = new Map();
 const DISPATCH_INDEX_CACHE_TTL_MS = 2000;
 const DISPATCH_INDEX_CACHE_MAX_ENTRIES = 32;
 const DISPATCH_INDEX_CACHE_MAX_NAMES = 200;
@@ -76,10 +78,14 @@ async function safeReadJson(filePath) {
   }
 }
 
-async function readTailText(filePath, maxBytes) {
+function getCheckpointTailCacheKey(filePath, maxBytes) {
+  return `${getCacheKeyPart(filePath)}::${getCacheKeyPart(maxBytes)}`;
+}
+
+async function readTailText(filePath, maxBytes, stats = null) {
   try {
-    const stats = await fs.stat(filePath);
-    const size = Number(stats.size) || 0;
+    const resolvedStats = stats && typeof stats === 'object' ? stats : await fs.stat(filePath);
+    const size = Number(resolvedStats.size) || 0;
     if (size <= 0) return '';
     const readSize = Math.min(size, maxBytes);
     const start = size - readSize;
@@ -103,24 +109,56 @@ async function readTailText(filePath, maxBytes) {
 }
 
 async function readLastJsonLine(filePath, { maxBytes = DEFAULT_CHECKPOINT_TAIL_BYTES } = {}) {
-  const tail = await readTailText(filePath, maxBytes);
-  if (!tail.trim()) return null;
+  const resolvedMaxBytes = Number.isFinite(maxBytes) ? Math.max(1, Math.floor(maxBytes)) : DEFAULT_CHECKPOINT_TAIL_BYTES;
+  const cacheKey = getCheckpointTailCacheKey(filePath, resolvedMaxBytes);
 
-  const lines = tail
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length === 0) return null;
+  let stats = null;
+  try {
+    stats = await fs.stat(filePath);
+  } catch {
+    CHECKPOINT_TAIL_CACHE.delete(cacheKey);
+    return null;
+  }
 
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    try {
-      return JSON.parse(lines[index]);
-    } catch {
-      // ignore malformed tail rows
+  const mtimeMs = Number.isFinite(stats.mtimeMs) ? Math.floor(stats.mtimeMs) : 0;
+  const size = Number(stats.size) || 0;
+  const cached = CHECKPOINT_TAIL_CACHE.get(cacheKey);
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+    bumpLruCache(CHECKPOINT_TAIL_CACHE, cacheKey);
+    return cached.value;
+  }
+
+  const tail = await readTailText(filePath, resolvedMaxBytes, stats);
+  let value = null;
+
+  if (tail.trim()) {
+    const lines = tail
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        value = JSON.parse(lines[index]);
+        break;
+      } catch {
+        // ignore malformed tail rows
+      }
     }
   }
 
-  return null;
+  setLruCache(
+    CHECKPOINT_TAIL_CACHE,
+    cacheKey,
+    {
+      mtimeMs,
+      size,
+      value,
+    },
+    CHECKPOINT_TAIL_CACHE_MAX_ENTRIES
+  );
+
+  return value;
 }
 
 function compareIsoDesc(left = '', right = '') {
