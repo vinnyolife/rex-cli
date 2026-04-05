@@ -21,12 +21,18 @@ function buildHindsightCacheKey({
   sessionId,
   provider,
   artifacts,
+  artifactSignatures = [],
   maxArtifacts,
   maxPairs,
   maxLessons,
 } = {}) {
   const artifactKey = Array.isArray(artifacts)
     ? artifacts.map((item) => getCacheKeyPart(item?.artifactPath)).join('|')
+    : '';
+  const signatureKey = Array.isArray(artifactSignatures) && artifactSignatures.length > 0
+    ? artifactSignatures
+      .map((item) => `${getCacheKeyPart(item?.artifactPath)}@${getCacheKeyPart(item?.mtimeMs)}@${getCacheKeyPart(item?.size)}`)
+      .join('|')
     : '';
 
   return [
@@ -37,6 +43,7 @@ function buildHindsightCacheKey({
     `maxPairs=${getCacheKeyPart(maxPairs)}`,
     `maxLessons=${getCacheKeyPart(maxLessons)}`,
     `artifacts=${artifactKey}`,
+    `signatures=${signatureKey}`,
   ].join('::');
 }
 
@@ -323,6 +330,32 @@ async function readJsonOptional(filePath) {
   }
 }
 
+async function buildArtifactSignatures(rootDir, artifacts = []) {
+  const resolvedRootDir = normalizeText(rootDir);
+  if (!resolvedRootDir) return [];
+  const entries = Array.isArray(artifacts) ? artifacts : [];
+  const stats = await Promise.all(entries.map(async (entry) => {
+    const artifactPath = normalizeText(entry?.artifactPath);
+    if (!artifactPath) return null;
+    try {
+      const stat = await fs.stat(path.join(resolvedRootDir, artifactPath));
+      return {
+        artifactPath,
+        mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.floor(stat.mtimeMs) : 0,
+        size: Number.isFinite(stat.size) ? Math.floor(stat.size) : 0,
+      };
+    } catch {
+      return {
+        artifactPath,
+        mtimeMs: 0,
+        size: 0,
+      };
+    }
+  }));
+
+  return stats.filter(Boolean);
+}
+
 export async function buildHindsightEval({
   rootDir,
   meta = null,
@@ -369,11 +402,13 @@ export async function buildHindsightEval({
     };
   }
 
+  const artifactSignatures = await buildArtifactSignatures(rootDir, artifacts);
   const cacheKey = buildHindsightCacheKey({
     rootDir,
     sessionId,
     provider,
     artifacts,
+    artifactSignatures,
     maxArtifacts: resolvedMaxArtifacts,
     maxPairs: resolvedMaxPairs,
     maxLessons: resolvedMaxLessons,

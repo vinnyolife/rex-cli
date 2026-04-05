@@ -244,6 +244,14 @@ async function findLatestDispatchArtifact(rootDir, sessionId) {
     ? artifact.dispatchRun
     : null;
   const jobRuns = Array.isArray(dispatchRun?.jobRuns) ? dispatchRun.jobRuns : [];
+  const workItemTelemetryItems = Array.isArray(artifact?.workItemTelemetry?.items)
+    ? artifact.workItemTelemetry.items
+    : [];
+  const workItemTelemetryById = new Map(
+    workItemTelemetryItems
+      .map((item) => [normalizeText(item?.itemId), item])
+      .filter(([itemId]) => itemId)
+  );
   const blocked = jobRuns
     .filter((jobRun) => normalizeText(jobRun?.status).toLowerCase() === 'blocked')
     .map((jobRun) => ({
@@ -255,6 +263,8 @@ async function findLatestDispatchArtifact(rootDir, sessionId) {
         ? jobRun.workItemRefs.map((ref) => normalizeText(ref)).filter(Boolean)
         : [],
       attempts: Number.isFinite(jobRun?.attempts) ? Math.max(0, Math.floor(jobRun.attempts)) : 0,
+      failureClass: normalizeText(workItemTelemetryById.get(normalizeText(jobRun?.jobId))?.failureClass),
+      retryClass: normalizeText(workItemTelemetryById.get(normalizeText(jobRun?.jobId))?.retryClass),
       error: clipText(jobRun?.output?.error || jobRun?.output?.rawOutput || ''),
     }))
     .filter((row) => row.jobId);

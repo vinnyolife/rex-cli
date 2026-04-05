@@ -206,13 +206,17 @@ function formatBlockedJobs(state) {
     const role = normalizeText(job.role) || 'unknown';
     const jobType = normalizeText(job.jobType) || 'unknown';
     const error = normalizeText(job.error);
+    const failureClass = normalizeText(job.failureClass);
+    const retryClass = normalizeText(job.retryClass);
+    const failureLabel = failureClass ? ` fail=${failureClass}` : '';
+    const retryLabel = retryClass ? ` retry=${retryClass}` : '';
     const workItemRefs = Array.isArray(job.workItemRefs) ? job.workItemRefs.map((ref) => normalizeText(ref)).filter(Boolean) : [];
     const wiLabel = workItemRefs.length > 0 ? ` wi=${workItemRefs.join(',')}` : '';
     const attempts = Number.isFinite(job.attempts) ? Math.max(0, Math.floor(job.attempts)) : 0;
     const attemptLabel = attempts > 0 ? ` a=${attempts}` : '';
     const turnId = normalizeText(job.turnId);
     const turnLabel = turnId ? ` turn=${clipLine(turnId, 90)}` : '';
-    lines.push(`- ${job.jobId} (${role}/${jobType}${wiLabel}${attemptLabel})${turnLabel}${error ? `: ${clipLine(error, 120)}` : ''}`);
+    lines.push(`- ${job.jobId} (${role}/${jobType}${wiLabel}${attemptLabel}${failureLabel}${retryLabel})${turnLabel}${error ? `: ${clipLine(error, 120)}` : ''}`);
   }
   if (blocked.length > 10) {
     lines.push(`- +${blocked.length - 10} more`);

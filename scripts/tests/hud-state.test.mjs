@@ -168,7 +168,16 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
       schemaVersion: 1,
       generatedAt: '2026-04-05T01:00:00.000Z',
       totals: { total: 2, queued: 0, running: 0, blocked: 1, done: 1 },
-      items: [],
+      items: [
+        {
+          itemId: 'phase.implement.wi.1',
+          itemType: 'phase',
+          role: 'implementer',
+          status: 'blocked',
+          failureClass: 'ownership-policy',
+          retryClass: 'same-hypothesis',
+        },
+      ],
     },
   });
 
@@ -182,6 +191,8 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
   assert.equal(state.latestDispatch?.blocked?.[0]?.turnId, '20260405T010000Z:phase.implement.wi.1:a2');
   assert.deepEqual(state.latestDispatch?.blocked?.[0]?.workItemRefs, ['wi.1']);
   assert.equal(state.latestDispatch?.blocked?.[0]?.attempts, 2);
+  assert.equal(state.latestDispatch?.blocked?.[0]?.failureClass, 'ownership-policy');
+  assert.equal(state.latestDispatch?.blocked?.[0]?.retryClass, 'same-hypothesis');
   assert.equal(state.dispatchHindsight?.pairsAnalyzed, 1);
   assert.equal(state.dispatchHindsight?.repeatedBlockedTurns, 1);
   assert.equal(state.dispatchHindsight?.topRepeatedFailureClasses?.[0]?.failureClass, 'ownership-policy');
