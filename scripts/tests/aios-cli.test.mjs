@@ -187,6 +187,7 @@ test('parseArgs accepts team shorthand and runtime overrides', () => {
     '--resume',
     'session-123',
     '--retry-blocked',
+    '--force',
     '--provider',
     'codex',
   ]);
@@ -194,6 +195,7 @@ test('parseArgs accepts team shorthand and runtime overrides', () => {
   assert.equal(resumeRetry.options.resumeSessionId, 'session-123');
   assert.equal(resumeRetry.options.sessionId, 'session-123');
   assert.equal(resumeRetry.options.retryBlocked, true);
+  assert.equal(resumeRetry.options.force, true);
   assert.equal(resumeRetry.options.clientId, 'codex-cli');
 });
 

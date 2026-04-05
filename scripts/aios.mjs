@@ -248,6 +248,7 @@ async function main() {
       sessionId: parsed.options.sessionId,
       resumeSessionId: parsed.options.resumeSessionId,
       retryBlocked: Boolean(parsed.options.retryBlocked),
+      force: Boolean(parsed.options.force),
       limit: parsed.options.limit,
       recommendationId: parsed.options.recommendationId,
       dispatchMode: 'local',

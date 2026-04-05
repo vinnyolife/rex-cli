@@ -1,12 +1,65 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+const HINDSIGHT_CACHE_MAX_ENTRIES = 24;
+const HINDSIGHT_CACHE = new Map();
+
 function nowIso() {
   return new Date().toISOString();
 }
 
 function normalizeText(value) {
   return String(value ?? '').trim();
+}
+
+function getCacheKeyPart(value) {
+  return String(value ?? '').replaceAll('::', ':');
+}
+
+function buildHindsightCacheKey({
+  rootDir,
+  sessionId,
+  provider,
+  artifacts,
+  maxArtifacts,
+  maxPairs,
+  maxLessons,
+} = {}) {
+  const artifactKey = Array.isArray(artifacts)
+    ? artifacts.map((item) => getCacheKeyPart(item?.artifactPath)).join('|')
+    : '';
+
+  return [
+    getCacheKeyPart(rootDir),
+    getCacheKeyPart(sessionId),
+    getCacheKeyPart(provider),
+    `maxArtifacts=${getCacheKeyPart(maxArtifacts)}`,
+    `maxPairs=${getCacheKeyPart(maxPairs)}`,
+    `maxLessons=${getCacheKeyPart(maxLessons)}`,
+    `artifacts=${artifactKey}`,
+  ].join('::');
+}
+
+function getCachedHindsight(cacheKey) {
+  if (!cacheKey) return null;
+  const cached = HINDSIGHT_CACHE.get(cacheKey);
+  if (!cached || typeof cached !== 'object') return null;
+  HINDSIGHT_CACHE.delete(cacheKey);
+  HINDSIGHT_CACHE.set(cacheKey, cached);
+  return cached;
+}
+
+function setCachedHindsight(cacheKey, result) {
+  if (!cacheKey || !result || typeof result !== 'object') return;
+  if (HINDSIGHT_CACHE.has(cacheKey)) {
+    HINDSIGHT_CACHE.delete(cacheKey);
+  }
+  HINDSIGHT_CACHE.set(cacheKey, result);
+  while (HINDSIGHT_CACHE.size > HINDSIGHT_CACHE_MAX_ENTRIES) {
+    const oldestKey = HINDSIGHT_CACHE.keys().next().value;
+    if (!oldestKey) break;
+    HINDSIGHT_CACHE.delete(oldestKey);
+  }
 }
 
 function normalizeStringArray(raw = []) {
@@ -284,6 +337,8 @@ export async function buildHindsightEval({
   const artifacts = [];
   const seen = new Set();
   const resolvedMaxArtifacts = Number.isFinite(maxArtifacts) ? Math.max(2, Math.floor(maxArtifacts)) : 6;
+  const resolvedMaxPairs = Number.isFinite(maxPairs) ? Math.max(1, Math.floor(maxPairs)) : 3;
+  const resolvedMaxLessons = Number.isFinite(maxLessons) ? Math.max(0, Math.floor(maxLessons)) : 12;
 
   for (const record of Array.isArray(dispatchEvidence) ? dispatchEvidence : []) {
     const artifactPath = normalizeText(record?.artifactPath);
@@ -311,6 +366,23 @@ export async function buildHindsightEval({
       topRepeatedJobs: [],
       topRepeatedFailureClasses: [],
       lessons: [],
+    };
+  }
+
+  const cacheKey = buildHindsightCacheKey({
+    rootDir,
+    sessionId,
+    provider,
+    artifacts,
+    maxArtifacts: resolvedMaxArtifacts,
+    maxPairs: resolvedMaxPairs,
+    maxLessons: resolvedMaxLessons,
+  });
+  const cached = getCachedHindsight(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      generatedAt: nowIso(),
     };
   }
 
@@ -346,7 +418,6 @@ export async function buildHindsightEval({
     };
   }
 
-  const resolvedMaxPairs = Number.isFinite(maxPairs) ? Math.max(1, Math.floor(maxPairs)) : 3;
   const pairs = [];
   const summary = {
     pairsAnalyzed: 0,
@@ -376,10 +447,9 @@ export async function buildHindsightEval({
     pairs.push(pair);
   }
 
-  const lessons = distillLessons({ pairs, sessionId, provider })
-    .slice(0, Number.isFinite(maxLessons) ? Math.max(0, Math.floor(maxLessons)) : 12);
+  const lessons = distillLessons({ pairs, sessionId, provider }).slice(0, resolvedMaxLessons);
 
-  return {
+  const result = {
     schemaVersion: 1,
     generatedAt: nowIso(),
     sessionId: sessionId || null,
@@ -396,5 +466,10 @@ export async function buildHindsightEval({
     topRepeatedFailureClasses: topEntries(repeatedFailureCounts, 5).map((item) => ({ failureClass: item.key, count: item.count })),
     lessons,
   };
-}
 
+  if (loaded.length === artifacts.length) {
+    setCachedHindsight(cacheKey, result);
+  }
+
+  return result;
+}

@@ -48,6 +48,42 @@ function parseBooleanEnv(rawValue, fallback = false) {
   return fallback;
 }
 
+function normalizeCounter(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function extractDispatchHindsightSummary(learnEvalReport) {
+  const hindsight = learnEvalReport?.signals?.dispatch?.hindsight && typeof learnEvalReport.signals.dispatch.hindsight === 'object'
+    ? learnEvalReport.signals.dispatch.hindsight
+    : null;
+
+  return {
+    pairsAnalyzed: normalizeCounter(hindsight?.pairsAnalyzed),
+    repeatedBlockedTurns: normalizeCounter(hindsight?.repeatedBlockedTurns),
+    regressions: normalizeCounter(hindsight?.regressions),
+  };
+}
+
+function isRetryBlockedDispatchUnstable(hindsightSummary) {
+  if (!hindsightSummary || typeof hindsightSummary !== 'object') return false;
+  if (hindsightSummary.pairsAnalyzed <= 0) return false;
+  return hindsightSummary.repeatedBlockedTurns > 0 || hindsightSummary.regressions > 0;
+}
+
+function writeWarning(io, message) {
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (io && typeof io.warn === 'function') {
+    io.warn(text);
+    return;
+  }
+  if (io && typeof io.error === 'function') {
+    io.error(text);
+    return;
+  }
+  process.stderr.write(`${text}\n`);
+}
+
 function extractBlueprintFromTargetId(targetId) {
   const match = /^blueprint\.([a-z0-9-]+)$/i.exec(String(targetId || '').trim());
   return match ? normalizeOrchestratorBlueprint(match[1]) : null;
@@ -465,6 +501,7 @@ export function normalizeOrchestrateOptions(rawOptions = {}) {
   }
   const resumeSessionId = resumeSessionIdRaw || sessionId;
   const retryBlocked = rawOptions.retryBlocked === true;
+  const force = rawOptions.force === true;
   const recommendationId = String(rawOptions.recommendationId || '').trim();
   const dispatchModeRaw = String(rawOptions.dispatchMode ?? '').trim();
   const executionModeRaw = String(rawOptions.executionMode ?? '').trim();
@@ -519,6 +556,7 @@ export function normalizeOrchestrateOptions(rawOptions = {}) {
     sessionId,
     resumeSessionId,
     retryBlocked,
+    force,
     limit: normalizePositiveInteger(rawOptions.limit, 10),
     recommendationId,
     dispatchMode,
@@ -555,6 +593,9 @@ export function planOrchestrate(rawOptions = {}) {
   }
   if (options.retryBlocked) {
     args.push('--retry-blocked');
+  }
+  if (options.force) {
+    args.push('--force');
   }
   if (options.dispatchMode !== 'none') {
     args.push('--dispatch', options.dispatchMode);
@@ -613,6 +654,52 @@ export async function runOrchestrate(
 
     const overlayContext = buildOverlayContext(learnEvalOverlay);
     contextSummary = [options.contextSummary, overlayContext].filter(Boolean).join(' | ');
+  }
+
+  const replaySessionId = options.resumeSessionId || options.sessionId;
+  const dispatchHindsightSummary = extractDispatchHindsightSummary(learnEvalReport);
+  const retryBlockedDispatchUnstable = options.retryBlocked && isRetryBlockedDispatchUnstable(dispatchHindsightSummary);
+
+  if (retryBlockedDispatchUnstable && options.executionMode === 'live' && !options.force) {
+    const message = `[guard] refusing live --retry-blocked for session ${replaySessionId}: dispatch hindsight pairs=${dispatchHindsightSummary.pairsAnalyzed} repeatBlocked=${dispatchHindsightSummary.repeatedBlockedTurns} regressions=${dispatchHindsightSummary.regressions}`;
+    const suggestion = `Run: node scripts/aios.mjs learn-eval --session ${replaySessionId} (or retry with --dry-run / --force)`;
+
+    if (options.format === 'json') {
+      const report = {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        kind: 'guardrail.retry-blocked',
+        sessionId: replaySessionId,
+        executionMode: options.executionMode,
+        retryBlocked: true,
+        force: false,
+        dispatchHindsight: dispatchHindsightSummary,
+        message: `${message}. ${suggestion}`,
+        suggestedCommands: [
+          `node scripts/aios.mjs learn-eval --session ${replaySessionId}`,
+          `node scripts/aios.mjs hud --session ${replaySessionId} --preset full`,
+        ],
+      };
+      io.log(JSON.stringify(report, null, 2));
+      return { exitCode: 1, report };
+    }
+
+    writeWarning(io, `${message}\n${suggestion}`);
+    return { exitCode: 1 };
+  }
+
+  if (retryBlockedDispatchUnstable) {
+    if (options.force) {
+      writeWarning(
+        io,
+        `[warn] live --retry-blocked override (--force): session ${replaySessionId} has unstable dispatch hindsight (pairs=${dispatchHindsightSummary.pairsAnalyzed} repeatBlocked=${dispatchHindsightSummary.repeatedBlockedTurns} regressions=${dispatchHindsightSummary.regressions})`
+      );
+    } else if (options.executionMode !== 'live') {
+      writeWarning(
+        io,
+        `[warn] --retry-blocked: session ${replaySessionId} has unstable dispatch hindsight (pairs=${dispatchHindsightSummary.pairsAnalyzed} repeatBlocked=${dispatchHindsightSummary.repeatedBlockedTurns} regressions=${dispatchHindsightSummary.regressions})`
+      );
+    }
   }
 
   const rawDispatchPolicy = buildDispatchPolicy({

@@ -1555,6 +1555,69 @@ test('runOrchestrate --retry-blocked replays blocked jobs with seeded dependenci
   assert.equal(report.dispatchRun.jobRuns[0].status, 'completed');
 });
 
+test('runOrchestrate refuses live --retry-blocked when dispatch hindsight is unstable', async () => {
+  const rootDir = await makeRootDir();
+  const sessionId = 'retry-guardrail';
+  await writeSession(
+    rootDir,
+    sessionId,
+    { updatedAt: '2026-03-09T04:30:00.000Z', goal: 'Guardrail retry-blocked test' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T04:00:00.000Z',
+        status: 'running',
+        summary: 'Checkpoint 1',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 900,
+        },
+      },
+    ]
+  );
+
+  await writeDispatchEvidence(rootDir, sessionId, {
+    seq: 1,
+    ts: '2026-03-09T04:06:00.000Z',
+    ok: true,
+    blockedJobs: 0,
+    artifactName: 'dispatch-run-20260309T040600Z.json',
+  });
+  await writeDispatchEvidence(rootDir, sessionId, {
+    seq: 2,
+    ts: '2026-03-09T04:07:00.000Z',
+    ok: false,
+    blockedJobs: 1,
+    artifactName: 'dispatch-run-20260309T040700Z.json',
+  });
+
+  const logs = [];
+  const result = await runOrchestrate(
+    {
+      sessionId,
+      resumeSessionId: sessionId,
+      retryBlocked: true,
+      dispatchMode: 'local',
+      executionMode: 'live',
+      format: 'json',
+    },
+    {
+      rootDir,
+      io: { log: (line) => logs.push(line) },
+    }
+  );
+
+  assert.equal(result.exitCode, 1);
+  const report = JSON.parse(logs.at(-1));
+  assert.equal(report.kind, 'guardrail.retry-blocked');
+  assert.equal(report.sessionId, sessionId);
+  assert.equal(report.dispatchHindsight.regressions, 1);
+  assert.match(report.message, /refusing live --retry-blocked/i);
+});
+
 test('runOrchestrate resolves blueprint and context from learn-eval overlay', async () => {
   const rootDir = await makeRootDir();
   await writeSession(

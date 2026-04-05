@@ -169,6 +169,7 @@ Options:
   --recommendation <targetId>
   --preflight <none|auto>
   --retry-blocked               Replay only blocked jobs from latest dispatch artifact in the session
+  --force                       Allow live --retry-blocked even when dispatch hindsight is unstable
   --format <text|json>
   --dry-run                     Local dispatch dry-run (no model calls)
   --live                        Force live execution (default)

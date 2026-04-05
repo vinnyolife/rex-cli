@@ -164,6 +164,7 @@ function createDefaultTeamOptions() {
     executionMode: 'live',
     resumeSessionId: '',
     retryBlocked: false,
+    force: false,
     format: 'text',
     teamSpec: '3:codex',
   };
@@ -381,6 +382,9 @@ function parseTeamArgs(argv) {
         break;
       case '--retry-blocked':
         options.retryBlocked = true;
+        break;
+      case '--force':
+        options.force = true;
         break;
       case '--dry-run':
         options.executionMode = 'dry-run';
