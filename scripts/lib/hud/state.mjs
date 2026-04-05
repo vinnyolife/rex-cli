@@ -18,6 +18,11 @@ const AGENT_PROVIDER_MAP = Object.freeze(
 
 const DEFAULT_SESSION_SCAN_LIMIT = 200;
 const DEFAULT_CHECKPOINT_TAIL_BYTES = 1_000_000;
+const DISPATCH_INDEX_CACHE_TTL_MS = 2000;
+const DISPATCH_INDEX_CACHE_MAX_ENTRIES = 32;
+const DISPATCH_INDEX_CACHE_MAX_NAMES = 200;
+const DISPATCH_INDEX_CACHE = new Map();
+const DISPATCH_INDEX_IN_FLIGHT = new Map();
 const DISPATCH_HINDSIGHT_FIX_HINT_ACTIONS = Object.freeze({
   'ownership-policy': 'runbook.dispatch-merge-triage',
   contract: 'runbook.dispatch-merge-triage',
@@ -34,6 +39,10 @@ function nowIso() {
 
 function normalizeText(value) {
   return String(value ?? '').trim();
+}
+
+function getCacheKeyPart(value) {
+  return String(value ?? '').replaceAll('::', ':');
 }
 
 function toPosixPath(filePath = '') {
@@ -145,6 +154,119 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
+function bumpLruCache(cache, cacheKey) {
+  if (!cacheKey || !(cache instanceof Map) || !cache.has(cacheKey)) return;
+  const value = cache.get(cacheKey);
+  cache.delete(cacheKey);
+  cache.set(cacheKey, value);
+}
+
+function setLruCache(cache, cacheKey, value, maxEntries) {
+  if (!cacheKey || !(cache instanceof Map)) return;
+  if (cache.has(cacheKey)) {
+    cache.delete(cacheKey);
+  }
+  cache.set(cacheKey, value);
+  const limit = Number.isFinite(maxEntries) ? Math.max(1, Math.floor(maxEntries)) : 50;
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function getDispatchIndexCacheKey(rootDir, sessionId) {
+  return `${getCacheKeyPart(rootDir)}::${getCacheKeyPart(sessionId)}`;
+}
+
+async function readDirMtimeMs(dirPath) {
+  try {
+    const stats = await fs.stat(dirPath);
+    const mtimeMs = Number.isFinite(stats.mtimeMs) ? Math.floor(stats.mtimeMs) : 0;
+    return mtimeMs > 0 ? mtimeMs : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function loadDispatchIndex(rootDir, sessionId) {
+  const normalizedSessionId = normalizeText(sessionId);
+  const artifactsDir = normalizedSessionId
+    ? path.join(getSessionsRoot(rootDir), normalizedSessionId, 'artifacts')
+    : '';
+  if (!normalizedSessionId || !artifactsDir || !existsSync(artifactsDir)) {
+    return {
+      cacheKey: '',
+      cachedAtMs: Date.now(),
+      dirMtimeMs: 0,
+      artifactsDir,
+      names: [],
+      latestName: '',
+      latestDispatch: null,
+    };
+  }
+
+  const cacheKey = getDispatchIndexCacheKey(rootDir, normalizedSessionId);
+  const nowMs = Date.now();
+  const dirMtimeMs = await readDirMtimeMs(artifactsDir);
+
+  const cached = DISPATCH_INDEX_CACHE.get(cacheKey);
+  if (
+    cached
+    && cached.dirMtimeMs === dirMtimeMs
+    && typeof cached.cachedAtMs === 'number'
+    && nowMs - cached.cachedAtMs <= DISPATCH_INDEX_CACHE_TTL_MS
+  ) {
+    bumpLruCache(DISPATCH_INDEX_CACHE, cacheKey);
+    return cached;
+  }
+
+  const inFlight = DISPATCH_INDEX_IN_FLIGHT.get(cacheKey);
+  if (inFlight) {
+    return await inFlight;
+  }
+
+  const refresh = (async () => {
+    let files = [];
+    try {
+      files = await fs.readdir(artifactsDir);
+    } catch {
+      files = [];
+    }
+
+    const names = files
+      .filter((name) => /^dispatch-run-.*\.json$/i.test(String(name || '').trim()))
+      .sort((left, right) => String(right).localeCompare(String(left)))
+      .slice(0, DISPATCH_INDEX_CACHE_MAX_NAMES);
+
+    const latestName = names[0] || '';
+    const previous = DISPATCH_INDEX_CACHE.get(cacheKey);
+    const latestDispatch = previous && previous.latestName === latestName
+      ? previous.latestDispatch
+      : null;
+
+    const entry = {
+      cacheKey,
+      cachedAtMs: Date.now(),
+      dirMtimeMs,
+      artifactsDir,
+      names,
+      latestName,
+      latestDispatch,
+    };
+
+    setLruCache(DISPATCH_INDEX_CACHE, cacheKey, entry, DISPATCH_INDEX_CACHE_MAX_ENTRIES);
+    return entry;
+  })();
+
+  DISPATCH_INDEX_IN_FLIGHT.set(cacheKey, refresh);
+  try {
+    return await refresh;
+  } finally {
+    DISPATCH_INDEX_IN_FLIGHT.delete(cacheKey);
+  }
+}
+
 export async function listContextDbSessions(rootDir, { agent = '', limit = DEFAULT_SESSION_SCAN_LIMIT } = {}) {
   const sessionsRoot = getSessionsRoot(rootDir);
   if (!existsSync(sessionsRoot)) return [];
@@ -235,27 +357,21 @@ export async function selectHudSessionId({ rootDir, sessionId = '', provider = '
 }
 
 async function findLatestDispatchArtifact(rootDir, sessionId) {
-  const sessionDir = path.join(getSessionsRoot(rootDir), sessionId);
-  const artifactsDir = path.join(sessionDir, 'artifacts');
-  if (!existsSync(artifactsDir)) return null;
+  const normalizedSessionId = normalizeText(sessionId);
+  if (!normalizedSessionId) return null;
 
-  let files = [];
-  try {
-    files = await fs.readdir(artifactsDir);
-  } catch {
-    return null;
+  const index = await loadDispatchIndex(rootDir, normalizedSessionId);
+  const latestName = index.latestName || index.names?.[0] || '';
+  if (!latestName) return null;
+
+  if (index.latestDispatch && index.latestName === latestName) {
+    return index.latestDispatch;
   }
 
-  const candidates = files
-    .filter((name) => /^dispatch-run-.*\.json$/i.test(String(name || '').trim()))
-    .sort((left, right) => String(right).localeCompare(String(left)));
-  const latest = candidates[0];
-  if (!latest) return null;
-
-  const absPath = path.join(artifactsDir, latest);
+  const absPath = path.join(index.artifactsDir, latestName);
   const artifact = await safeReadJson(absPath);
   if (!artifact || typeof artifact !== 'object') {
-    return {
+    const result = {
       artifactPath: toPosixPath(path.relative(rootDir, absPath)),
       persistedAt: '',
       ok: false,
@@ -270,6 +386,11 @@ async function findLatestDispatchArtifact(rootDir, sessionId) {
       raw: null,
       parseError: 'invalid-json',
     };
+    if (index.cacheKey) {
+      index.latestName = latestName;
+      index.latestDispatch = result;
+    }
+    return result;
   }
 
   const dispatchRun = artifact.dispatchRun && typeof artifact.dispatchRun === 'object'
@@ -318,7 +439,7 @@ async function findLatestDispatchArtifact(rootDir, sessionId) {
     }
     : null;
 
-  return {
+  const result = {
     artifactPath: toPosixPath(path.relative(rootDir, absPath)),
     persistedAt: normalizeText(artifact.persistedAt) || normalizeText(artifact.dispatchEvidence?.persistedAt) || '',
     ok: dispatchRun?.ok === true,
@@ -334,6 +455,13 @@ async function findLatestDispatchArtifact(rootDir, sessionId) {
     workItems,
     raw: artifact,
   };
+
+  if (index.cacheKey) {
+    index.latestName = latestName;
+    index.latestDispatch = result;
+  }
+
+  return result;
 }
 
 function inferProviderFromAgent(agent = '') {
@@ -344,21 +472,9 @@ async function collectRecentDispatchEvidence(rootDir, sessionId, { limit = 6 } =
   const normalizedSessionId = normalizeText(sessionId);
   if (!normalizedSessionId) return [];
 
-  const artifactsDir = path.join(getSessionsRoot(rootDir), normalizedSessionId, 'artifacts');
-  if (!existsSync(artifactsDir)) return [];
-
-  let files = [];
-  try {
-    files = await fs.readdir(artifactsDir);
-  } catch {
-    return [];
-  }
-
   const max = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 6;
-  const candidates = files
-    .filter((name) => /^dispatch-run-.*\.json$/i.test(String(name || '').trim()))
-    .sort((left, right) => String(right).localeCompare(String(left)))
-    .slice(0, max);
+  const index = await loadDispatchIndex(rootDir, normalizedSessionId);
+  const candidates = Array.isArray(index.names) ? index.names.slice(0, max) : [];
 
   return candidates.map((name) => ({
     artifactPath: toPosixPath(path.join('memory', 'context-db', 'sessions', normalizedSessionId, 'artifacts', name)),
@@ -486,12 +602,18 @@ export async function readHudState({ rootDir, sessionId = '', provider = '' } = 
     }
     : null;
 
+  const artifactCache = {};
+  if (latestDispatch?.artifactPath && latestDispatch.raw && typeof latestDispatch.raw === 'object') {
+    artifactCache[latestDispatch.artifactPath] = latestDispatch.raw;
+  }
+
   let dispatchHindsight = null;
   try {
     dispatchHindsight = await buildHindsightEval({
       rootDir,
       meta,
       dispatchEvidence,
+      artifactCache,
     });
   } catch (error) {
     warnings.push(`Dispatch hindsight eval failed: ${clipText(formatErrorMessage(error), 160)}`);
@@ -566,20 +688,6 @@ export async function readHudDispatchSummary({ rootDir, sessionId = '', provider
   if (latestDispatch?.artifactPath && latestDispatch.raw && typeof latestDispatch.raw === 'object') {
     artifactCache[latestDispatch.artifactPath] = latestDispatch.raw;
   }
-
-  await Promise.all(
-    (Array.isArray(dispatchEvidence) ? dispatchEvidence : [])
-      .map((record) => normalizeText(record?.artifactPath))
-      .filter(Boolean)
-      .map(async (artifactPath) => {
-        if (artifactCache[artifactPath]) return;
-        if (path.isAbsolute(artifactPath)) return;
-        const artifact = await safeReadJson(path.join(rootDir, artifactPath));
-        if (artifact && typeof artifact === 'object') {
-          artifactCache[artifactPath] = artifact;
-        }
-      })
-  );
 
   let dispatchHindsight = null;
   try {

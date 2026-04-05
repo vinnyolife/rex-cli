@@ -305,6 +305,62 @@ test('readHudDispatchSummary includes latest dispatch, hindsight, and fix hint',
   );
 });
 
+test('readHudDispatchSummary refreshes latest dispatch after new artifact is written', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-dispatch-cache-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'dispatch-cache-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+  const meta = makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T00:00:00.000Z' });
+
+  await writeJson(path.join(sessionDir, 'meta.json'), meta);
+
+  await writeJson(path.join(sessionDir, 'artifacts', 'dispatch-run-20260406T000000Z.json'), {
+    schemaVersion: 1,
+    kind: 'orchestration.dispatch-run',
+    sessionId,
+    persistedAt: '2026-04-06T00:00:00.000Z',
+    dispatchRun: {
+      ok: true,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: [],
+      finalOutputs: [],
+    },
+  });
+
+  const first = await readHudDispatchSummary({ rootDir, sessionId, provider: 'codex', meta });
+  assert.ok(String(first.latestDispatch?.artifactPath || '').includes('dispatch-run-20260406T000000Z.json'));
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await writeJson(path.join(sessionDir, 'artifacts', 'dispatch-run-20260406T000001Z.json'), {
+    schemaVersion: 1,
+    kind: 'orchestration.dispatch-run',
+    sessionId,
+    persistedAt: '2026-04-06T00:00:01.000Z',
+    dispatchRun: {
+      ok: false,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: [
+        {
+          jobId: 'phase.implement.wi.1',
+          jobType: 'phase',
+          role: 'implementer',
+          status: 'blocked',
+          attempts: 1,
+          output: { error: 'File policy violation' },
+        },
+      ],
+      finalOutputs: [],
+    },
+  });
+
+  const second = await readHudDispatchSummary({ rootDir, sessionId, provider: 'codex', meta });
+  assert.ok(String(second.latestDispatch?.artifactPath || '').includes('dispatch-run-20260406T000001Z.json'));
+  assert.equal(second.latestDispatch?.ok, false);
+  assert.equal(second.latestDispatch?.blockedJobs, 1);
+});
+
 test('runTeamHistory includes dispatch hindsight summary and fix hint', async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-history-'));
   const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
