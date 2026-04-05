@@ -6,6 +6,10 @@ function normalizeText(value) {
   return String(value ?? '').trim();
 }
 
+function normalizeCounter(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
 function normalizeIntervalMs(value, fallback = 1000) {
   const parsed = Number.parseInt(String(value ?? '').trim(), 10);
   return Number.isFinite(parsed) && parsed > 0 ? Math.max(250, parsed) : fallback;
@@ -63,12 +67,33 @@ function formatHistoryLine(record) {
       ? `dispatch=ok jobs=${dispatch.jobCount}`
       : `dispatch=blocked blocked=${dispatch.blockedJobs} jobs=${dispatch.jobCount}`
     : 'dispatch=none';
+  const hindsight = record.dispatchHindsight && typeof record.dispatchHindsight === 'object'
+    ? record.dispatchHindsight
+    : null;
+  const hindsightPairs = normalizeCounter(hindsight?.pairsAnalyzed);
+  const hindsightRepeatBlocked = normalizeCounter(hindsight?.repeatedBlockedTurns);
+  const hindsightRegressions = normalizeCounter(hindsight?.regressions);
+  const hindsightTopFailure = normalizeText(hindsight?.topFailureClass);
+  const hindsightLabel = hindsightPairs > 0
+    ? [
+      `hindsight pairs=${hindsightPairs}`,
+      hindsightRepeatBlocked > 0 ? `repeatBlocked=${hindsightRepeatBlocked}` : '',
+      hindsightRegressions > 0 ? `regressions=${hindsightRegressions}` : '',
+      hindsightTopFailure ? `topFailure=${hindsightTopFailure}` : '',
+    ].filter(Boolean).join(' ')
+    : '';
+  const fixHint = record.dispatchFixHint && typeof record.dispatchFixHint === 'object'
+    ? record.dispatchFixHint
+    : null;
+  const fixHintLabel = normalizeText(fixHint?.targetId) ? `fixHint=${normalizeText(fixHint.targetId)}` : '';
 
   const bits = [
     updatedAt ? `[${updatedAt}]` : '',
     sessionId ? `session=${sessionId}` : '',
     status ? `status=${status}` : '',
     dispatchLabel,
+    hindsightLabel,
+    fixHintLabel,
     goal ? `goal="${goal.length > 80 ? goal.slice(0, 79) + '…' : goal}"` : '',
   ].filter(Boolean);
   return `- ${bits.join(' | ')}`;
@@ -91,6 +116,15 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   for (const meta of sessions) {
     const sessionId = normalizeText(meta.sessionId);
     const state = await readHudState({ rootDir, sessionId, provider });
+    const hindsight = state.dispatchHindsight && typeof state.dispatchHindsight === 'object'
+      ? state.dispatchHindsight
+      : null;
+    const topFailure = Array.isArray(hindsight?.topRepeatedFailureClasses) && hindsight.topRepeatedFailureClasses.length > 0
+      ? hindsight.topRepeatedFailureClasses[0]
+      : null;
+    const fixHint = state.dispatchFixHint && typeof state.dispatchFixHint === 'object'
+      ? state.dispatchFixHint
+      : null;
     records.push({
       sessionId,
       updatedAt: normalizeText(meta.updatedAt) || normalizeText(meta.createdAt),
@@ -102,6 +136,24 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
           jobCount: Number.isFinite(state.latestDispatch.jobCount) ? state.latestDispatch.jobCount : 0,
           blockedJobs: Number.isFinite(state.latestDispatch.blockedJobs) ? state.latestDispatch.blockedJobs : 0,
           artifactPath: normalizeText(state.latestDispatch.artifactPath),
+        }
+        : null,
+      dispatchHindsight: hindsight
+        ? {
+          pairsAnalyzed: normalizeCounter(hindsight.pairsAnalyzed),
+          comparedJobs: normalizeCounter(hindsight.comparedJobs),
+          resolvedBlockedTurns: normalizeCounter(hindsight.resolvedBlockedTurns),
+          repeatedBlockedTurns: normalizeCounter(hindsight.repeatedBlockedTurns),
+          regressions: normalizeCounter(hindsight.regressions),
+          topFailureClass: normalizeText(topFailure?.failureClass) || null,
+        }
+        : null,
+      dispatchFixHint: fixHint
+        ? {
+          targetId: normalizeText(fixHint.targetId) || null,
+          evidence: normalizeText(fixHint.evidence) || null,
+          nextCommand: normalizeText(fixHint.nextCommand) || null,
+          nextArtifact: normalizeText(fixHint.nextArtifact) || null,
         }
         : null,
     });
@@ -126,4 +178,3 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   io.log(lines.join('\n') + '\n');
   return { exitCode: 0 };
 }
-

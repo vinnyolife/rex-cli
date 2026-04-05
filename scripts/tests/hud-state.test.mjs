@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { readHudState, selectHudSessionId } from '../lib/hud/state.mjs';
 import { renderHud } from '../lib/hud/render.mjs';
+import { runTeamHistory } from '../lib/lifecycle/team-ops.mjs';
 
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -185,6 +186,10 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
   assert.equal(state.dispatchHindsight?.repeatedBlockedTurns, 1);
   assert.equal(state.dispatchHindsight?.topRepeatedFailureClasses?.[0]?.failureClass, 'ownership-policy');
   assert.equal(state.dispatchFixHint?.targetId, 'runbook.dispatch-merge-triage');
+  assert.match(
+    state.dispatchFixHint?.nextCommand ?? '',
+    /orchestrate --session session-2 --dispatch local --execute dry-run --format json/
+  );
   assert.ok(Array.isArray(state.suggestedCommands));
   assert.ok(state.suggestedCommands.some((cmd) => cmd.includes('orchestrate') && cmd.includes(sessionId)));
   assert.ok(state.suggestedCommands.some((cmd) => cmd.includes('doctor')));
@@ -192,4 +197,78 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
   const rendered = renderHud(state, { preset: 'focused' });
   assert.match(rendered, /Dispatch Hindsight: pairs=1/);
   assert.match(rendered, /FixHint: \[runbook\.dispatch-merge-triage\]/);
+});
+
+test('runTeamHistory includes dispatch hindsight summary and fix hint', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-history-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'history-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-05T03:00:00.000Z' })
+  );
+
+  const jobRuns = (attempts) => [
+    {
+      jobId: 'phase.implement.wi.1',
+      jobType: 'phase',
+      role: 'implementer',
+      status: 'blocked',
+      attempts,
+      output: { error: 'File policy violation' },
+    },
+    {
+      jobId: 'phase.plan',
+      jobType: 'phase',
+      role: 'planner',
+      status: 'simulated',
+      output: { outputType: 'handoff' },
+    },
+  ];
+
+  await writeJson(path.join(sessionDir, 'artifacts', 'dispatch-run-20260405T025900Z.json'), {
+    schemaVersion: 1,
+    kind: 'orchestration.dispatch-run',
+    sessionId,
+    persistedAt: '2026-04-05T02:59:00.000Z',
+    dispatchRun: {
+      ok: false,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: jobRuns(1),
+      finalOutputs: [],
+    },
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'dispatch-run-20260405T030000Z.json'), {
+    schemaVersion: 1,
+    kind: 'orchestration.dispatch-run',
+    sessionId,
+    persistedAt: '2026-04-05T03:00:00.000Z',
+    dispatchRun: {
+      ok: false,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: jobRuns(2),
+      finalOutputs: [],
+    },
+  });
+
+  const logs = [];
+  await runTeamHistory(
+    { provider: 'codex', limit: 5, json: true },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const report = JSON.parse(logs.at(-1));
+  const record = report.records.find((item) => item.sessionId === sessionId);
+  assert.ok(record, 'expected history record');
+  assert.equal(record.dispatchHindsight.pairsAnalyzed, 1);
+  assert.equal(record.dispatchHindsight.repeatedBlockedTurns, 1);
+  assert.equal(record.dispatchHindsight.topFailureClass, 'ownership-policy');
+  assert.equal(record.dispatchFixHint.targetId, 'runbook.dispatch-merge-triage');
+  assert.match(
+    record.dispatchFixHint.nextCommand ?? '',
+    /orchestrate --session history-session --dispatch local --execute dry-run --format json/
+  );
 });

@@ -365,7 +365,9 @@ function buildDispatchFixHint({ sessionId, dispatchHindsight, latestDispatchArti
     targetType: target?.targetType || null,
     title: target?.title || targetId,
     evidence: evidenceParts.join(' '),
-    nextCommand: target?.nextCommand || null,
+    nextCommand: sessionId
+      ? `node scripts/aios.mjs orchestrate --session ${normalizeText(sessionId)} --dispatch local --execute dry-run --format json`
+      : target?.nextCommand || null,
     nextArtifact: normalizeText(latestDispatchArtifactPath) || null,
   };
 }
