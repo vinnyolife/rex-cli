@@ -7,6 +7,7 @@ import test from 'node:test';
 import { buildHindsightEval } from '../lib/harness/hindsight-eval.mjs';
 import { readHudDispatchSummary, readHudState, selectHudSessionId } from '../lib/hud/state.mjs';
 import { renderHud } from '../lib/hud/render.mjs';
+import { watchRenderLoop } from '../lib/hud/watch.mjs';
 import { runTeamHistory } from '../lib/lifecycle/team-ops.mjs';
 
 async function writeJson(filePath, value) {
@@ -213,6 +214,38 @@ test('buildHindsightEval caches artifact signatures to avoid redundant fs.stat',
   } finally {
     fs.stat = originalStat;
   }
+});
+
+test('watchRenderLoop skips redraw when output is unchanged', async () => {
+  const stdoutWrites = [];
+  const stderrWrites = [];
+  let stopHandler = null;
+  let callCount = 0;
+
+  await watchRenderLoop(async () => {
+    callCount += 1;
+    if (callCount === 1) return 'hello';
+    if (callCount === 2) return 'hello';
+    if (callCount === 3) {
+      if (typeof stopHandler === 'function') stopHandler();
+      return 'world';
+    }
+    return 'world';
+  }, {
+    intervalMs: 5,
+    isTTY: true,
+    env: {},
+    writeStdout: (text) => stdoutWrites.push(String(text)),
+    writeStderr: (text) => stderrWrites.push(String(text)),
+    registerSigint: (handler) => {
+      stopHandler = handler;
+    },
+  });
+
+  assert.equal(stderrWrites.length, 0);
+  const stdout = stdoutWrites.join('');
+  assert.equal(stdout.split('hello').length - 1, 1);
+  assert.equal(stdout.split('world').length - 1, 1);
 });
 
 test('readHudState includes latest checkpoint and dispatch evidence', async () => {

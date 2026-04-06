@@ -37,6 +37,7 @@ export async function watchRenderLoop(
   writeStdout('\x1b[?25l');
 
   let firstRender = true;
+  let lastOutput = null;
   let inFlight = false;
   let queued = false;
   let stopped = false;
@@ -64,13 +65,19 @@ export async function watchRenderLoop(
 
     try {
       const output = await render();
-      if (firstRender) {
-        writeStdout('\x1b[2J\x1b[H');
-        firstRender = false;
-      } else {
-        writeStdout('\x1b[H');
+      const rendered = String(output || '');
+      const shouldRedraw = firstRender || rendered !== lastOutput;
+
+      if (shouldRedraw) {
+        if (firstRender) {
+          writeStdout('\x1b[2J\x1b[H');
+          firstRender = false;
+        } else {
+          writeStdout('\x1b[H');
+        }
+        writeStdout(rendered + '\x1b[K\n\x1b[J');
+        lastOutput = rendered;
       }
-      writeStdout(String(output || '') + '\x1b[K\n\x1b[J');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       writeStderr(`Watch render failed: ${message}\n`);
@@ -96,4 +103,3 @@ export async function watchRenderLoop(
     await done;
   }
 }
-
