@@ -21,6 +21,7 @@ import {
   renderOrchestrationReport,
 } from '../lib/harness/orchestrator.mjs';
 import { evaluateClarityGate } from '../lib/harness/clarity-gate.mjs';
+import { persistDispatchEvidence } from '../lib/harness/orchestrator-evidence.mjs';
 import { buildWorkItemTelemetry } from '../lib/harness/work-item-telemetry.mjs';
 import { planOrchestrate, runOrchestrate } from '../lib/lifecycle/orchestrate.mjs';
 
@@ -2799,6 +2800,38 @@ test('renderOrchestrationReport includes dispatch evidence summary', () => {
   assert.match(report, /Dispatch Evidence:/);
   assert.match(report, /security-stable#1/);
   assert.match(report, /dispatch-run-20260309T030000Z\.json/);
+});
+
+test('persistDispatchEvidence uses millisecond artifact stamps to avoid collisions', async () => {
+  const rootDir = await makeRootDir();
+  const sessionId = 'artifact-stamp-ms';
+
+  const report = {
+    blueprint: 'feature',
+    taskTitle: 'Stamp test',
+    dispatchRun: {
+      ok: true,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: [],
+      finalOutputs: [],
+    },
+  };
+
+  const firstNow = new Date('2026-04-06T00:00:00.123Z');
+  const secondNow = new Date('2026-04-06T00:00:00.124Z');
+
+  const first = await persistDispatchEvidence({ rootDir, sessionId, report, elapsedMs: 1, now: firstNow });
+  const second = await persistDispatchEvidence({ rootDir, sessionId, report, elapsedMs: 1, now: secondNow });
+
+  assert.match(String(first.artifactPath || ''), /dispatch-run-20260406T000000123Z\.json$/);
+  assert.match(String(second.artifactPath || ''), /dispatch-run-20260406T000000124Z\.json$/);
+  assert.notEqual(first.artifactPath, second.artifactPath);
+
+  const firstAbs = path.join(rootDir, first.artifactPath);
+  const secondAbs = path.join(rootDir, second.artifactPath);
+  assert.equal(Boolean(await fs.stat(firstAbs)), true);
+  assert.equal(Boolean(await fs.stat(secondAbs)), true);
 });
 
 test('renderOrchestrationReport includes dispatch evidence reasons when present', () => {

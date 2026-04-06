@@ -41,7 +41,7 @@ function normalizeStringArray(raw = []) {
 }
 
 function formatArtifactTimestamp(ts = new Date()) {
-  return ts.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return ts.toISOString().replace(/[-:]/g, '').replace(/\.(\d{3})Z$/, '$1Z');
 }
 
 function buildArtifactPath(sessionId, stamp) {
@@ -235,7 +235,7 @@ async function writeArtifact(absPath, payload) {
   await fs.writeFile(absPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
-export async function persistDispatchEvidence({ rootDir, sessionId, report, elapsedMs } = {}) {
+export async function persistDispatchEvidence({ rootDir, sessionId, report, elapsedMs, now = null } = {}) {
   if (!report?.dispatchRun) {
     return { persisted: false, reason: 'dispatch-run-missing' };
   }
@@ -252,7 +252,8 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
     return { persisted: false, reason: 'session-required', mode: 'contextdb' };
   }
 
-  const stamp = formatArtifactTimestamp();
+  const persistedAt = now instanceof Date ? now : new Date();
+  const stamp = formatArtifactTimestamp(persistedAt);
   const artifactPath = buildArtifactPath(sessionId, stamp);
   const artifactAbsPath = path.join(rootDir, artifactPath);
   const dispatchRunForArtifact = enrichDispatchRunForArtifact(report.dispatchRun, report.dispatchPlan, stamp);
@@ -260,7 +261,7 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
     schemaVersion: 1,
     kind: ORCHESTRATION_DISPATCH_EVENT_KIND,
     sessionId,
-    persistedAt: new Date().toISOString(),
+    persistedAt: persistedAt.toISOString(),
     blueprint: report.blueprint,
     taskTitle: report.taskTitle,
     contextSummary: report.contextSummary,
