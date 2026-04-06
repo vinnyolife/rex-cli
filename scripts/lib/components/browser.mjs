@@ -470,6 +470,9 @@ export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
 
   io.log('');
   io.log('[6/6] quick next steps');
+  io.log('- Recommended: keep default profile CDP service healthy');
+  io.log('  node scripts/aios.mjs internal browser cdp-start');
+  io.log('  node scripts/aios.mjs internal browser cdp-status');
   io.log('- If ERR exists: run install script first');
   io.log('  node scripts/aios.mjs setup --components browser');
   io.log('- Then smoke test in client chat: browser_launch -> browser_navigate -> browser_snapshot -> browser_close');
