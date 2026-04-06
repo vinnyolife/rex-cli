@@ -102,6 +102,7 @@ function parseHudArgs(argv) {
   const rest = argv.slice(1);
   const options = createDefaultHudOptions();
   let help = false;
+  let presetExplicit = false;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -121,6 +122,7 @@ function parseHudArgs(argv) {
         index += 1;
         break;
       case '--preset':
+        presetExplicit = true;
         options.preset = normalizeHudPreset(takeValue(rest, index, '--preset'));
         index += 1;
         break;
@@ -141,6 +143,9 @@ function parseHudArgs(argv) {
   }
 
   options.provider = normalizeTeamProvider(options.provider);
+  if (options.watch && !presetExplicit) {
+    options.preset = 'minimal';
+  }
   return {
     mode: help ? 'help' : 'command',
     help,

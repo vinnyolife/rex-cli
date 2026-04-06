@@ -213,6 +213,7 @@ test('parseArgs accepts hud command options', () => {
   const watchResult = parseArgs(['hud', '--watch', '--interval-ms', '500']);
   assert.equal(watchResult.command, 'hud');
   assert.equal(watchResult.options.watch, true);
+  assert.equal(watchResult.options.preset, 'minimal');
   assert.equal(watchResult.options.intervalMs, 500);
 });
 

@@ -190,7 +190,7 @@ Options:
 Options:
   --session <id>                Explicit ContextDB session id
   --provider <codex|claude|gemini>
-  --preset <minimal|focused|full>
+  --preset <minimal|focused|full> Rendering preset (default: focused; with --watch defaults to minimal unless --preset provided)
   --watch                       Refresh display on an interval (TTY-only)
   --interval-ms <n>             Watch refresh interval in ms (default: 1000)
   --json                        Output structured JSON instead of text
