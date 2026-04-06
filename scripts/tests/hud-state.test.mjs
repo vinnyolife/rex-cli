@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { buildHindsightEval } from '../lib/harness/hindsight-eval.mjs';
 import { readHudDispatchSummary, readHudState, selectHudSessionId } from '../lib/hud/state.mjs';
 import { renderHud } from '../lib/hud/render.mjs';
 import { runTeamHistory } from '../lib/lifecycle/team-ops.mjs';
@@ -127,6 +128,90 @@ test('selectHudSessionId caches session directory listing until sessionsRoot cha
     assert.equal(readdirCount, 2);
   } finally {
     fs.readdir = originalReaddir;
+  }
+});
+
+test('buildHindsightEval caches artifact signatures to avoid redundant fs.stat', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-hindsight-sig-cache-'));
+  const sessionId = 'hindsight-sig-cache-session';
+  const artifactsDir = path.join(rootDir, 'memory', 'context-db', 'sessions', sessionId, 'artifacts');
+
+  const olderPath = path.join(artifactsDir, 'dispatch-run-20260406T000000Z.json');
+  const newerPath = path.join(artifactsDir, 'dispatch-run-20260406T000001Z.json');
+
+  await writeJson(olderPath, {
+    schemaVersion: 1,
+    kind: 'orchestration.dispatch-run',
+    sessionId,
+    persistedAt: '2026-04-06T00:00:00.000Z',
+    dispatchRun: {
+      ok: false,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: [
+        {
+          jobId: 'phase.implement.wi.1',
+          jobType: 'phase',
+          role: 'implementer',
+          status: 'blocked',
+          attempts: 1,
+          output: { error: 'File policy violation' },
+        },
+      ],
+      finalOutputs: [],
+    },
+  });
+  await writeJson(newerPath, {
+    schemaVersion: 1,
+    kind: 'orchestration.dispatch-run',
+    sessionId,
+    persistedAt: '2026-04-06T00:00:01.000Z',
+    dispatchRun: {
+      ok: false,
+      mode: 'dry-run',
+      executorRegistry: ['local-dry-run'],
+      jobRuns: [
+        {
+          jobId: 'phase.implement.wi.1',
+          jobType: 'phase',
+          role: 'implementer',
+          status: 'blocked',
+          attempts: 2,
+          output: { error: 'File policy violation' },
+        },
+      ],
+      finalOutputs: [],
+    },
+  });
+
+  const dispatchEvidence = [
+    {
+      artifactPath: path.join('memory', 'context-db', 'sessions', sessionId, 'artifacts', path.basename(newerPath)),
+    },
+    {
+      artifactPath: path.join('memory', 'context-db', 'sessions', sessionId, 'artifacts', path.basename(olderPath)),
+    },
+  ];
+
+  const meta = makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T00:00:02.000Z' });
+
+  const originalStat = fs.stat;
+  let statCount = 0;
+  fs.stat = async (...args) => {
+    statCount += 1;
+    return await originalStat(...args);
+  };
+
+  try {
+    const first = await buildHindsightEval({ rootDir, meta, dispatchEvidence, maxArtifacts: 2, maxPairs: 1 });
+    assert.equal(first.pairsAnalyzed, 1);
+    assert.equal(statCount, 2);
+
+    const second = await buildHindsightEval({ rootDir, meta, dispatchEvidence, maxArtifacts: 2, maxPairs: 1 });
+    assert.equal(second.pairsAnalyzed, 1);
+    assert.equal(statCount, 2);
+  } finally {
+    fs.stat = originalStat;
   }
 });
 

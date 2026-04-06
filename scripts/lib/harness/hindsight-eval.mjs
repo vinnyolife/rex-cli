@@ -3,6 +3,9 @@ import path from 'node:path';
 
 const HINDSIGHT_CACHE_MAX_ENTRIES = 24;
 const HINDSIGHT_CACHE = new Map();
+const ARTIFACT_SIGNATURE_CACHE_MAX_ENTRIES = 128;
+const ARTIFACT_SIGNATURE_NEGATIVE_TTL_MS = 750;
+const ARTIFACT_SIGNATURE_CACHE = new Map();
 
 function nowIso() {
   return new Date().toISOString();
@@ -14,6 +17,27 @@ function normalizeText(value) {
 
 function getCacheKeyPart(value) {
   return String(value ?? '').replaceAll('::', ':');
+}
+
+function bumpLruCache(cache, cacheKey) {
+  if (!cacheKey || !(cache instanceof Map) || !cache.has(cacheKey)) return;
+  const value = cache.get(cacheKey);
+  cache.delete(cacheKey);
+  cache.set(cacheKey, value);
+}
+
+function setLruCache(cache, cacheKey, value, maxEntries) {
+  if (!cacheKey || !(cache instanceof Map)) return;
+  if (cache.has(cacheKey)) {
+    cache.delete(cacheKey);
+  }
+  cache.set(cacheKey, value);
+  const limit = Number.isFinite(maxEntries) ? Math.max(1, Math.floor(maxEntries)) : 50;
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
 }
 
 function buildHindsightCacheKey({
@@ -334,26 +358,58 @@ async function buildArtifactSignatures(rootDir, artifacts = []) {
   const resolvedRootDir = normalizeText(rootDir);
   if (!resolvedRootDir) return [];
   const entries = Array.isArray(artifacts) ? artifacts : [];
-  const stats = await Promise.all(entries.map(async (entry) => {
+  const nowMs = Date.now();
+
+  const signatures = await Promise.all(entries.map(async (entry) => {
     const artifactPath = normalizeText(entry?.artifactPath);
     if (!artifactPath) return null;
+
+    const cacheKey = `${getCacheKeyPart(resolvedRootDir)}::artifact-signature::${getCacheKeyPart(artifactPath)}`;
+    const cached = ARTIFACT_SIGNATURE_CACHE.get(cacheKey);
+    if (cached && typeof cached === 'object') {
+      const missing = cached.missing === true;
+      const cachedAtMs = typeof cached.cachedAtMs === 'number' ? cached.cachedAtMs : 0;
+      if (!missing || nowMs - cachedAtMs <= ARTIFACT_SIGNATURE_NEGATIVE_TTL_MS) {
+        bumpLruCache(ARTIFACT_SIGNATURE_CACHE, cacheKey);
+        return {
+          artifactPath,
+          mtimeMs: Number.isFinite(cached.mtimeMs) ? Math.floor(cached.mtimeMs) : 0,
+          size: Number.isFinite(cached.size) ? Math.floor(cached.size) : 0,
+        };
+      }
+    }
+
+    let mtimeMs = 0;
+    let size = 0;
+    let missing = false;
     try {
       const stat = await fs.stat(path.join(resolvedRootDir, artifactPath));
-      return {
-        artifactPath,
-        mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.floor(stat.mtimeMs) : 0,
-        size: Number.isFinite(stat.size) ? Math.floor(stat.size) : 0,
-      };
+      mtimeMs = Number.isFinite(stat.mtimeMs) ? Math.floor(stat.mtimeMs) : 0;
+      size = Number.isFinite(stat.size) ? Math.floor(stat.size) : 0;
     } catch {
-      return {
-        artifactPath,
-        mtimeMs: 0,
-        size: 0,
-      };
+      missing = true;
     }
+
+    setLruCache(
+      ARTIFACT_SIGNATURE_CACHE,
+      cacheKey,
+      {
+        mtimeMs,
+        size,
+        missing,
+        cachedAtMs: nowMs,
+      },
+      ARTIFACT_SIGNATURE_CACHE_MAX_ENTRIES
+    );
+
+    return {
+      artifactPath,
+      mtimeMs,
+      size,
+    };
   }));
 
-  return stats.filter(Boolean);
+  return signatures.filter(Boolean);
 }
 
 export async function buildHindsightEval({
