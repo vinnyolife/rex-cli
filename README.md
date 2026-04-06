@@ -346,6 +346,7 @@ If you prefer explicit per-component lifecycle, use the individual scripts in `s
 CDP service quick commands (macOS):
 
 ```bash
+scripts/doctor-browser-mcp.sh --fix
 scripts/start-browser-cdp.sh
 scripts/status-browser-cdp.sh
 scripts/restart-browser-cdp.sh

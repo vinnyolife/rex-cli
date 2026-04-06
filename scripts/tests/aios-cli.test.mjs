@@ -82,6 +82,13 @@ test('parseArgs accepts internal browser cdp lifecycle actions', () => {
   assert.equal(start.options.target, 'browser');
   assert.equal(start.options.action, 'cdp-start');
 
+  const doctorFix = parseArgs(['internal', 'browser', 'doctor', '--fix', '--dry-run']);
+  assert.equal(doctorFix.command, 'internal');
+  assert.equal(doctorFix.options.target, 'browser');
+  assert.equal(doctorFix.options.action, 'doctor');
+  assert.equal(doctorFix.options.fix, true);
+  assert.equal(doctorFix.options.dryRun, true);
+
   const status = parseArgs(['internal', 'browser', 'cdp-status']);
   assert.equal(status.command, 'internal');
   assert.equal(status.options.target, 'browser');

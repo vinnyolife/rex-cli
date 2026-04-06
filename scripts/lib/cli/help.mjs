@@ -38,6 +38,7 @@ Examples:
   node scripts/aios.mjs orchestrate --session codex-cli-20260303T080437-065e16c0 --format json
   node scripts/aios.mjs learn-eval --limit 5
   node scripts/aios.mjs entropy-gc auto --session codex-cli-20260303T080437-065e16c0
+  node scripts/aios.mjs internal browser doctor --fix
   node scripts/aios.mjs internal browser cdp-start
   node scripts/aios.mjs internal browser cdp-status
 `;
@@ -309,7 +310,7 @@ export function getInternalHelpText(target, action) {
 
   if (target === 'browser' && action === 'doctor') {
     return `Usage:
-  node scripts/aios.mjs internal browser doctor
+  node scripts/aios.mjs internal browser doctor [--fix] [--dry-run]
 `;
   }
 

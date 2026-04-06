@@ -345,6 +345,7 @@ TUI 可见变化提示：
 CDP 服务常用命令（macOS）：
 
 ```bash
+scripts/doctor-browser-mcp.sh --fix
 scripts/start-browser-cdp.sh
 scripts/status-browser-cdp.sh
 scripts/restart-browser-cdp.sh

@@ -595,7 +595,7 @@ function parseInternalArgs(argv) {
         options.verbose = true;
         break;
       case '--fix':
-        if (target !== 'native' || action !== 'doctor') {
+        if (((target !== 'native' && target !== 'browser') || action !== 'doctor')) {
           throw new Error(`Unknown option: ${arg}`);
         }
         options.fix = true;

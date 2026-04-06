@@ -382,16 +382,96 @@ export async function statusBrowserCdpService({ rootDir, io = console } = {}) {
   };
 }
 
-export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
+function formatErrorMessage(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function resolveBrowserDoctorRuntime(runtime = {}) {
+  return {
+    platform: String(runtime.platform || process.platform),
+    commandExists: typeof runtime.commandExists === 'function' ? runtime.commandExists : commandExists,
+    captureCommand: typeof runtime.captureCommand === 'function' ? runtime.captureCommand : captureCommand,
+    testPortOpen: typeof runtime.testPortOpen === 'function' ? runtime.testPortOpen : testPortOpen,
+    startCdpService: typeof runtime.startCdpService === 'function' ? runtime.startCdpService : startBrowserCdpService,
+  };
+}
+
+async function autoHealDefaultCdpPort({
+  rootDir,
+  io = console,
+  port,
+  dryRun = false,
+  runtime,
+} = {}) {
+  if (runtime.platform !== 'darwin') {
+    return {
+      attempted: false,
+      healed: false,
+      dryRun: false,
+      reason: `auto-heal requires macOS (current: ${runtime.platform})`,
+    };
+  }
+
+  if (dryRun) {
+    io.log(`[plan] browser doctor fix would run: node scripts/aios.mjs internal browser cdp-start (port=${port})`);
+    return {
+      attempted: false,
+      healed: false,
+      dryRun: true,
+      reason: 'dry-run mode (service not started)',
+    };
+  }
+
+  io.log(`[fix] browser doctor: starting CDP service via internal browser cdp-start (port=${port})`);
+  try {
+    await runtime.startCdpService({ rootDir, io });
+  } catch (error) {
+    return {
+      attempted: true,
+      healed: false,
+      dryRun: false,
+      reason: `cdp-start failed: ${formatErrorMessage(error)}`,
+    };
+  }
+
+  const reachable = await runtime.testPortOpen(port);
+  if (!reachable) {
+    return {
+      attempted: true,
+      healed: false,
+      dryRun: false,
+      reason: `CDP port ${port} still unreachable after cdp-start`,
+    };
+  }
+
+  io.log(`[fix] browser doctor: CDP port reachable after cdp-start (${port})`);
+  return {
+    attempted: true,
+    healed: true,
+    dryRun: false,
+    reason: '',
+  };
+}
+
+export async function doctorBrowserMcp({ rootDir, io = console, fix = false, dryRun = false, runtime = {} } = {}) {
   const mcpDir = path.join(rootDir, 'mcp-server');
   const distEntry = path.join(mcpDir, 'dist', 'index.js');
   const profileConfig = path.join(rootDir, 'config', 'browser-profiles.json');
+  const doctorRuntime = resolveBrowserDoctorRuntime(runtime);
 
   let warnings = 0;
+  let effectiveWarnings = 0;
   let errors = 0;
+  let autoFixPlanned = 0;
+  let autoFixApplied = 0;
+  let autoFixHealed = 0;
   const ok = (message) => io.log(`OK   ${message}`);
-  const warn = (message) => {
+  const warn = (message, { effective = true } = {}) => {
     warnings += 1;
+    if (effective) effectiveWarnings += 1;
     io.log(`WARN ${message}`);
   };
   const err = (message) => {
@@ -404,10 +484,10 @@ export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
   io.log('');
   io.log('[1/6] Command checks');
   for (const command of ['node', 'npm', 'npx']) {
-    if (commandExists(command)) ok(`command exists: ${command}`); else err(`missing command: ${command}`);
+    if (doctorRuntime.commandExists(command)) ok(`command exists: ${command}`); else err(`missing command: ${command}`);
   }
 
-  const version = captureCommand('node', ['-p', 'process.versions.node']);
+  const version = doctorRuntime.captureCommand('node', ['-p', 'process.versions.node']);
   const major = Number((version.stdout.trim().split('.')[0] || '0'));
   if (major > 0 && major < 20) {
     warn(`node version is ${version.stdout.trim()} (recommended: >= 20)`);
@@ -421,7 +501,7 @@ export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
 
   io.log('');
   io.log('[3/6] Playwright runtime');
-  const playwrightPath = captureCommand('node', ['-e', "process.stdout.write(require('playwright').chromium.executablePath())"], { cwd: mcpDir });
+  const playwrightPath = doctorRuntime.captureCommand('node', ['-e', "process.stdout.write(require('playwright').chromium.executablePath())"], { cwd: mcpDir });
   if (playwrightPath.status === 0 && playwrightPath.stdout.trim() && fs.existsSync(playwrightPath.stdout.trim())) {
     ok('Playwright chromium executable found');
   } else {
@@ -459,8 +539,25 @@ export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
     const port = Number(defaultProfile.cdpPort);
     if (!Number.isInteger(port) || port <= 0) {
       warn(`default cdpPort is not a valid integer: ${defaultProfile.cdpPort}`);
-    } else if (await testPortOpen(port)) {
+    } else if (await doctorRuntime.testPortOpen(port)) {
       ok(`default CDP port is reachable: ${port}`);
+    } else if (fix) {
+      const healed = await autoHealDefaultCdpPort({
+        rootDir,
+        io,
+        port,
+        dryRun,
+        runtime: doctorRuntime,
+      });
+      if (healed.dryRun) autoFixPlanned += 1;
+      if (healed.attempted) autoFixApplied += 1;
+      if (healed.healed) {
+        autoFixHealed += 1;
+        ok(`default CDP port auto-healed: ${port}`);
+      } else {
+        const detail = healed.reason ? `; ${healed.reason}` : '';
+        warn(`default CDP port is not reachable: ${port} (profile=default will auto-fallback to local launch)${detail}`);
+      }
     } else {
       warn(`default CDP port is not reachable: ${port} (profile=default will auto-fallback to local launch)`);
     }
@@ -473,6 +570,11 @@ export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
   io.log('- Recommended: keep default profile CDP service healthy');
   io.log('  node scripts/aios.mjs internal browser cdp-start');
   io.log('  node scripts/aios.mjs internal browser cdp-status');
+  io.log('- Browser doctor auto-heal:');
+  io.log('  node scripts/aios.mjs internal browser doctor --fix');
+  if (fix) {
+    io.log(`  [fix] planned=${autoFixPlanned} attempted=${autoFixApplied} healed=${autoFixHealed}`);
+  }
   io.log('- If ERR exists: run install script first');
   io.log('  node scripts/aios.mjs setup --components browser');
   io.log('- Then smoke test in client chat: browser_launch -> browser_navigate -> browser_snapshot -> browser_close');
@@ -481,5 +583,5 @@ export async function doctorBrowserMcp({ rootDir, io = console } = {}) {
   if (errors > 0) io.log(`Result: FAILED (${errors} errors, ${warnings} warnings)`);
   else io.log(`Result: OK (${warnings} warnings)`);
 
-  return { warnings, effectiveWarnings: warnings, errors };
+  return { warnings, effectiveWarnings, errors, autoFixPlanned, autoFixApplied, autoFixHealed };
 }

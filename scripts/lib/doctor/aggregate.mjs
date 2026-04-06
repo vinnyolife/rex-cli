@@ -258,13 +258,13 @@ export async function runDoctorSuite({
   io.log('');
   io.log('== doctor-browser-mcp ==');
   if (isHarnessGateEnabled('doctor:browser', { profile, disabledGates, profiles: ['standard', 'strict'] })) {
-    const browserResult = await doctorBrowserMcp({ rootDir, io });
+    const browserResult = await doctorBrowserMcp({ rootDir, fix, dryRun, io });
     addDoctorCheck(checks, {
       id: 'doctor:browser',
       item: 'Browser MCP prerequisites and profile health',
       status: browserResult.errors > 0 ? 'error' : (browserResult.effectiveWarnings > 0 ? 'warn' : 'ok'),
-      fix: 'Run: node scripts/aios.mjs setup --components browser',
-      note: `errors=${browserResult.errors}; effectiveWarnings=${browserResult.effectiveWarnings}`,
+      fix: 'Run: node scripts/aios.mjs internal browser doctor --fix (or setup --components browser)',
+      note: `errors=${browserResult.errors}; effectiveWarnings=${browserResult.effectiveWarnings}; autoFixHealed=${browserResult.autoFixHealed ?? 0}`,
     });
     if (browserResult.errors > 0) {
       effectiveWarns += 1;
