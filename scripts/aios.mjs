@@ -104,6 +104,10 @@ async function runInternal(options) {
     const module = await import('./lib/components/browser.mjs');
     if (action === 'install') return module.installBrowserMcp({ rootDir, dryRun: Boolean(options.dryRun), skipPlaywrightInstall: Boolean(options.skipPlaywrightInstall) });
     if (action === 'doctor') return module.doctorBrowserMcp({ rootDir });
+    if (action === 'cdp-start') return module.startBrowserCdpService({ rootDir });
+    if (action === 'cdp-stop') return module.stopBrowserCdpService({ rootDir });
+    if (action === 'cdp-restart' || action === 'cdp-reload') return module.restartBrowserCdpService({ rootDir });
+    if (action === 'cdp-status') return module.statusBrowserCdpService({ rootDir });
   }
 
   if (target === 'privacy') {

@@ -76,6 +76,24 @@ test('parseArgs accepts install mode for skills workflows', () => {
   assert.equal(internalResult.options.installMode, 'link');
 });
 
+test('parseArgs accepts internal browser cdp lifecycle actions', () => {
+  const start = parseArgs(['internal', 'browser', 'cdp-start']);
+  assert.equal(start.command, 'internal');
+  assert.equal(start.options.target, 'browser');
+  assert.equal(start.options.action, 'cdp-start');
+
+  const status = parseArgs(['internal', 'browser', 'cdp-status']);
+  assert.equal(status.command, 'internal');
+  assert.equal(status.options.target, 'browser');
+  assert.equal(status.options.action, 'cdp-status');
+
+  const restart = parseArgs(['internal', 'browser', 'cdp-restart', '--help']);
+  assert.equal(restart.command, 'internal');
+  assert.equal(restart.mode, 'help');
+  assert.equal(restart.options.target, 'browser');
+  assert.equal(restart.options.action, 'cdp-restart');
+});
+
 test('parseArgs accepts native component, internal native target, and native-only doctor flags', () => {
   const setupResult = parseArgs([
     'setup',

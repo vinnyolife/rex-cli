@@ -73,6 +73,15 @@ test('doctor-browser-mcp.sh forwards help to internal browser doctor', async () 
   assert.deepEqual(captured.slice(4), ['--help']);
 });
 
+test('start-browser-cdp.sh forwards to internal browser cdp-start', async () => {
+  const { result, captured } = await runWrapper('scripts/start-browser-cdp.sh', ['--help']);
+  assert.equal(result.status, 0);
+  assert.equal(captured[1], 'internal');
+  assert.equal(captured[2], 'browser');
+  assert.equal(captured[3], 'cdp-start');
+  assert.deepEqual(captured.slice(4), ['--help']);
+});
+
 test('install-contextdb-shell.ps1 is a thin wrapper', async () => {
   const content = await readFile(path.join(repoRoot, 'scripts', 'install-contextdb-shell.ps1'), 'utf8');
   assert.match(content, /internal shell install/);
@@ -82,4 +91,9 @@ test('doctor-contextdb-skills.ps1 is a thin wrapper', async () => {
   const content = await readFile(path.join(repoRoot, 'scripts', 'doctor-contextdb-skills.ps1'), 'utf8');
   assert.match(content, /internal skills doctor/);
   assert.doesNotMatch(content, /\$ClientName:/);
+});
+
+test('status-browser-cdp.ps1 is a thin wrapper', async () => {
+  const content = await readFile(path.join(repoRoot, 'scripts', 'status-browser-cdp.ps1'), 'utf8');
+  assert.match(content, /internal browser cdp-status/);
 });
