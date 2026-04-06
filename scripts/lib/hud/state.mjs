@@ -22,6 +22,10 @@ const CHECKPOINT_TAIL_CACHE_MAX_ENTRIES = 32;
 const CHECKPOINT_TAIL_CACHE = new Map();
 const JSON_READ_CACHE_MAX_ENTRIES = 64;
 const JSON_READ_CACHE = new Map();
+const SESSION_INDEX_CACHE_TTL_MS = 30_000;
+const SESSION_INDEX_CACHE_MAX_ENTRIES = 8;
+const SESSION_INDEX_CACHE = new Map();
+const SESSION_INDEX_IN_FLIGHT = new Map();
 const DISPATCH_INDEX_CACHE_TTL_MS = 2000;
 const DISPATCH_INDEX_CACHE_MAX_ENTRIES = 32;
 const DISPATCH_INDEX_CACHE_MAX_NAMES = 200;
@@ -261,6 +265,10 @@ function setLruCache(cache, cacheKey, value, maxEntries) {
   }
 }
 
+function getSessionsIndexCacheKey(rootDir) {
+  return `${getCacheKeyPart(rootDir)}::sessions-index`;
+}
+
 function getDispatchIndexCacheKey(rootDir, sessionId) {
   return `${getCacheKeyPart(rootDir)}::${getCacheKeyPart(sessionId)}`;
 }
@@ -272,6 +280,72 @@ async function readDirMtimeMs(dirPath) {
     return mtimeMs > 0 ? mtimeMs : 0;
   } catch {
     return 0;
+  }
+}
+
+async function loadSessionsIndex(rootDir) {
+  const sessionsRoot = getSessionsRoot(rootDir);
+  if (!sessionsRoot || !existsSync(sessionsRoot)) {
+    return {
+      cacheKey: '',
+      cachedAtMs: Date.now(),
+      dirMtimeMs: 0,
+      sessionsRoot,
+      names: [],
+    };
+  }
+
+  const cacheKey = getSessionsIndexCacheKey(rootDir);
+  const nowMs = Date.now();
+  const dirMtimeMs = await readDirMtimeMs(sessionsRoot);
+
+  const cached = SESSION_INDEX_CACHE.get(cacheKey);
+  if (
+    cached
+    && cached.dirMtimeMs === dirMtimeMs
+    && typeof cached.cachedAtMs === 'number'
+    && nowMs - cached.cachedAtMs <= SESSION_INDEX_CACHE_TTL_MS
+  ) {
+    bumpLruCache(SESSION_INDEX_CACHE, cacheKey);
+    return cached;
+  }
+
+  const inFlight = SESSION_INDEX_IN_FLIGHT.get(cacheKey);
+  if (inFlight) {
+    return await inFlight;
+  }
+
+  const refresh = (async () => {
+    let entries = [];
+    try {
+      entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+
+    const names = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => normalizeText(entry.name))
+      .filter(Boolean)
+      .sort((left, right) => String(right).localeCompare(String(left)));
+
+    const entry = {
+      cacheKey,
+      cachedAtMs: Date.now(),
+      dirMtimeMs,
+      sessionsRoot,
+      names,
+    };
+
+    setLruCache(SESSION_INDEX_CACHE, cacheKey, entry, SESSION_INDEX_CACHE_MAX_ENTRIES);
+    return entry;
+  })();
+
+  SESSION_INDEX_IN_FLIGHT.set(cacheKey, refresh);
+  try {
+    return await refresh;
+  } finally {
+    SESSION_INDEX_IN_FLIGHT.delete(cacheKey);
   }
 }
 
@@ -354,28 +428,17 @@ async function loadDispatchIndex(rootDir, sessionId) {
 }
 
 export async function listContextDbSessions(rootDir, { agent = '', limit = DEFAULT_SESSION_SCAN_LIMIT } = {}) {
-  const sessionsRoot = getSessionsRoot(rootDir);
-  if (!existsSync(sessionsRoot)) return [];
-
   const requestedAgent = normalizeText(agent);
-  let entries = [];
-  try {
-    entries = await fs.readdir(sessionsRoot, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const max = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : DEFAULT_SESSION_SCAN_LIMIT;
+  const index = await loadSessionsIndex(rootDir);
+  const sessionsRoot = index.sessionsRoot;
+  if (!sessionsRoot || !existsSync(sessionsRoot)) return [];
 
   const metas = [];
-  const max = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : DEFAULT_SESSION_SCAN_LIMIT;
-  const candidates = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => normalizeText(entry.name))
-    .filter(Boolean)
-    .sort((left, right) => String(right).localeCompare(String(left)))
-    .slice(0, max * 4);
+  const candidates = Array.isArray(index.names) ? index.names.slice(0, max * 4) : [];
 
   const parsed = await mapWithConcurrency(candidates, 8, async (sessionId) => {
-    const meta = await safeReadJson(path.join(sessionsRoot, sessionId, 'meta.json'));
+    const meta = await safeReadJsonCached(path.join(sessionsRoot, sessionId, 'meta.json'));
     if (!meta || typeof meta !== 'object') return null;
     if (requestedAgent && normalizeText(meta.agent) !== requestedAgent) return null;
     const updatedAt = normalizeText(meta.updatedAt) || normalizeText(meta.createdAt);

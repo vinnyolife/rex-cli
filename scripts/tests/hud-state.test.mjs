@@ -88,6 +88,48 @@ test('selectHudSessionId scales to many sessions', async () => {
   assert.equal(selection.source, 'provider-latest');
 });
 
+test('selectHudSessionId caches session directory listing until sessionsRoot changes', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-sessions-cache-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+
+  for (let index = 0; index < 10; index += 1) {
+    const sessionId = `session-${String(index).padStart(2, '0')}`;
+    await writeJson(
+      path.join(sessionsRoot, sessionId, 'meta.json'),
+      makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: `2026-04-06T00:00:${String(index).padStart(2, '0')}.000Z` })
+    );
+  }
+
+  const originalReaddir = fs.readdir;
+  let readdirCount = 0;
+  fs.readdir = async (dirPath, ...rest) => {
+    if (String(dirPath) === sessionsRoot) {
+      readdirCount += 1;
+    }
+    return await originalReaddir(dirPath, ...rest);
+  };
+
+  try {
+    const first = await selectHudSessionId({ rootDir, provider: 'codex' });
+    const second = await selectHudSessionId({ rootDir, provider: 'codex' });
+    assert.equal(first.source, 'provider-latest');
+    assert.equal(second.source, 'provider-latest');
+    assert.equal(readdirCount, 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await writeJson(
+      path.join(sessionsRoot, 'session-99', 'meta.json'),
+      makeSessionMeta({ sessionId: 'session-99', agent: 'codex-cli', updatedAt: '2026-04-06T00:01:00.000Z' })
+    );
+
+    const third = await selectHudSessionId({ rootDir, provider: 'codex' });
+    assert.equal(third.source, 'provider-latest');
+    assert.equal(readdirCount, 2);
+  } finally {
+    fs.readdir = originalReaddir;
+  }
+});
+
 test('readHudState includes latest checkpoint and dispatch evidence', async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-'));
   const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
