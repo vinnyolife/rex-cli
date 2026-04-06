@@ -216,6 +216,18 @@ test('parseArgs accepts hud command options', () => {
   assert.equal(watchResult.options.fast, true);
   assert.equal(watchResult.options.preset, 'minimal');
   assert.equal(watchResult.options.intervalMs, 500);
+
+  const autoFastWatch = parseArgs(['hud', '--watch', '--interval-ms', '250']);
+  assert.equal(autoFastWatch.command, 'hud');
+  assert.equal(autoFastWatch.options.watch, true);
+  assert.equal(autoFastWatch.options.preset, 'minimal');
+  assert.equal(autoFastWatch.options.fast, true);
+
+  const noFastWatch = parseArgs(['hud', '--watch', '--interval-ms', '250', '--no-fast']);
+  assert.equal(noFastWatch.command, 'hud');
+  assert.equal(noFastWatch.options.watch, true);
+  assert.equal(noFastWatch.options.preset, 'minimal');
+  assert.equal(noFastWatch.options.fast, false);
 });
 
 test('parseArgs accepts team status/history subcommands', () => {
@@ -235,6 +247,7 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(statusWatchDefaults.command, 'team');
   assert.equal(statusWatchDefaults.options.subcommand, 'status');
   assert.equal(statusWatchDefaults.options.watch, true);
+  assert.equal(statusWatchDefaults.options.fast, false);
   assert.equal(statusWatchDefaults.options.preset, 'minimal');
 
   const statusWatchFast = parseArgs(['team', 'status', '--watch', '--fast']);
@@ -243,6 +256,20 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(statusWatchFast.options.watch, true);
   assert.equal(statusWatchFast.options.fast, true);
   assert.equal(statusWatchFast.options.preset, 'minimal');
+
+  const statusWatchAutoFast = parseArgs(['team', 'status', '--watch', '--interval-ms', '250']);
+  assert.equal(statusWatchAutoFast.command, 'team');
+  assert.equal(statusWatchAutoFast.options.subcommand, 'status');
+  assert.equal(statusWatchAutoFast.options.watch, true);
+  assert.equal(statusWatchAutoFast.options.fast, true);
+  assert.equal(statusWatchAutoFast.options.preset, 'minimal');
+
+  const statusWatchNoFast = parseArgs(['team', 'status', '--watch', '--interval-ms', '250', '--no-fast']);
+  assert.equal(statusWatchNoFast.command, 'team');
+  assert.equal(statusWatchNoFast.options.subcommand, 'status');
+  assert.equal(statusWatchNoFast.options.watch, true);
+  assert.equal(statusWatchNoFast.options.fast, false);
+  assert.equal(statusWatchNoFast.options.preset, 'minimal');
 
   const statusWatchExplicitPreset = parseArgs(['team', 'status', '--preset', 'full', '--watch']);
   assert.equal(statusWatchExplicitPreset.command, 'team');

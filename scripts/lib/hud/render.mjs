@@ -230,20 +230,39 @@ function formatBlockedJobs(state) {
   return lines;
 }
 
+function formatWatchMetaLine(watchMeta = null) {
+  if (!watchMeta || typeof watchMeta !== 'object') return '';
+  const renderIntervalMs = Number.isFinite(watchMeta.renderIntervalMs)
+    ? Math.max(1, Math.floor(watchMeta.renderIntervalMs))
+    : null;
+  const dataRefreshMs = Number.isFinite(watchMeta.dataRefreshMs)
+    ? Math.max(1, Math.floor(watchMeta.dataRefreshMs))
+    : null;
+  if (!renderIntervalMs || !dataRefreshMs) return '';
+  const fastEnabled = watchMeta.fast === true ? 'on' : 'off';
+  const dataAgeMs = Number.isFinite(watchMeta.dataAgeMs)
+    ? `${Math.max(0, Math.floor(watchMeta.dataAgeMs))}ms`
+    : 'n/a';
+  return `watch: render=${renderIntervalMs}ms data-refresh=${dataRefreshMs}ms fast=${fastEnabled} data-age=${dataAgeMs}`;
+}
+
 export function normalizeHudPreset(raw = 'focused') {
   const value = normalizeText(raw).toLowerCase();
   if (value === 'minimal' || value === 'focused' || value === 'full') return value;
   return 'focused';
 }
 
-export function renderHud(state, { preset = 'focused' } = {}) {
+export function renderHud(state, { preset = 'focused', watchMeta = null } = {}) {
   const resolvedPreset = normalizeHudPreset(preset);
 
   if (resolvedPreset === 'minimal') {
     const sessionLine = formatSessionLine(state);
     const dispatch = state?.latestDispatch || null;
     const dispatchLabel = dispatch ? (dispatch.ok === true ? 'dispatch=ok' : `dispatch=blocked(${dispatch.blockedJobs || 0})`) : 'dispatch=none';
-    return `${sessionLine}\n${dispatchLabel}\n`;
+    const watchLine = formatWatchMetaLine(watchMeta || state?.watchMeta || null);
+    return watchLine
+      ? `${sessionLine}\n${dispatchLabel}\n${watchLine}\n`
+      : `${sessionLine}\n${dispatchLabel}\n`;
   }
 
   const lines = [

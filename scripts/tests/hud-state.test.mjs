@@ -275,6 +275,25 @@ test('createThrottledWatchRender limits read cadence while reusing last output',
   assert.equal(callCount, 2);
 });
 
+test('renderHud minimal shows watch visibility line when watchMeta is provided', () => {
+  const rendered = renderHud({
+    selection: { sessionId: 's-1', provider: 'codex', agent: 'codex-cli' },
+    latestDispatch: { ok: false, blockedJobs: 2 },
+  }, {
+    preset: 'minimal',
+    watchMeta: {
+      renderIntervalMs: 250,
+      dataRefreshMs: 1000,
+      fast: true,
+      dataAgeMs: 20000,
+    },
+  });
+
+  assert.match(rendered, /session=s-1/);
+  assert.match(rendered, /dispatch=blocked\(2\)/);
+  assert.match(rendered, /watch: render=250ms data-refresh=1000ms fast=on data-age=20000ms/);
+});
+
 test('readHudState includes latest checkpoint and dispatch evidence', async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-'));
   const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');

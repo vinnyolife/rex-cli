@@ -1,5 +1,6 @@
 import { readHudState } from '../hud/state.mjs';
 import { normalizeHudPreset, renderHud } from '../hud/render.mjs';
+import { buildWatchMeta } from '../hud/watch-meta.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
 
 const FAST_WATCH_DATA_REFRESH_MS = 1000;
@@ -28,6 +29,9 @@ export function normalizeHudOptions(rawOptions = {}) {
 export async function runHud(rawOptions = {}, { rootDir, io = console, env = process.env } = {}) {
   const options = normalizeHudOptions(rawOptions);
   const fastWatchMinimal = options.fast && options.watch && !options.json && options.preset === 'minimal';
+  const dataRefreshMs = fastWatchMinimal
+    ? Math.max(options.intervalMs, FAST_WATCH_DATA_REFRESH_MS)
+    : options.intervalMs;
 
   const renderOnce = async () => {
     const state = await readHudState({
@@ -42,7 +46,16 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
       return { exitCode: state.selection?.sessionId ? 0 : 1, state };
     }
 
-    io.log(renderHud(state, { preset: options.preset }));
+    io.log(renderHud(state, {
+      preset: options.preset,
+      watchMeta: options.watch
+        ? buildWatchMeta(state, {
+          renderIntervalMs: options.intervalMs,
+          dataRefreshMs,
+          fast: fastWatchMinimal,
+        })
+        : null,
+    }));
     return { exitCode: state.selection?.sessionId ? 0 : 1, state };
   };
 
@@ -60,12 +73,19 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
       provider: options.provider,
       fast: fastWatchMinimal,
     });
-    return renderHud(state, { preset: options.preset });
+    return renderHud(state, {
+      preset: options.preset,
+      watchMeta: buildWatchMeta(state, {
+        renderIntervalMs: options.intervalMs,
+        dataRefreshMs,
+        fast: fastWatchMinimal,
+      }),
+    });
   };
 
   const watchRender = fastWatchMinimal
     ? createThrottledWatchRender(readAndRender, {
-      minIntervalMs: Math.max(options.intervalMs, FAST_WATCH_DATA_REFRESH_MS),
+      minIntervalMs: dataRefreshMs,
     })
     : readAndRender;
 

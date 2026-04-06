@@ -104,6 +104,7 @@ function parseHudArgs(argv) {
   const options = createDefaultHudOptions();
   let help = false;
   let presetExplicit = false;
+  let fastExplicit = false;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -133,6 +134,11 @@ function parseHudArgs(argv) {
         break;
       case '--fast':
         options.fast = true;
+        fastExplicit = true;
+        break;
+      case '--no-fast':
+        options.fast = false;
+        fastExplicit = true;
         break;
       case '--json':
         options.json = true;
@@ -149,6 +155,9 @@ function parseHudArgs(argv) {
   options.provider = normalizeTeamProvider(options.provider);
   if (options.watch && !presetExplicit) {
     options.preset = 'minimal';
+  }
+  if (!fastExplicit && options.watch && options.preset === 'minimal' && options.intervalMs <= 500) {
+    options.fast = true;
   }
   return {
     mode: help ? 'help' : 'command',
@@ -199,6 +208,7 @@ function parseTeamStatusArgs(argv) {
   const options = createDefaultTeamStatusOptions();
   let help = false;
   let presetExplicit = false;
+  let fastExplicit = false;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -239,6 +249,11 @@ function parseTeamStatusArgs(argv) {
         break;
       case '--fast':
         options.fast = true;
+        fastExplicit = true;
+        break;
+      case '--no-fast':
+        options.fast = false;
+        fastExplicit = true;
         break;
       case '--json':
         options.json = true;
@@ -259,6 +274,9 @@ function parseTeamStatusArgs(argv) {
   }
   if (options.watch && !presetExplicit) {
     options.preset = 'minimal';
+  }
+  if (!fastExplicit && options.watch && options.preset === 'minimal' && options.intervalMs <= 500) {
+    options.fast = true;
   }
 
   return {

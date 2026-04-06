@@ -1,5 +1,6 @@
 import { listContextDbSessions, readHudDispatchSummary, readHudState } from '../hud/state.mjs';
 import { normalizeHudPreset, renderHud } from '../hud/render.mjs';
+import { buildWatchMeta } from '../hud/watch-meta.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
 
 const FAST_WATCH_DATA_REFRESH_MS = 1000;
@@ -61,6 +62,9 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
   const json = rawOptions.json === true;
   const intervalMs = normalizeIntervalMs(rawOptions.intervalMs, 1000);
   const fastWatchMinimal = fast && watch && !json && preset === 'minimal';
+  const dataRefreshMs = fastWatchMinimal
+    ? Math.max(intervalMs, FAST_WATCH_DATA_REFRESH_MS)
+    : intervalMs;
 
   const renderOnce = async () => {
     const state = await readHudState({ rootDir, sessionId, provider, fast: fastWatchMinimal });
@@ -68,7 +72,16 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
       io.log(JSON.stringify(state, null, 2));
       return { exitCode: state.selection?.sessionId ? 0 : 1 };
     }
-    io.log(renderHud(state, { preset }));
+    io.log(renderHud(state, {
+      preset,
+      watchMeta: watch
+        ? buildWatchMeta(state, {
+          renderIntervalMs: intervalMs,
+          dataRefreshMs,
+          fast: fastWatchMinimal,
+        })
+        : null,
+    }));
     return { exitCode: state.selection?.sessionId ? 0 : 1 };
   };
 
@@ -81,12 +94,19 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
 
   const readAndRender = async () => {
     const state = await readHudState({ rootDir, sessionId, provider, fast: fastWatchMinimal });
-    return renderHud(state, { preset });
+    return renderHud(state, {
+      preset,
+      watchMeta: buildWatchMeta(state, {
+        renderIntervalMs: intervalMs,
+        dataRefreshMs,
+        fast: fastWatchMinimal,
+      }),
+    });
   };
 
   const watchRender = fastWatchMinimal
     ? createThrottledWatchRender(readAndRender, {
-      minIntervalMs: Math.max(intervalMs, FAST_WATCH_DATA_REFRESH_MS),
+      minIntervalMs: dataRefreshMs,
     })
     : readAndRender;
 
