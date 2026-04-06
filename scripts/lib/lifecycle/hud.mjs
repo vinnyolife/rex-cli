@@ -1,6 +1,7 @@
 import { readHudState } from '../hud/state.mjs';
 import { normalizeHudPreset, renderHud } from '../hud/render.mjs';
 import { buildWatchMeta } from '../hud/watch-meta.mjs';
+import { resolveWatchCadence } from '../hud/watch-cadence.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
 
 const FAST_WATCH_DATA_REFRESH_MS = 1000;
@@ -9,12 +10,8 @@ function normalizeText(value) {
   return String(value ?? '').trim();
 }
 
-function normalizeIntervalMs(value, fallback = 1000) {
-  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(250, parsed) : fallback;
-}
-
 export function normalizeHudOptions(rawOptions = {}) {
+  const cadence = resolveWatchCadence(rawOptions.intervalMs, { fallbackMs: 1000 });
   return {
     sessionId: normalizeText(rawOptions.sessionId),
     provider: normalizeText(rawOptions.provider).toLowerCase(),
@@ -22,7 +19,9 @@ export function normalizeHudOptions(rawOptions = {}) {
     watch: rawOptions.watch === true,
     fast: rawOptions.fast === true,
     json: rawOptions.json === true,
-    intervalMs: normalizeIntervalMs(rawOptions.intervalMs, 1000),
+    intervalMs: cadence.renderIntervalMs,
+    intervalLabel: cadence.renderIntervalLabel,
+    adaptiveInterval: cadence.adaptiveInterval,
   };
 }
 
@@ -32,6 +31,11 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
   const dataRefreshMs = fastWatchMinimal
     ? Math.max(options.intervalMs, FAST_WATCH_DATA_REFRESH_MS)
     : options.intervalMs;
+  const dataRefreshLabel = options.adaptiveInterval
+    ? fastWatchMinimal
+      ? `auto(${dataRefreshMs}-${Math.max(dataRefreshMs, options.adaptiveInterval.maxIntervalMs)}ms)`
+      : options.intervalLabel
+    : `${dataRefreshMs}ms`;
 
   const renderOnce = async () => {
     const state = await readHudState({
@@ -51,7 +55,9 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
       watchMeta: options.watch
         ? buildWatchMeta(state, {
           renderIntervalMs: options.intervalMs,
+          renderIntervalLabel: options.intervalLabel,
           dataRefreshMs,
+          dataRefreshLabel,
           fast: fastWatchMinimal,
         })
         : null,
@@ -77,7 +83,9 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
       preset: options.preset,
       watchMeta: buildWatchMeta(state, {
         renderIntervalMs: options.intervalMs,
+        renderIntervalLabel: options.intervalLabel,
         dataRefreshMs,
+        dataRefreshLabel,
         fast: fastWatchMinimal,
       }),
     });
@@ -91,6 +99,7 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
 
   await watchRenderLoop(watchRender, {
     intervalMs: options.intervalMs,
+    adaptiveInterval: options.adaptiveInterval,
     env,
   });
 

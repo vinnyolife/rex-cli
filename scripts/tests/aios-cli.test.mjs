@@ -228,6 +228,19 @@ test('parseArgs accepts hud command options', () => {
   assert.equal(noFastWatch.options.watch, true);
   assert.equal(noFastWatch.options.preset, 'minimal');
   assert.equal(noFastWatch.options.fast, false);
+
+  const autoIntervalWatch = parseArgs(['hud', '--watch', '--interval-ms', 'auto']);
+  assert.equal(autoIntervalWatch.command, 'hud');
+  assert.equal(autoIntervalWatch.options.watch, true);
+  assert.equal(autoIntervalWatch.options.preset, 'minimal');
+  assert.equal(autoIntervalWatch.options.intervalMs, 'auto');
+  assert.equal(autoIntervalWatch.options.fast, true);
+
+  const autoIntervalNoFast = parseArgs(['hud', '--watch', '--interval-ms', 'auto', '--no-fast']);
+  assert.equal(autoIntervalNoFast.command, 'hud');
+  assert.equal(autoIntervalNoFast.options.watch, true);
+  assert.equal(autoIntervalNoFast.options.intervalMs, 'auto');
+  assert.equal(autoIntervalNoFast.options.fast, false);
 });
 
 test('parseArgs accepts team status/history subcommands', () => {
@@ -271,6 +284,22 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(statusWatchNoFast.options.fast, false);
   assert.equal(statusWatchNoFast.options.preset, 'minimal');
 
+  const statusWatchAutoInterval = parseArgs(['team', 'status', '--watch', '--interval-ms', 'auto']);
+  assert.equal(statusWatchAutoInterval.command, 'team');
+  assert.equal(statusWatchAutoInterval.options.subcommand, 'status');
+  assert.equal(statusWatchAutoInterval.options.watch, true);
+  assert.equal(statusWatchAutoInterval.options.intervalMs, 'auto');
+  assert.equal(statusWatchAutoInterval.options.fast, true);
+  assert.equal(statusWatchAutoInterval.options.preset, 'minimal');
+
+  const statusWatchAutoIntervalNoFast = parseArgs(['team', 'status', '--watch', '--interval-ms', 'auto', '--no-fast']);
+  assert.equal(statusWatchAutoIntervalNoFast.command, 'team');
+  assert.equal(statusWatchAutoIntervalNoFast.options.subcommand, 'status');
+  assert.equal(statusWatchAutoIntervalNoFast.options.watch, true);
+  assert.equal(statusWatchAutoIntervalNoFast.options.intervalMs, 'auto');
+  assert.equal(statusWatchAutoIntervalNoFast.options.fast, false);
+  assert.equal(statusWatchAutoIntervalNoFast.options.preset, 'minimal');
+
   const statusWatchExplicitPreset = parseArgs(['team', 'status', '--preset', 'full', '--watch']);
   assert.equal(statusWatchExplicitPreset.command, 'team');
   assert.equal(statusWatchExplicitPreset.options.subcommand, 'status');
@@ -294,6 +323,10 @@ test('parseArgs accepts team status/history subcommands', () => {
 
 test('parseArgs rejects invalid mode', () => {
   assert.throws(() => parseArgs(['setup', '--mode', 'bad-value']), /--mode must be one of/);
+});
+
+test('parseArgs rejects invalid watch interval token', () => {
+  assert.throws(() => parseArgs(['hud', '--watch', '--interval-ms', 'fast']), /--interval-ms must be a positive integer or \"auto\"/);
 });
 
 test('parseArgs rejects team --retry-blocked without a session target', () => {

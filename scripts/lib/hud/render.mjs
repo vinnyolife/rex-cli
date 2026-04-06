@@ -235,15 +235,19 @@ function formatWatchMetaLine(watchMeta = null) {
   const renderIntervalMs = Number.isFinite(watchMeta.renderIntervalMs)
     ? Math.max(1, Math.floor(watchMeta.renderIntervalMs))
     : null;
+  const renderIntervalLabel = normalizeText(watchMeta.renderIntervalLabel);
   const dataRefreshMs = Number.isFinite(watchMeta.dataRefreshMs)
     ? Math.max(1, Math.floor(watchMeta.dataRefreshMs))
     : null;
-  if (!renderIntervalMs || !dataRefreshMs) return '';
+  const dataRefreshLabel = normalizeText(watchMeta.dataRefreshLabel);
+  const resolvedRenderLabel = renderIntervalLabel || (renderIntervalMs ? `${renderIntervalMs}ms` : '');
+  const resolvedDataRefreshLabel = dataRefreshLabel || (dataRefreshMs ? `${dataRefreshMs}ms` : '');
+  if (!resolvedRenderLabel || !resolvedDataRefreshLabel) return '';
   const fastEnabled = watchMeta.fast === true ? 'on' : 'off';
   const dataAgeMs = Number.isFinite(watchMeta.dataAgeMs)
     ? `${Math.max(0, Math.floor(watchMeta.dataAgeMs))}ms`
     : 'n/a';
-  return `watch: render=${renderIntervalMs}ms data-refresh=${dataRefreshMs}ms fast=${fastEnabled} data-age=${dataAgeMs}`;
+  return `watch: render=${resolvedRenderLabel} data-refresh=${resolvedDataRefreshLabel} fast=${fastEnabled} data-age=${dataAgeMs}`;
 }
 
 export function normalizeHudPreset(raw = 'focused') {

@@ -50,6 +50,18 @@ function parsePositiveInteger(raw, flag) {
   return value;
 }
 
+function parseWatchInterval(raw, flag) {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (value === 'auto') {
+    return 'auto';
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer or "auto"`);
+  }
+  return parsed;
+}
+
 function parsePrivacyMode(raw) {
   const value = String(raw || '').trim().toLowerCase();
   if (!PRIVACY_MODES.has(value)) {
@@ -144,7 +156,7 @@ function parseHudArgs(argv) {
         options.json = true;
         break;
       case '--interval-ms':
-        options.intervalMs = parsePositiveInteger(takeValue(rest, index, '--interval-ms'), '--interval-ms');
+        options.intervalMs = parseWatchInterval(takeValue(rest, index, '--interval-ms'), '--interval-ms');
         index += 1;
         break;
       default:
@@ -156,7 +168,9 @@ function parseHudArgs(argv) {
   if (options.watch && !presetExplicit) {
     options.preset = 'minimal';
   }
-  if (!fastExplicit && options.watch && options.preset === 'minimal' && options.intervalMs <= 500) {
+  const intervalAutoFastEligible = options.intervalMs === 'auto'
+    || (Number.isFinite(options.intervalMs) && options.intervalMs <= 500);
+  if (!fastExplicit && options.watch && options.preset === 'minimal' && intervalAutoFastEligible) {
     options.fast = true;
   }
   return {
@@ -259,7 +273,7 @@ function parseTeamStatusArgs(argv) {
         options.json = true;
         break;
       case '--interval-ms':
-        options.intervalMs = parsePositiveInteger(takeValue(rest, index, '--interval-ms'), '--interval-ms');
+        options.intervalMs = parseWatchInterval(takeValue(rest, index, '--interval-ms'), '--interval-ms');
         index += 1;
         break;
       default:
@@ -275,7 +289,9 @@ function parseTeamStatusArgs(argv) {
   if (options.watch && !presetExplicit) {
     options.preset = 'minimal';
   }
-  if (!fastExplicit && options.watch && options.preset === 'minimal' && options.intervalMs <= 500) {
+  const intervalAutoFastEligible = options.intervalMs === 'auto'
+    || (Number.isFinite(options.intervalMs) && options.intervalMs <= 500);
+  if (!fastExplicit && options.watch && options.preset === 'minimal' && intervalAutoFastEligible) {
     options.fast = true;
   }
 

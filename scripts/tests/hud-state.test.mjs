@@ -7,7 +7,7 @@ import test from 'node:test';
 import { buildHindsightEval } from '../lib/harness/hindsight-eval.mjs';
 import { readHudDispatchSummary, readHudState, selectHudSessionId } from '../lib/hud/state.mjs';
 import { renderHud } from '../lib/hud/render.mjs';
-import { createThrottledWatchRender, watchRenderLoop } from '../lib/hud/watch.mjs';
+import { computeAdaptiveNextIntervalMs, createThrottledWatchRender, watchRenderLoop } from '../lib/hud/watch.mjs';
 import { runTeamHistory } from '../lib/lifecycle/team-ops.mjs';
 
 async function writeJson(filePath, value) {
@@ -273,6 +273,39 @@ test('createThrottledWatchRender limits read cadence while reusing last output',
   nowMs = 1000;
   assert.equal(await throttledRender(), 'frame-2');
   assert.equal(callCount, 2);
+});
+
+test('computeAdaptiveNextIntervalMs backs off on idle and resets on change', () => {
+  assert.equal(computeAdaptiveNextIntervalMs(250, {
+    changed: false,
+    minIntervalMs: 250,
+    maxIntervalMs: 2000,
+    backoffMultiplier: 2,
+  }), 500);
+  assert.equal(computeAdaptiveNextIntervalMs(500, {
+    changed: false,
+    minIntervalMs: 250,
+    maxIntervalMs: 2000,
+    backoffMultiplier: 2,
+  }), 1000);
+  assert.equal(computeAdaptiveNextIntervalMs(1000, {
+    changed: false,
+    minIntervalMs: 250,
+    maxIntervalMs: 2000,
+    backoffMultiplier: 2,
+  }), 2000);
+  assert.equal(computeAdaptiveNextIntervalMs(2000, {
+    changed: false,
+    minIntervalMs: 250,
+    maxIntervalMs: 2000,
+    backoffMultiplier: 2,
+  }), 2000);
+  assert.equal(computeAdaptiveNextIntervalMs(2000, {
+    changed: true,
+    minIntervalMs: 250,
+    maxIntervalMs: 2000,
+    backoffMultiplier: 2,
+  }), 250);
 });
 
 test('renderHud minimal shows watch visibility line when watchMeta is provided', () => {

@@ -1,6 +1,7 @@
 import { listContextDbSessions, readHudDispatchSummary, readHudState } from '../hud/state.mjs';
 import { normalizeHudPreset, renderHud } from '../hud/render.mjs';
 import { buildWatchMeta } from '../hud/watch-meta.mjs';
+import { resolveWatchCadence } from '../hud/watch-cadence.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
 
 const FAST_WATCH_DATA_REFRESH_MS = 1000;
@@ -11,11 +12,6 @@ function normalizeText(value) {
 
 function normalizeCounter(value) {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-
-function normalizeIntervalMs(value, fallback = 1000) {
-  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(250, parsed) : fallback;
 }
 
 function normalizeConcurrency(value, fallback = 4) {
@@ -60,11 +56,17 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
   const watch = rawOptions.watch === true;
   const fast = rawOptions.fast === true;
   const json = rawOptions.json === true;
-  const intervalMs = normalizeIntervalMs(rawOptions.intervalMs, 1000);
+  const watchCadence = resolveWatchCadence(rawOptions.intervalMs, { fallbackMs: 1000 });
+  const intervalMs = watchCadence.renderIntervalMs;
   const fastWatchMinimal = fast && watch && !json && preset === 'minimal';
   const dataRefreshMs = fastWatchMinimal
     ? Math.max(intervalMs, FAST_WATCH_DATA_REFRESH_MS)
     : intervalMs;
+  const dataRefreshLabel = watchCadence.adaptiveInterval
+    ? fastWatchMinimal
+      ? `auto(${dataRefreshMs}-${Math.max(dataRefreshMs, watchCadence.adaptiveInterval.maxIntervalMs)}ms)`
+      : watchCadence.renderIntervalLabel
+    : `${dataRefreshMs}ms`;
 
   const renderOnce = async () => {
     const state = await readHudState({ rootDir, sessionId, provider, fast: fastWatchMinimal });
@@ -77,7 +79,9 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
       watchMeta: watch
         ? buildWatchMeta(state, {
           renderIntervalMs: intervalMs,
+          renderIntervalLabel: watchCadence.renderIntervalLabel,
           dataRefreshMs,
+          dataRefreshLabel,
           fast: fastWatchMinimal,
         })
         : null,
@@ -98,7 +102,9 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
       preset,
       watchMeta: buildWatchMeta(state, {
         renderIntervalMs: intervalMs,
+        renderIntervalLabel: watchCadence.renderIntervalLabel,
         dataRefreshMs,
+        dataRefreshLabel,
         fast: fastWatchMinimal,
       }),
     });
@@ -110,7 +116,11 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
     })
     : readAndRender;
 
-  await watchRenderLoop(watchRender, { intervalMs, env });
+  await watchRenderLoop(watchRender, {
+    intervalMs,
+    adaptiveInterval: watchCadence.adaptiveInterval,
+    env,
+  });
 
   return { exitCode: process.exitCode ?? 0 };
 }
