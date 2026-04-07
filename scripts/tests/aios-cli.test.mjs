@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { parseArgs } from '../lib/cli/parse-args.mjs';
@@ -420,4 +423,40 @@ test('aios memo prints help', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /add <text>/i);
   assert.match(result.stdout, /pin show/i);
+});
+
+test('aios memo add emits side turn-envelope metadata', async () => {
+  const repoRoot = process.cwd();
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-memo-turn-'));
+  const cliPath = path.join(repoRoot, 'scripts', 'aios.mjs');
+
+  try {
+    const result = spawnSync('node', [cliPath, 'memo', 'add', 'record memo #ops'], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const eventsPath = path.join(
+      workspaceRoot,
+      'memory',
+      'context-db',
+      'sessions',
+      'workspace-memory--default',
+      'l2-events.jsonl'
+    );
+    const eventsRaw = await fs.readFile(eventsPath, 'utf8');
+    const events = eventsRaw.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    const memoEvent = events[events.length - 1];
+
+    assert.equal(memoEvent.kind, 'memo');
+    assert.equal(memoEvent.turn?.turnType, 'side');
+    assert.equal(memoEvent.turn?.environment, 'memo');
+    assert.equal(memoEvent.turn?.hindsightStatus, 'na');
+    assert.equal(memoEvent.turn?.outcome, 'success');
+    assert.match(String(memoEvent.turn?.turnId || ''), /^memo:default:/);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
 });

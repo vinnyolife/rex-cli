@@ -421,6 +421,53 @@ test('executeEntropyGc auto archives stale artifacts and writes manifest', async
   assert.equal(newestStats.isFile(), true);
 });
 
+test('executeEntropyGc persists turn-envelope metadata on maintenance evidence events', async () => {
+  const rootDir = await makeRootDir();
+  const sessionId = 'entropy-evidence-turn';
+  createSession(rootDir, sessionId);
+  const sessionDir = path.join(rootDir, 'memory', 'context-db', 'sessions', sessionId);
+  const artifactsDir = path.join(sessionDir, 'artifacts');
+  await mkdir(artifactsDir, { recursive: true });
+
+  const newest = path.join(artifactsDir, 'dispatch-run-newest.json');
+  const stale = path.join(artifactsDir, 'dispatch-run-stale.json');
+  await writeFile(newest, '{"ok":true}\n', 'utf8');
+  await writeFile(stale, '{"ok":false}\n', 'utf8');
+
+  const nowMs = Date.parse('2026-03-16T00:00:00.000Z');
+  const oneHourAgo = new Date(nowMs - (1 * 60 * 60 * 1000));
+  const twoDaysAgo = new Date(nowMs - (48 * 60 * 60 * 1000));
+  await utimes(newest, oneHourAgo, oneHourAgo);
+  await utimes(stale, twoDaysAgo, twoDaysAgo);
+
+  const report = await executeEntropyGc(
+    {
+      sessionId,
+      mode: 'auto',
+      retain: 1,
+      minAgeHours: 24,
+      format: 'json',
+    },
+    { rootDir, now: nowMs, persistEvidence: true }
+  );
+
+  assert.equal(report.evidence?.persisted, true);
+  assert.equal(report.archivedCount, 1);
+  assert.equal(report.manifestPath.endsWith('/manifest.json'), true);
+
+  const eventsPath = path.join(sessionDir, 'l2-events.jsonl');
+  const eventsRaw = await readFile(eventsPath, 'utf8');
+  const events = eventsRaw.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  const entropyEvent = events.find((item) => item.kind === 'maintenance.entropy-gc');
+  assert.equal(Boolean(entropyEvent), true);
+  assert.equal(entropyEvent.turn?.turnType, 'system-maintenance');
+  assert.equal(entropyEvent.turn?.environment, 'entropy-gc');
+  assert.equal(entropyEvent.turn?.hindsightStatus, 'na');
+  assert.equal(entropyEvent.turn?.outcome, 'success');
+  assert.equal(Array.isArray(entropyEvent.turn?.nextStateRefs), true);
+  assert.equal(entropyEvent.turn?.nextStateRefs?.includes(report.manifestPath), true);
+});
+
 test('validateHandoffPayload rejects missing required fields', () => {
   const result = validateHandoffPayload({ fromRole: 'planner' });
   assert.equal(result.ok, false);

@@ -11,6 +11,10 @@ import { runContextDbCli } from '../contextdb-cli.mjs';
 const DISPATCH_ARTIFACT_RE = /^dispatch-run-.*\.json$/i;
 const ENTROPY_EVENT_KIND = 'maintenance.entropy-gc';
 
+function normalizeText(value = '') {
+  return String(value ?? '').trim();
+}
+
 function normalizePath(value = '') {
   return String(value || '').split(path.sep).join('/');
 }
@@ -30,6 +34,11 @@ function parsePositiveInteger(value, fallback) {
 function formatStamp(date = new Date()) {
   const iso = date.toISOString().replace(/[-:]/g, '');
   return iso.slice(0, 15).replace('T', 'T');
+}
+
+function buildEntropyTurnId(report = {}) {
+  const sessionId = normalizeText(report.sessionId).replace(/[^a-zA-Z0-9._:-]/g, '') || 'session';
+  return `entropy:${sessionId}:${formatStamp()}`;
 }
 
 function readJsonLines(raw = '') {
@@ -330,6 +339,7 @@ export async function executeEntropyGc(
   }
 
   try {
+    const turnId = buildEntropyTurnId(report);
     const eventArgs = [
       'event:add',
       '--workspace',
@@ -342,9 +352,20 @@ export async function executeEntropyGc(
       ENTROPY_EVENT_KIND,
       '--text',
       createEntropySummary(report),
+      '--turn-id',
+      turnId,
+      '--turn-type',
+      'system-maintenance',
+      '--environment',
+      'entropy-gc',
+      '--hindsight-status',
+      'na',
+      '--outcome',
+      'success',
     ];
     if (report.manifestPath) {
       eventArgs.push('--refs', report.manifestPath);
+      eventArgs.push('--next-state-refs', report.manifestPath);
     }
     const event = runContextDbCli(eventArgs);
 

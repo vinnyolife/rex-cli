@@ -29,6 +29,23 @@ function normalizeText(value) {
   return String(value ?? '').trim();
 }
 
+function formatTurnStamp(date = new Date()) {
+  return date.toISOString().replace(/[-:]/g, '').replace(/\.(\d{3})Z$/, '$1Z');
+}
+
+function normalizeStringArray(raw = []) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const results = [];
+  for (const item of raw) {
+    const text = normalizeText(item);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    results.push(text);
+  }
+  return results;
+}
+
 function normalizePositiveInteger(raw, fallback) {
   const value = Number.parseInt(String(raw ?? '').trim(), 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -97,6 +114,21 @@ function collectBoundarySnippets(dispatchRun = null) {
     }
   }
   return snippets;
+}
+
+function collectDispatchTurnIds(dispatchRun = null) {
+  return normalizeStringArray(
+    (Array.isArray(dispatchRun?.jobRuns) ? dispatchRun.jobRuns : []).map((jobRun) => jobRun?.turnId)
+  );
+}
+
+function collectDispatchWorkItemRefs(dispatchRun = null) {
+  const refs = [];
+  for (const jobRun of Array.isArray(dispatchRun?.jobRuns) ? dispatchRun.jobRuns : []) {
+    const items = Array.isArray(jobRun?.workItemRefs) ? jobRun.workItemRefs : [];
+    refs.push(...items);
+  }
+  return normalizeStringArray(refs);
 }
 
 function getFailureCategoryCount(learnEvalReport = null, category = '') {
@@ -241,6 +273,8 @@ export function evaluateClarityGate(
   const sensitiveCommandSignals = collectPatternSignals(payloadSnippets, SENSITIVE_COMMAND_PATTERNS);
   const externalWriteSignals = collectExternalWriteSignals(filesTouchedList);
   const boundaryCrossingSignals = collectPatternSignals(boundarySnippets, BOUNDARY_PATTERNS);
+  const dispatchTurnIds = collectDispatchTurnIds(dispatchRun);
+  const dispatchWorkItemRefs = collectDispatchWorkItemRefs(dispatchRun);
   const reasons = [];
 
   if (blockedCheckpoints >= blockedThreshold) {
@@ -288,6 +322,8 @@ export function evaluateClarityGate(
       externalWriteSignals,
       boundaryCrossingSignals,
       riskSignalCount: sensitiveCommandSignals.length + externalWriteSignals.length + boundaryCrossingSignals.length,
+      dispatchTurnIds,
+      dispatchWorkItemRefs,
     },
     nextActions: buildNextActions({ needsHuman }),
   };
@@ -309,7 +345,10 @@ export function persistClarityGateDecision(
 
   try {
     const summary = buildClaritySummary({ ...gate, sessionId });
-    const event = runContextDbCli([
+    const dispatchTurnIds = normalizeStringArray(gate?.metrics?.dispatchTurnIds);
+    const dispatchWorkItemRefs = normalizeStringArray(gate?.metrics?.dispatchWorkItemRefs);
+    const turnId = `clarity:${formatTurnStamp()}:summary`;
+    const eventArgs = [
       'event:add',
       '--workspace',
       rootDir,
@@ -321,7 +360,24 @@ export function persistClarityGateDecision(
       CLARITY_GATE_EVENT_KIND,
       '--text',
       summary,
-    ]);
+      '--turn-id',
+      turnId,
+      '--turn-type',
+      'verification',
+      '--environment',
+      'orchestrate',
+      '--hindsight-status',
+      'evaluated',
+      '--outcome',
+      'ambiguous',
+    ];
+    if (dispatchTurnIds.length > 0) {
+      eventArgs.push('--parent-turn-id', dispatchTurnIds[0]);
+    }
+    if (dispatchWorkItemRefs.length > 0) {
+      eventArgs.push('--work-item-refs', dispatchWorkItemRefs.join(','));
+    }
+    const event = runContextDbCli(eventArgs);
     const eventId = `${sessionId}#${event.seq}`;
     const checkpoint = runContextDbCli([
       'checkpoint',

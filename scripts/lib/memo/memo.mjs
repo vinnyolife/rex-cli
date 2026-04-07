@@ -137,6 +137,12 @@ function extractTags(text) {
   return Array.from(tags);
 }
 
+function createMemoTurnId(space = "") {
+  const normalizedSpace = sanitizeWorkspaceMemorySpaceForSessionId(space) || "default";
+  const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `memo:${normalizedSpace}:${stamp}`;
+}
+
 function safePrintText(io, text) {
   const raw = String(text ?? "");
   if (!raw) {
@@ -282,6 +288,7 @@ export async function runMemo(rawOptions = {}, { io = console } = {}) {
     const space = activeSpace;
     const { sessionId } = ensureWorkspaceMemorySession(workspaceRoot, space);
     const refs = extractTags(text);
+    const turnId = createMemoTurnId(space);
     const args = [
       "event:add",
       "--workspace", workspaceRoot,
@@ -289,6 +296,11 @@ export async function runMemo(rawOptions = {}, { io = console } = {}) {
       "--role", "user",
       "--kind", "memo",
       "--text", text,
+      "--turn-id", turnId,
+      "--turn-type", "side",
+      "--environment", "memo",
+      "--hindsight-status", "na",
+      "--outcome", "success",
     ];
     if (refs.length > 0) {
       args.push("--refs", refs.join(","));

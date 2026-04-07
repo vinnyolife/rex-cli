@@ -1919,6 +1919,15 @@ test('runOrchestrate persists live dispatch evidence with runtime cost telemetry
   assert.match(lastCheckpoint.summary, /live/);
   assert.equal((lastCheckpoint.telemetry?.cost?.totalTokens || 0) > 0, true);
   assert.equal((lastCheckpoint.telemetry?.cost?.usd || 0) > 0, true);
+
+  const liveEventsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'live-cost-session', 'l2-events.jsonl'), 'utf8');
+  const liveEvents = liveEventsRaw.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  const entropyEvent = liveEvents.find((item) => item.kind === 'maintenance.entropy-gc');
+  assert.equal(Boolean(entropyEvent), true);
+  assert.equal(entropyEvent.turn?.turnType, 'system-maintenance');
+  assert.equal(entropyEvent.turn?.environment, 'entropy-gc');
+  assert.equal(entropyEvent.turn?.hindsightStatus, 'na');
+  assert.equal(entropyEvent.turn?.outcome, 'success');
 });
 
 test('runOrchestrate enables clarity human-gate and blocks entropy auto when signals are unclear', async () => {
@@ -1985,7 +1994,12 @@ test('runOrchestrate enables clarity human-gate and blocks entropy auto when sig
 
   const eventsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'clarity-session', 'l2-events.jsonl'), 'utf8');
   const events = eventsRaw.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
-  assert.equal(events.some((item) => item.kind === 'orchestration.human-gate'), true);
+  const clarityEvent = events.find((item) => item.kind === 'orchestration.human-gate');
+  assert.equal(Boolean(clarityEvent), true);
+  assert.equal(clarityEvent.turn?.turnType, 'verification');
+  assert.equal(clarityEvent.turn?.environment, 'orchestrate');
+  assert.equal(clarityEvent.turn?.hindsightStatus, 'evaluated');
+  assert.equal(clarityEvent.turn?.outcome, 'ambiguous');
 
   const checkpointsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'clarity-session', 'l1-checkpoints.jsonl'), 'utf8');
   const checkpoints = checkpointsRaw.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
