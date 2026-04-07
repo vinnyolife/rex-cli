@@ -1187,7 +1187,7 @@ test('runTeamHistory quality-category filters to failed records with matching ca
   assert.equal(report.records[0].qualityGate.failureCategory, 'quality-logs');
 });
 
-test('runTeamHistory quality-category-prefix filters failed category families', async () => {
+test('runTeamHistory quality-category-prefix filters failed category families with comma-separated prefixes', async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-history-quality-category-prefix-'));
   const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
   const failedLogsSessionId = 'history-quality-prefix-failed-logs';
@@ -1283,14 +1283,15 @@ test('runTeamHistory quality-category-prefix filters failed category families', 
 
   const logs = [];
   await runTeamHistory(
-    { provider: 'codex', limit: 3, json: true, fast: true, qualityCategoryPrefix: 'quality-' },
+    { provider: 'codex', limit: 4, json: true, fast: true, qualityCategoryPrefix: 'quality-, contextdb-quality-' },
     { rootDir, io: { log: (line) => logs.push(line) } }
   );
   const report = JSON.parse(logs.at(-1));
   const sessionIds = report.records.map((record) => record.sessionId).sort();
-  assert.equal(report.qualityCategoryPrefix, 'quality-');
-  assert.equal(report.summary.total, 2);
-  assert.deepEqual(sessionIds, [failedLogsSessionId, failedMetricsSessionId].sort());
+  assert.equal(report.qualityCategoryPrefix, 'quality-, contextdb-quality-');
+  assert.deepEqual(report.qualityCategoryPrefixes, ['quality-', 'contextdb-quality-']);
+  assert.equal(report.summary.total, 3);
+  assert.deepEqual(sessionIds, [failedLogsSessionId, failedMetricsSessionId, failedOtherSessionId].sort());
 });
 
 test('runTeamHistory preserves session ordering under concurrency', async () => {

@@ -39,6 +39,18 @@ function normalizeQualityCategory(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function normalizeQualityCategoryPrefixes(value) {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value
+      .map((item) => normalizeQualityCategory(item))
+      .filter(Boolean)));
+  }
+  return Array.from(new Set(normalizeText(value)
+    .split(',')
+    .map((item) => normalizeQualityCategory(item))
+    .filter(Boolean)));
+}
+
 function resolveQualityCategory(record) {
   const qualityGate = record?.qualityGate && typeof record.qualityGate === 'object'
     ? record.qualityGate
@@ -59,10 +71,11 @@ function matchesQualityCategory(record, categoryFilter) {
   return normalizeQualityCategory(resolveQualityCategory(record)) === categoryFilter;
 }
 
-function matchesQualityCategoryPrefix(record, categoryPrefixFilter) {
-  if (!categoryPrefixFilter) return true;
+function matchesQualityCategoryPrefix(record, categoryPrefixFilters = []) {
+  if (!Array.isArray(categoryPrefixFilters) || categoryPrefixFilters.length === 0) return true;
   if (!hasFailedQualityGate(record)) return false;
-  return normalizeQualityCategory(resolveQualityCategory(record)).startsWith(categoryPrefixFilter);
+  const category = normalizeQualityCategory(resolveQualityCategory(record));
+  return categoryPrefixFilters.some((prefix) => category.startsWith(prefix));
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -308,7 +321,12 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   const qualityCategory = normalizeText(rawOptions.qualityCategory);
   const qualityCategoryFilter = normalizeQualityCategory(qualityCategory);
   const qualityCategoryPrefix = normalizeText(rawOptions.qualityCategoryPrefix);
-  const qualityCategoryPrefixFilter = normalizeQualityCategory(qualityCategoryPrefix);
+  const qualityCategoryPrefixFilters = normalizeQualityCategoryPrefixes(
+    Array.isArray(rawOptions.qualityCategoryPrefixes)
+      ? rawOptions.qualityCategoryPrefixes
+      : qualityCategoryPrefix
+  );
+  const qualityCategoryPrefixEnabled = qualityCategoryPrefixFilters.length > 0;
   const sinceIso = normalizeText(rawOptions.since);
   const statusFilter = normalizeText(rawOptions.status);
 
@@ -318,7 +336,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
       ? 'gemini-cli'
       : 'codex-cli';
 
-  const scanLimit = (sinceIso || statusFilter || qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixFilter)
+  const scanLimit = (sinceIso || statusFilter || qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled)
     ? Math.max(resolvedLimit, resolvedLimit * 8)
     : resolvedLimit;
   const sessions = await listContextDbSessions(rootDir, { agent, limit: scanLimit });
@@ -333,7 +351,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
     }
     return true;
   });
-  const targetSessions = (qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixFilter)
+  const targetSessions = (qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled)
     ? filteredSessions
     : filteredSessions.slice(0, resolvedLimit);
 
@@ -403,10 +421,10 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   const filteredByCategory = qualityCategoryFilter
     ? filteredByQualityFailed.filter((record) => matchesQualityCategory(record, qualityCategoryFilter))
     : filteredByQualityFailed;
-  const filteredByCategoryPrefix = qualityCategoryPrefixFilter
-    ? filteredByCategory.filter((record) => matchesQualityCategoryPrefix(record, qualityCategoryPrefixFilter))
+  const filteredByCategoryPrefix = qualityCategoryPrefixEnabled
+    ? filteredByCategory.filter((record) => matchesQualityCategoryPrefix(record, qualityCategoryPrefixFilters))
     : filteredByCategory;
-  const selectedRecords = (qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixFilter)
+  const selectedRecords = (qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled)
     ? filteredByCategoryPrefix.slice(0, resolvedLimit)
     : filteredByCategoryPrefix;
   const summary = summarizeHistory(selectedRecords);
@@ -421,6 +439,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
       qualityFailedOnly,
       qualityCategory: qualityCategory || null,
       qualityCategoryPrefix: qualityCategoryPrefix || null,
+      qualityCategoryPrefixes: qualityCategoryPrefixEnabled ? qualityCategoryPrefixFilters : null,
       since: sinceIso || null,
       status: statusFilter || null,
       summary,
@@ -432,7 +451,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   const filterLabels = [];
   if (qualityFailedOnly) filterLabels.push('quality-gate failed only');
   if (qualityCategoryFilter) filterLabels.push(`quality-category=${qualityCategory}`);
-  if (qualityCategoryPrefixFilter) filterLabels.push(`quality-category-prefix=${qualityCategoryPrefix}`);
+  if (qualityCategoryPrefixEnabled) filterLabels.push(`quality-category-prefix=${qualityCategoryPrefixFilters.join(',')}`);
 
   const lines = [
     `AIOS Team History (provider=${provider} agent=${agent})`,

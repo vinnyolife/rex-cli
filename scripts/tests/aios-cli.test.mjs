@@ -357,7 +357,7 @@ test('parseArgs accepts team status/history subcommands', () => {
     '--quality-category',
     'quality-logs',
     '--quality-category-prefix',
-    'quality-',
+    'quality-, contextdb-quality-',
   ]);
   assert.equal(history.command, 'team');
   assert.equal(history.options.subcommand, 'history');
@@ -366,7 +366,7 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(history.options.concurrency, 8);
   assert.equal(history.options.qualityFailedOnly, true);
   assert.equal(history.options.qualityCategory, 'quality-logs');
-  assert.equal(history.options.qualityCategoryPrefix, 'quality-');
+  assert.equal(history.options.qualityCategoryPrefix, 'quality-, contextdb-quality-');
 });
 
 test('parseArgs rejects invalid mode', () => {
