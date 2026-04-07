@@ -341,6 +341,7 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(historyDefaults.options.limit, 10);
   assert.equal(historyDefaults.options.concurrency, 4);
   assert.equal(historyDefaults.options.qualityFailedOnly, false);
+  assert.equal(historyDefaults.options.qualityCategory, '');
 
   const history = parseArgs([
     'team',
@@ -352,6 +353,8 @@ test('parseArgs accepts team status/history subcommands', () => {
     '--concurrency',
     '8',
     '--quality-failed-only',
+    '--quality-category',
+    'quality-logs',
   ]);
   assert.equal(history.command, 'team');
   assert.equal(history.options.subcommand, 'history');
@@ -359,6 +362,7 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(history.options.limit, 5);
   assert.equal(history.options.concurrency, 8);
   assert.equal(history.options.qualityFailedOnly, true);
+  assert.equal(history.options.qualityCategory, 'quality-logs');
 });
 
 test('parseArgs rejects invalid mode', () => {

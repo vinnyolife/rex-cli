@@ -35,11 +35,28 @@ function normalizeQualityOutcome(value) {
   return normalized;
 }
 
+function normalizeQualityCategory(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function resolveQualityCategory(record) {
+  const qualityGate = record?.qualityGate && typeof record.qualityGate === 'object'
+    ? record.qualityGate
+    : null;
+  return normalizeText(qualityGate?.failureCategory) || normalizeText(qualityGate?.categoryRef);
+}
+
 function hasFailedQualityGate(record) {
   const qualityGate = record?.qualityGate && typeof record.qualityGate === 'object'
     ? record.qualityGate
     : null;
   return normalizeQualityOutcome(qualityGate?.outcome) === 'failed';
+}
+
+function matchesQualityCategory(record, categoryFilter) {
+  if (!categoryFilter) return true;
+  if (!hasFailedQualityGate(record)) return false;
+  return normalizeQualityCategory(resolveQualityCategory(record)) === categoryFilter;
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -282,6 +299,8 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   const concurrency = normalizeConcurrency(rawOptions.concurrency, 4);
   const fast = rawOptions.fast === true;
   const qualityFailedOnly = rawOptions.qualityFailedOnly === true;
+  const qualityCategory = normalizeText(rawOptions.qualityCategory);
+  const qualityCategoryFilter = normalizeQualityCategory(qualityCategory);
   const sinceIso = normalizeText(rawOptions.since);
   const statusFilter = normalizeText(rawOptions.status);
 
@@ -291,7 +310,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
       ? 'gemini-cli'
       : 'codex-cli';
 
-  const scanLimit = (sinceIso || statusFilter || qualityFailedOnly)
+  const scanLimit = (sinceIso || statusFilter || qualityFailedOnly || qualityCategoryFilter)
     ? Math.max(resolvedLimit, resolvedLimit * 8)
     : resolvedLimit;
   const sessions = await listContextDbSessions(rootDir, { agent, limit: scanLimit });
@@ -306,7 +325,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
     }
     return true;
   });
-  const targetSessions = qualityFailedOnly
+  const targetSessions = (qualityFailedOnly || qualityCategoryFilter)
     ? filteredSessions
     : filteredSessions.slice(0, resolvedLimit);
 
@@ -370,9 +389,15 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
     };
   });
 
-  const selectedRecords = qualityFailedOnly
-    ? records.filter((record) => hasFailedQualityGate(record)).slice(0, resolvedLimit)
+  const filteredByQualityFailed = qualityFailedOnly
+    ? records.filter((record) => hasFailedQualityGate(record))
     : records;
+  const filteredByCategory = qualityCategoryFilter
+    ? filteredByQualityFailed.filter((record) => matchesQualityCategory(record, qualityCategoryFilter))
+    : filteredByQualityFailed;
+  const selectedRecords = (qualityFailedOnly || qualityCategoryFilter)
+    ? filteredByCategory.slice(0, resolvedLimit)
+    : filteredByCategory;
   const summary = summarizeHistory(selectedRecords);
   if (json) {
     io.log(JSON.stringify({
@@ -383,6 +408,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
       limit: resolvedLimit,
       fast,
       qualityFailedOnly,
+      qualityCategory: qualityCategory || null,
       since: sinceIso || null,
       status: statusFilter || null,
       summary,
@@ -391,9 +417,13 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
     return { exitCode: 0 };
   }
 
+  const filterLabels = [];
+  if (qualityFailedOnly) filterLabels.push('quality-gate failed only');
+  if (qualityCategoryFilter) filterLabels.push(`quality-category=${qualityCategory}`);
+
   const lines = [
     `AIOS Team History (provider=${provider} agent=${agent})`,
-    qualityFailedOnly ? 'Filter: quality-gate failed only' : '',
+    filterLabels.length > 0 ? `Filter: ${filterLabels.join('; ')}` : '',
     `Summary: sessions=${summary.total} dispatchBlocked=${summary.dispatchBlocked} hindsightUnstable=${summary.hindsightUnstable} topFailures=${summary.topFailures.map((item) => `${item.failureClass}=${item.count}`).join(', ') || 'none'} topQualityFailures=${summary.topQualityFailures.map((item) => `${item.failureCategory}=${item.count}`).join(', ') || 'none'} topFixHints=${summary.topFixHints.map((item) => `${item.targetId}=${item.count}`).join(', ') || 'none'} topJobs=${summary.topJobs.map((item) => `${item.jobId}=${item.count}`).join(', ') || 'none'}`,
     ...(selectedRecords.length > 0 ? selectedRecords.map((record) => formatHistoryLine(record)) : ['- (none)']),
   ];
