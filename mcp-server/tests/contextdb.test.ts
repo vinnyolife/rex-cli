@@ -254,6 +254,126 @@ test('contextdb cli checkpoint accepts telemetry flags', async () => {
   });
 });
 
+test('appendEvent normalizes and persists turn envelope metadata', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'turn envelope normalization',
+  });
+
+  const event = await appendEvent({
+    workspaceRoot: workspace,
+    sessionId: session.sessionId,
+    role: 'assistant',
+    kind: 'response',
+    text: 'turn envelope event',
+    turn: {
+      turnId: ' turn-1 ',
+      parentTurnId: ' parent-0 ',
+      turnType: 'MAIN' as unknown as 'main',
+      environment: ' cli ',
+      workItemRefs: ['wi-2', 'wi-1', 'wi-1', ''],
+      nextStateRefs: ['artifact:b', 'artifact:a', 'artifact:b'],
+      hindsightStatus: 'PENDING' as unknown as 'pending',
+      outcome: 'SUCCESS' as unknown as 'success',
+    },
+  });
+
+  assert.deepEqual(event.turn, {
+    turnId: 'turn-1',
+    parentTurnId: 'parent-0',
+    turnType: 'main',
+    environment: 'cli',
+    workItemRefs: ['wi-1', 'wi-2'],
+    nextStateRefs: ['artifact:a', 'artifact:b'],
+    hindsightStatus: 'pending',
+    outcome: 'success',
+  });
+
+  const eventId = `${session.sessionId}#${event.seq}`;
+  const byId = await getEventById({
+    workspaceRoot: workspace,
+    eventId,
+  });
+  assert.equal(byId.event?.turn?.turnId, 'turn-1');
+  assert.equal(byId.event?.turn?.turnType, 'main');
+});
+
+test('contextdb cli event:add accepts turn envelope flags', async () => {
+  const workspace = await makeWorkspace();
+  const session = await createSession({
+    workspaceRoot: workspace,
+    agent: 'codex-cli',
+    project: 'rex-cli',
+    goal: 'event add turn flags',
+  });
+
+  const result = spawnSync(
+    'npx',
+    [
+      'tsx',
+      'src/contextdb/cli.ts',
+      'event:add',
+      '--workspace',
+      workspace,
+      '--session',
+      session.sessionId,
+      '--role',
+      'assistant',
+      '--kind',
+      'response',
+      '--text',
+      'cli turn envelope event',
+      '--turn-id',
+      'turn-2',
+      '--parent-turn-id',
+      'turn-1',
+      '--turn-type',
+      'main',
+      '--environment',
+      'cli',
+      '--work-item-refs',
+      'wi-2,wi-1,wi-2',
+      '--next-state-refs',
+      'artifact:b,artifact:a',
+      '--hindsight-status',
+      'evaluated',
+      '--outcome',
+      'correction',
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse((result.stdout || '{}').trim()) as {
+    turn?: {
+      turnId?: string;
+      parentTurnId?: string;
+      turnType?: string;
+      environment?: string;
+      workItemRefs?: string[];
+      nextStateRefs?: string[];
+      hindsightStatus?: string;
+      outcome?: string;
+    };
+  };
+  assert.deepEqual(payload.turn, {
+    turnId: 'turn-2',
+    parentTurnId: 'turn-1',
+    turnType: 'main',
+    environment: 'cli',
+    workItemRefs: ['wi-1', 'wi-2'],
+    nextStateRefs: ['artifact:a', 'artifact:b'],
+    hindsightStatus: 'evaluated',
+    outcome: 'correction',
+  });
+});
+
 test('createSession writes metadata and index record', async () => {
   const workspace = await makeWorkspace();
   const session = await createSession({

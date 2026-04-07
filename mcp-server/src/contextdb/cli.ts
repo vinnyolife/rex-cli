@@ -15,6 +15,7 @@ import {
   searchMemory,
   searchEvents,
   syncContextIndex,
+  type EventTurnEnvelope,
   writeCheckpoint,
 } from './core.js';
 
@@ -28,7 +29,7 @@ function usage(): string {
     '  contextdb init [--workspace <path>]',
     '  contextdb session:new --agent <name> --project <name> --goal <text> [--tags a,b]',
     '  contextdb session:latest --agent <name> [--project <name>]',
-    '  contextdb event:add --session <id> --role <user|assistant|tool|system> --text <text> [--kind <kind>] [--refs a,b]',
+    '  contextdb event:add --session <id> --role <user|assistant|tool|system> --text <text> [--kind <kind>] [--refs a,b] [--turn-id <id>] [--parent-turn-id <id>] [--turn-type main|side|system-maintenance|verification] [--environment <label>] [--work-item-refs a,b] [--next-state-refs a,b] [--hindsight-status pending|evaluated|na|failed] [--outcome success|correction|retry-needed|ambiguous|unknown]',
     '  contextdb checkpoint --session <id> --summary <text> [--status running|blocked|done] [--next a|b] [--artifacts a|b] [--verify-result unknown|passed|failed|partial] [--retry-count n] [--failure-category <label>] [--elapsed-ms n] [--cost-usd n]',
     '  contextdb context:pack --session <id> [--limit 30] [--token-budget 1200] [--recall smart|tail] [--kinds prompt,response,error] [--refs a,b] [--no-dedupe] [--out memory/context-db/exports/<id>.md] [--stdout]',
     '  contextdb search [--query <text>] [--project <name>] [--session <id>] [--scope events|checkpoints|all] [--role <role>] [--kinds a,b] [--refs a,b] [--statuses running,blocked,done] [--limit 20] [--semantic]',
@@ -153,6 +154,16 @@ async function main(): Promise<void> {
     }
 
     case 'event:add': {
+      const turn: EventTurnEnvelope = {
+        ...(typeof options['turn-id'] === 'string' ? { turnId: options['turn-id'] } : {}),
+        ...(typeof options['parent-turn-id'] === 'string' ? { parentTurnId: options['parent-turn-id'] } : {}),
+        ...(typeof options['turn-type'] === 'string' ? { turnType: options['turn-type'] as EventTurnEnvelope['turnType'] } : {}),
+        ...(typeof options.environment === 'string' ? { environment: options.environment } : {}),
+        ...(typeof options['hindsight-status'] === 'string' ? { hindsightStatus: options['hindsight-status'] as EventTurnEnvelope['hindsightStatus'] } : {}),
+        ...(typeof options.outcome === 'string' ? { outcome: options.outcome as EventTurnEnvelope['outcome'] } : {}),
+        ...(typeof options['work-item-refs'] === 'string' ? { workItemRefs: getOptionalCsv(options, 'work-item-refs') } : {}),
+        ...(typeof options['next-state-refs'] === 'string' ? { nextStateRefs: getOptionalCsv(options, 'next-state-refs') } : {}),
+      };
       const event = await appendEvent({
         workspaceRoot,
         sessionId: getOption(options, 'session'),
@@ -160,6 +171,7 @@ async function main(): Promise<void> {
         text: getOption(options, 'text'),
         kind: typeof options.kind === 'string' ? options.kind : undefined,
         refs: getOptionalCsv(options, 'refs'),
+        turn,
       });
       console.log(JSON.stringify(event, null, 2));
       return;

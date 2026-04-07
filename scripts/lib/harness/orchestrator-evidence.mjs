@@ -276,12 +276,18 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
 
   try {
     const dispatchCost = normalizeDispatchCost(report.dispatchRun.cost);
+    const dispatchSummaryTurnId = `dispatch:${stamp}:summary`;
+    const dispatchWorkItemRefs = Array.isArray(report.workItems)
+      ? report.workItems
+        .map((item) => normalizeText(item?.itemId || item?.id || ''))
+        .filter(Boolean)
+      : [];
     const eventRefs = [
       artifactPath,
       'env:orchestrate',
       `dispatch:${stamp}`,
     ];
-    const event = runContextDbCli([
+    const eventArgs = [
       'event:add',
       '--workspace',
       rootDir,
@@ -293,9 +299,23 @@ export async function persistDispatchEvidence({ rootDir, sessionId, report, elap
       ORCHESTRATION_DISPATCH_EVENT_KIND,
       '--text',
       buildEventText(report, artifactPath),
+      '--turn-id',
+      dispatchSummaryTurnId,
+      '--turn-type',
+      'verification',
+      '--environment',
+      'orchestrate',
+      '--hindsight-status',
+      'evaluated',
+      '--outcome',
+      report.dispatchRun.ok ? 'success' : 'retry-needed',
       '--refs',
       formatRefsCsv(eventRefs),
-    ]);
+    ];
+    if (dispatchWorkItemRefs.length > 0) {
+      eventArgs.push('--work-item-refs', dispatchWorkItemRefs.join(','));
+    }
+    const event = runContextDbCli(eventArgs);
     const eventId = `${sessionId}#${event.seq}`;
 
     const checkpointStatus = report.dispatchRun.ok ? 'running' : 'blocked';

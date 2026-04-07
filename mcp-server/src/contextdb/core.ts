@@ -21,6 +21,20 @@ import { semanticRerank } from './semantic.js';
 export type SessionStatus = 'running' | 'blocked' | 'done';
 export type EventRole = 'system' | 'user' | 'assistant' | 'tool';
 export type VerificationResult = 'unknown' | 'passed' | 'failed' | 'partial';
+export type TurnType = 'main' | 'side' | 'system-maintenance' | 'verification';
+export type TurnOutcome = 'success' | 'correction' | 'retry-needed' | 'ambiguous' | 'unknown';
+export type HindsightStatus = 'pending' | 'evaluated' | 'na' | 'failed';
+
+export interface EventTurnEnvelope {
+  turnId?: string;
+  parentTurnId?: string;
+  turnType?: TurnType;
+  environment?: string;
+  workItemRefs?: string[];
+  nextStateRefs?: string[];
+  hindsightStatus?: HindsightStatus;
+  outcome?: TurnOutcome;
+}
 
 export interface CheckpointVerification {
   result: VerificationResult;
@@ -61,6 +75,7 @@ export interface ContextEvent {
   kind: string;
   text: string;
   refs: string[];
+  turn?: EventTurnEnvelope;
 }
 
 export interface Checkpoint {
@@ -106,6 +121,7 @@ export interface IndexedEvent {
   kind: string;
   text: string;
   refs: string[];
+  turn?: EventTurnEnvelope;
   textHash: string;
   signatureHash: string;
 }
@@ -177,6 +193,82 @@ function normalizeRefs(refs: unknown): string[] {
         .filter((ref) => ref.length > 0)
     )
   ).sort();
+}
+
+const TURN_TYPES = new Set<TurnType>(['main', 'side', 'system-maintenance', 'verification']);
+const TURN_OUTCOMES = new Set<TurnOutcome>(['success', 'correction', 'retry-needed', 'ambiguous', 'unknown']);
+const HINDSIGHT_STATUSES = new Set<HindsightStatus>(['pending', 'evaluated', 'na', 'failed']);
+
+function normalizeTextList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(
+    new Set(
+      raw
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((item) => item.length > 0)
+    )
+  ).sort();
+}
+
+function normalizeTurnType(raw: unknown): TurnType | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim().toLowerCase();
+  return TURN_TYPES.has(value as TurnType) ? (value as TurnType) : undefined;
+}
+
+function normalizeTurnOutcome(raw: unknown): TurnOutcome | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim().toLowerCase();
+  return TURN_OUTCOMES.has(value as TurnOutcome) ? (value as TurnOutcome) : undefined;
+}
+
+function normalizeHindsightStatus(raw: unknown): HindsightStatus | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim().toLowerCase();
+  return HINDSIGHT_STATUSES.has(value as HindsightStatus) ? (value as HindsightStatus) : undefined;
+}
+
+function normalizeTurnEnvelope(turn: unknown): EventTurnEnvelope | undefined {
+  if (!turn || typeof turn !== 'object' || Array.isArray(turn)) {
+    return undefined;
+  }
+
+  const raw = turn as Record<string, unknown>;
+  const normalized: EventTurnEnvelope = {};
+  const turnId = normalizeTextValue(raw.turnId);
+  const parentTurnId = normalizeTextValue(raw.parentTurnId);
+  const turnType = normalizeTurnType(raw.turnType);
+  const environment = normalizeTextValue(raw.environment);
+  const workItemRefs = normalizeTextList(raw.workItemRefs);
+  const nextStateRefs = normalizeTextList(raw.nextStateRefs);
+  const hindsightStatus = normalizeHindsightStatus(raw.hindsightStatus);
+  const outcome = normalizeTurnOutcome(raw.outcome);
+
+  if (turnId) normalized.turnId = turnId;
+  if (parentTurnId) normalized.parentTurnId = parentTurnId;
+  if (turnType) normalized.turnType = turnType;
+  if (environment) normalized.environment = environment;
+  if (workItemRefs.length > 0) normalized.workItemRefs = workItemRefs;
+  if (nextStateRefs.length > 0) normalized.nextStateRefs = nextStateRefs;
+  if (hindsightStatus) normalized.hindsightStatus = hindsightStatus;
+  if (outcome) normalized.outcome = outcome;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function serializeTurnEnvelope(turn: unknown): string {
+  const normalized = normalizeTurnEnvelope(turn);
+  if (!normalized) return '';
+  return JSON.stringify({
+    turnId: normalized.turnId || '',
+    parentTurnId: normalized.parentTurnId || '',
+    turnType: normalized.turnType || '',
+    environment: normalized.environment || '',
+    workItemRefs: normalized.workItemRefs || [],
+    nextStateRefs: normalized.nextStateRefs || [],
+    hindsightStatus: normalized.hindsightStatus || '',
+    outcome: normalized.outcome || '',
+  });
 }
 
 function hashText(text: string): string {
@@ -342,8 +434,8 @@ function formatCheckpointTelemetryLines(telemetry?: CheckpointTelemetry): string
   return lines.length > 0 ? lines : ['- (none)'];
 }
 
-function eventSignature(event: Pick<ContextEvent, 'role' | 'kind' | 'text' | 'refs'>): string {
-  const normalized = `${event.role}|${event.kind}|${sanitizeInline(event.text)}|${normalizeRefs(event.refs).join(',')}`;
+function eventSignature(event: Pick<ContextEvent, 'role' | 'kind' | 'text' | 'refs' | 'turn'>): string {
+  const normalized = `${event.role}|${event.kind}|${sanitizeInline(event.text)}|${normalizeRefs(event.refs).join(',')}|${serializeTurnEnvelope(event.turn)}`;
   return hashText(normalized);
 }
 
@@ -661,6 +753,7 @@ export interface AppendEventInput {
   text: string;
   kind?: string;
   refs?: string[];
+  turn?: EventTurnEnvelope;
 }
 
 export async function appendEvent(input: AppendEventInput): Promise<ContextEvent> {
@@ -676,6 +769,7 @@ export async function appendEvent(input: AppendEventInput): Promise<ContextEvent
       ? state.lastEventSeq
       : Number(state.lastEventSeq) || 0) + 1;
 
+    const turn = normalizeTurnEnvelope(input.turn);
     const event: ContextEvent = {
       seq: nextSeq,
       ts: nowIso(),
@@ -683,6 +777,7 @@ export async function appendEvent(input: AppendEventInput): Promise<ContextEvent
       kind: input.kind || 'message',
       text: input.text,
       refs: normalizeRefs(input.refs ?? []),
+      ...(turn ? { turn } : {}),
     };
 
     const lastEvent = await readLastJsonLine<ContextEvent>(paths.events);
@@ -692,6 +787,7 @@ export async function appendEvent(input: AppendEventInput): Promise<ContextEvent
         kind: lastEvent.kind,
         text: lastEvent.text,
         refs: lastEvent.refs ?? [],
+        turn: lastEvent.turn,
       }) === eventSignature(event);
       const withinWindow = Math.abs(toEpoch(event.ts) - toEpoch(lastEvent.ts)) <= EVENT_DEDUP_WINDOW_MS;
       if (sameSignature && withinWindow) {
@@ -718,6 +814,7 @@ export async function appendEvent(input: AppendEventInput): Promise<ContextEvent
       kind: event.kind,
       text: event.text,
       refs: event.refs,
+      ...(event.turn ? { turn: event.turn } : {}),
       textHash: hashText(sanitizeInline(event.text)),
       signatureHash: eventSignature(event),
     };
@@ -923,6 +1020,7 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
         kind: event.kind,
         text: event.text,
         refs: event.refs ?? [],
+        turn: event.turn,
       });
       if (seen.has(signature)) continue;
       seen.add(signature);
@@ -1064,7 +1162,16 @@ export async function buildContextPacket(input: BuildPacketInput): Promise<Build
         const eventId = item.seq ? `${input.sessionId}#${item.seq}` : `${input.sessionId}#?`;
         const refs = normalizeRefs(item.refs);
         const refsLabel = refs.length > 0 ? ` refs=[${refs.join(', ')}]` : '';
-        return `${index + 1}. [${item.ts}] (${eventId}) ${item.role}/${item.kind}${refsLabel}: ${sanitizeInline(item.text)}`;
+        const turn = normalizeTurnEnvelope(item.turn);
+        const turnBits: string[] = [];
+        if (turn?.turnId) turnBits.push(`turn=${turn.turnId}`);
+        if (turn?.turnType) turnBits.push(`type=${turn.turnType}`);
+        if (turn?.environment) turnBits.push(`env=${turn.environment}`);
+        if (Array.isArray(turn?.workItemRefs) && turn.workItemRefs.length > 0) {
+          turnBits.push(`wi=${turn.workItemRefs.join(',')}`);
+        }
+        const turnLabel = turnBits.length > 0 ? ` turn=[${turnBits.join(' ')}]` : '';
+        return `${index + 1}. [${item.ts}] (${eventId}) ${item.role}/${item.kind}${refsLabel}${turnLabel}: ${sanitizeInline(item.text)}`;
       })
       .join('\n')
     : '1. (no events yet)';
@@ -1306,6 +1413,7 @@ async function syncContextIndexIncremental(
           : index + 1;
         if (seq <= indexedSeqs.eventSeq) continue;
         const refs = normalizeRefs(event.refs ?? []);
+        const turn = normalizeTurnEnvelope(event.turn);
         const ts = typeof event.ts === 'string' && event.ts.length > 0 ? event.ts : nowIso();
         const indexed: IndexedEvent = {
           eventId: `${meta.sessionId}#${seq}`,
@@ -1319,12 +1427,14 @@ async function syncContextIndexIncremental(
           kind: event.kind,
           text: event.text,
           refs,
+          ...(turn ? { turn } : {}),
           textHash: hashText(sanitizeInline(event.text)),
           signatureHash: eventSignature({
             role: event.role,
             kind: event.kind,
             text: event.text,
             refs,
+            turn,
           }),
         };
         upsertEventRow(dbPath, indexed);
@@ -1475,6 +1585,7 @@ export async function rebuildContextIndex(workspaceRoot: string): Promise<Rebuil
         ? Math.floor(event.seq)
         : index + 1;
       const refs = normalizeRefs(event.refs ?? []);
+      const turn = normalizeTurnEnvelope(event.turn);
       const ts = typeof event.ts === 'string' && event.ts.length > 0 ? event.ts : nowIso();
       const indexed: IndexedEvent = {
         eventId: `${meta.sessionId}#${seq}`,
@@ -1488,12 +1599,14 @@ export async function rebuildContextIndex(workspaceRoot: string): Promise<Rebuil
         kind: event.kind,
         text: event.text,
         refs,
+        ...(turn ? { turn } : {}),
         textHash: hashText(sanitizeInline(event.text)),
         signatureHash: eventSignature({
           role: event.role,
           kind: event.kind,
           text: event.text,
           refs,
+          turn,
         }),
       };
       upsertEventRow(dbPath, indexed);
@@ -1770,6 +1883,7 @@ export async function getEventById(input: GetEventByIdInput): Promise<GetEventBy
         kind: indexed.kind,
         text: indexed.text,
         refs: indexed.refs,
+        ...(indexed.turn ? { turn: indexed.turn } : {}),
       },
     };
   }

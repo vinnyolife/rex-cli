@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import type { CheckpointCost, CheckpointTelemetry, VerificationResult } from './core.js';
+import type { CheckpointCost, CheckpointTelemetry, EventTurnEnvelope, VerificationResult } from './core.js';
 
 export interface SqliteSessionRow {
   sessionId: string;
@@ -25,6 +25,7 @@ export interface SqliteEventRow {
   kind: string;
   text: string;
   refs: string[];
+  turn?: EventTurnEnvelope;
   textHash: string;
   signatureHash: string;
 }
@@ -85,6 +86,7 @@ interface EventSelectRow {
   kind: string;
   text: string;
   refs_json: string;
+  turn_json: string | null;
   text_hash: string;
   signature_hash: string;
 }
@@ -248,6 +250,14 @@ function ensureCheckpointTelemetryColumns(db: Database.Database): void {
   }
 }
 
+function ensureEventTurnColumn(db: Database.Database): void {
+  const tableInfo = db.prepare('PRAGMA table_info(events);').all() as Array<{ name: string }>;
+  const columns = new Set(tableInfo.map((row) => row.name));
+  if (!columns.has('turn_json')) {
+    db.exec('ALTER TABLE events ADD COLUMN turn_json TEXT;');
+  }
+}
+
 function ensureEventsFtsBackfill(db: Database.Database): void {
   db.exec(`
     INSERT INTO events_fts (event_id, kind, text, refs)
@@ -335,6 +345,7 @@ export function ensureSqliteSidecar(dbPath: string): void {
       text TEXT NOT NULL,
       refs_json TEXT NOT NULL,
       refs_flat TEXT NOT NULL,
+      turn_json TEXT,
       text_hash TEXT NOT NULL,
       signature_hash TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -405,6 +416,7 @@ export function ensureSqliteSidecar(dbPath: string): void {
       ON checkpoints (session_id, ts_epoch DESC);
   `);
   ensureCheckpointTelemetryColumns(db);
+  ensureEventTurnColumn(db);
   ensureEventsFtsBackfill(db);
   ensureCheckpointsFtsBackfill(db);
   ensureEventRefsBackfill(db);
@@ -486,9 +498,9 @@ export function upsertEventRow(dbPath: string, row: SqliteEventRow): void {
   const db = getConnection(dbPath);
   db.prepare(`
     INSERT INTO events (
-      event_id, session_id, seq, ts, ts_epoch, project, agent, role, kind, text, refs_json, refs_flat, text_hash, signature_hash
+      event_id, session_id, seq, ts, ts_epoch, project, agent, role, kind, text, refs_json, refs_flat, turn_json, text_hash, signature_hash
     ) VALUES (
-      @event_id, @session_id, @seq, @ts, @ts_epoch, @project, @agent, @role, @kind, @text, @refs_json, @refs_flat, @text_hash, @signature_hash
+      @event_id, @session_id, @seq, @ts, @ts_epoch, @project, @agent, @role, @kind, @text, @refs_json, @refs_flat, @turn_json, @text_hash, @signature_hash
     )
     ON CONFLICT(event_id) DO UPDATE SET
       ts=excluded.ts,
@@ -500,6 +512,7 @@ export function upsertEventRow(dbPath: string, row: SqliteEventRow): void {
       text=excluded.text,
       refs_json=excluded.refs_json,
       refs_flat=excluded.refs_flat,
+      turn_json=excluded.turn_json,
       text_hash=excluded.text_hash,
       signature_hash=excluded.signature_hash;
   `).run({
@@ -515,6 +528,7 @@ export function upsertEventRow(dbPath: string, row: SqliteEventRow): void {
     text: row.text,
     refs_json: JSON.stringify(row.refs),
     refs_flat: refsToFlat(row.refs),
+    turn_json: row.turn ? JSON.stringify(row.turn) : null,
     text_hash: row.textHash,
     signature_hash: row.signatureHash,
   });
@@ -652,7 +666,7 @@ export function searchEventRows(dbPath: string, input: SqliteSearchInput): Sqlit
       const ftsParams: Array<string | number> = [toFtsMatchQuery(tokens), ...params, limit];
       rows = db.prepare(`
         SELECT
-          e.event_id, e.session_id, e.seq, e.ts, e.ts_epoch, e.project, e.agent, e.role, e.kind, e.text, e.refs_json, e.text_hash, e.signature_hash
+          e.event_id, e.session_id, e.seq, e.ts, e.ts_epoch, e.project, e.agent, e.role, e.kind, e.text, e.refs_json, e.turn_json, e.text_hash, e.signature_hash
         FROM events_fts
         INNER JOIN events AS e ON e.event_id = events_fts.event_id
         WHERE events_fts MATCH ?
@@ -678,7 +692,7 @@ export function searchEventRows(dbPath: string, input: SqliteSearchInput): Sqlit
       fallbackParams.push(limit);
       rows = db.prepare(`
         SELECT
-          e.event_id, e.session_id, e.seq, e.ts, e.ts_epoch, e.project, e.agent, e.role, e.kind, e.text, e.refs_json, e.text_hash, e.signature_hash
+          e.event_id, e.session_id, e.seq, e.ts, e.ts_epoch, e.project, e.agent, e.role, e.kind, e.text, e.refs_json, e.turn_json, e.text_hash, e.signature_hash
         FROM events AS e
         WHERE ${fallbackClauses.join(' AND ')}
         ORDER BY e.ts_epoch DESC
@@ -689,7 +703,7 @@ export function searchEventRows(dbPath: string, input: SqliteSearchInput): Sqlit
     params.push(limit);
     rows = db.prepare(`
       SELECT
-        e.event_id, e.session_id, e.seq, e.ts, e.ts_epoch, e.project, e.agent, e.role, e.kind, e.text, e.refs_json, e.text_hash, e.signature_hash
+        e.event_id, e.session_id, e.seq, e.ts, e.ts_epoch, e.project, e.agent, e.role, e.kind, e.text, e.refs_json, e.turn_json, e.text_hash, e.signature_hash
       FROM events AS e
       ${where}
       ORDER BY e.ts_epoch DESC
@@ -697,21 +711,25 @@ export function searchEventRows(dbPath: string, input: SqliteSearchInput): Sqlit
     `).all(...params) as EventSelectRow[];
   }
 
-  return rows.map((row) => ({
-    eventId: row.event_id,
-    sessionId: row.session_id,
-    seq: row.seq,
-    ts: row.ts,
-    tsEpoch: row.ts_epoch,
-    project: row.project,
-    agent: row.agent,
-    role: row.role,
-    kind: row.kind,
-    text: row.text,
-    refs: parseJsonStringArray(row.refs_json),
-    textHash: row.text_hash,
-    signatureHash: row.signature_hash,
-  }));
+  return rows.map((row) => {
+    const turn = parseJsonObject<EventTurnEnvelope>(row.turn_json);
+    return {
+      eventId: row.event_id,
+      sessionId: row.session_id,
+      seq: row.seq,
+      ts: row.ts,
+      tsEpoch: row.ts_epoch,
+      project: row.project,
+      agent: row.agent,
+      role: row.role,
+      kind: row.kind,
+      text: row.text,
+      refs: parseJsonStringArray(row.refs_json),
+      ...(turn ? { turn } : {}),
+      textHash: row.text_hash,
+      signatureHash: row.signature_hash,
+    };
+  });
 }
 
 export function searchCheckpointRows(dbPath: string, input: SqliteCheckpointSearchInput): SqliteCheckpointRow[] {
@@ -815,12 +833,13 @@ export function getEventRowById(dbPath: string, eventId: string): SqliteEventRow
   const db = getConnection(dbPath);
   const row = db.prepare(`
     SELECT
-      event_id, session_id, seq, ts, ts_epoch, project, agent, role, kind, text, refs_json, text_hash, signature_hash
+      event_id, session_id, seq, ts, ts_epoch, project, agent, role, kind, text, refs_json, turn_json, text_hash, signature_hash
     FROM events
     WHERE event_id = ?;
   `).get(eventId) as EventSelectRow | undefined;
 
   if (!row) return null;
+  const turn = parseJsonObject<EventTurnEnvelope>(row.turn_json);
   return {
     eventId: row.event_id,
     sessionId: row.session_id,
@@ -833,6 +852,7 @@ export function getEventRowById(dbPath: string, eventId: string): SqliteEventRow
     kind: row.kind,
     text: row.text,
     refs: parseJsonStringArray(row.refs_json),
+    ...(turn ? { turn } : {}),
     textHash: row.text_hash,
     signatureHash: row.signature_hash,
   };

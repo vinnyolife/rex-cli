@@ -782,11 +782,19 @@ export async function runCtxAgent(argv = process.argv.slice(2)) {
   }
 
   if (opts.prompt) {
+    const oneShotTurnSeed = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const promptTurnId = `oneshot:${opts.sessionId}:${oneShotTurnSeed}:prompt`;
+    const responseTurnId = `oneshot:${opts.sessionId}:${oneShotTurnSeed}:response`;
+
     ctx(opts.workspaceRoot, 'event:add', [
       '--session', opts.sessionId,
       '--role', 'user',
       '--kind', 'prompt',
       '--text', opts.prompt,
+      '--turn-id', promptTurnId,
+      '--turn-type', 'main',
+      '--environment', 'cli',
+      '--hindsight-status', 'pending',
     ]);
 
     let responseStatus = opts.checkpointStatus;
@@ -821,6 +829,12 @@ Prompt: ${opts.prompt}`;
       '--role', 'assistant',
       '--kind', kind,
       '--text', logOutput,
+      '--turn-id', responseTurnId,
+      '--parent-turn-id', promptTurnId,
+      '--turn-type', 'main',
+      '--environment', 'cli',
+      '--hindsight-status', 'evaluated',
+      '--outcome', exitCode === 0 ? 'success' : 'retry-needed',
     ]);
 
     if (opts.autoCheckpoint) {

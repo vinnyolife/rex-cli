@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -223,6 +223,82 @@ test('ctx-agent tolerates context:pack failures by running without a context pac
     // The checkpoint path recreates the summary, so a later pack should succeed and write the export.
     await stat(path.join(workspaceRoot, 'memory', 'context-db', 'sessions', sessionId, 'l0-summary.md'));
     await stat(path.join(workspaceRoot, 'memory', 'context-db', 'exports', `${sessionId}-context.md`));
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent one-shot writes turn envelope metadata for prompt/response events', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-turn-envelope-'));
+  const sessionId = 'ctx-turn-envelope';
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'codex-cli',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify one-shot turn envelope logging',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'codex-cli',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--prompt',
+        'turn envelope smoke',
+        '--dry-run',
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const eventsPath = path.join(workspaceRoot, 'memory', 'context-db', 'sessions', sessionId, 'l2-events.jsonl');
+    const rows = (await stat(eventsPath)).isFile()
+      ? (await readFile(eventsPath, 'utf8'))
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+      : [];
+
+    assert.equal(rows.length >= 2, true);
+    const promptEvent = rows[rows.length - 2];
+    const responseEvent = rows[rows.length - 1];
+
+    assert.equal(promptEvent.role, 'user');
+    assert.equal(promptEvent.kind, 'prompt');
+    assert.equal(promptEvent.turn?.turnType, 'main');
+    assert.equal(promptEvent.turn?.environment, 'cli');
+    assert.equal(promptEvent.turn?.hindsightStatus, 'pending');
+    assert.match(String(promptEvent.turn?.turnId || ''), /:prompt$/);
+
+    assert.equal(responseEvent.role, 'assistant');
+    assert.equal(responseEvent.kind, 'response');
+    assert.equal(responseEvent.turn?.turnType, 'main');
+    assert.equal(responseEvent.turn?.environment, 'cli');
+    assert.equal(responseEvent.turn?.hindsightStatus, 'evaluated');
+    assert.equal(responseEvent.turn?.outcome, 'success');
+    assert.equal(responseEvent.turn?.parentTurnId, promptEvent.turn?.turnId);
+    assert.match(String(responseEvent.turn?.turnId || ''), /:response$/);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
