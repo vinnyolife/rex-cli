@@ -250,6 +250,31 @@ function formatWatchMetaLine(watchMeta = null) {
   return `watch: render=${resolvedRenderLabel} data-refresh=${resolvedDataRefreshLabel} fast=${fastEnabled} data-age=${dataAgeMs}`;
 }
 
+function formatMinimalQualityLabel(state) {
+  const qualityGate = state?.latestQualityGate && typeof state.latestQualityGate === 'object'
+    ? state.latestQualityGate
+    : null;
+  if (!qualityGate) return '';
+
+  const outcome = normalizeText(qualityGate.outcome).toLowerCase();
+  const categoryRef = normalizeText(qualityGate.categoryRef);
+  const outcomeLabel = outcome === 'retry-needed'
+    ? 'failed'
+    : outcome === 'success'
+      ? 'ok'
+      : outcome;
+
+  if (!outcomeLabel || outcomeLabel === 'ok') {
+    return '';
+  }
+
+  if (categoryRef) {
+    return `quality=${outcomeLabel}(${categoryRef})`;
+  }
+
+  return `quality=${outcomeLabel}`;
+}
+
 export function normalizeHudPreset(raw = 'focused') {
   const value = normalizeText(raw).toLowerCase();
   if (value === 'minimal' || value === 'focused' || value === 'full') return value;
@@ -263,10 +288,12 @@ export function renderHud(state, { preset = 'focused', watchMeta = null } = {}) 
     const sessionLine = formatSessionLine(state);
     const dispatch = state?.latestDispatch || null;
     const dispatchLabel = dispatch ? (dispatch.ok === true ? 'dispatch=ok' : `dispatch=blocked(${dispatch.blockedJobs || 0})`) : 'dispatch=none';
+    const qualityLabel = formatMinimalQualityLabel(state);
+    const statusLine = [dispatchLabel, qualityLabel].filter(Boolean).join(' ');
     const watchLine = formatWatchMetaLine(watchMeta || state?.watchMeta || null);
     return watchLine
-      ? `${sessionLine}\n${dispatchLabel}\n${watchLine}\n`
-      : `${sessionLine}\n${dispatchLabel}\n`;
+      ? `${sessionLine}\n${statusLine}\n${watchLine}\n`
+      : `${sessionLine}\n${statusLine}\n`;
   }
 
   const lines = [

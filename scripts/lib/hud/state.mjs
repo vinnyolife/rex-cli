@@ -18,8 +18,11 @@ const AGENT_PROVIDER_MAP = Object.freeze(
 
 const DEFAULT_SESSION_SCAN_LIMIT = 200;
 const DEFAULT_CHECKPOINT_TAIL_BYTES = 1_000_000;
+const DEFAULT_EVENT_TAIL_BYTES = 400_000;
 const CHECKPOINT_TAIL_CACHE_MAX_ENTRIES = 32;
 const CHECKPOINT_TAIL_CACHE = new Map();
+const EVENT_TAIL_CACHE_MAX_ENTRIES = 32;
+const EVENT_TAIL_CACHE = new Map();
 const JSON_READ_CACHE_MAX_ENTRIES = 64;
 const JSON_READ_CACHE = new Map();
 const SESSION_INDEX_CACHE_TTL_MS = 30_000;
@@ -40,6 +43,7 @@ const DISPATCH_HINDSIGHT_FIX_HINT_ACTIONS = Object.freeze({
   'runtime-error': 'runbook.tool-repair',
   default: 'runbook.failure-triage',
 });
+const QUALITY_GATE_EVENT_KIND = 'verification.quality-gate';
 
 function nowIso() {
   return new Date().toISOString();
@@ -134,6 +138,45 @@ function getCheckpointTailCacheKey(filePath, maxBytes) {
   return `${getCacheKeyPart(filePath)}::${getCacheKeyPart(maxBytes)}`;
 }
 
+function getEventTailCacheKey(filePath, maxBytes) {
+  return `${getCacheKeyPart(filePath)}::${getCacheKeyPart(maxBytes)}`;
+}
+
+function normalizeStringArray(raw = []) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const values = [];
+  for (const item of raw) {
+    const text = normalizeText(item);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    values.push(text);
+  }
+  return values;
+}
+
+function normalizeQualityGateEvent(rawEvent = null) {
+  if (!rawEvent || typeof rawEvent !== 'object') return null;
+  if (normalizeText(rawEvent.kind) !== QUALITY_GATE_EVENT_KIND) return null;
+  const turn = rawEvent.turn && typeof rawEvent.turn === 'object' ? rawEvent.turn : null;
+  if (!turn) return null;
+  const nextStateRefs = normalizeStringArray(turn.nextStateRefs);
+  const categoryRef = nextStateRefs.find((item) => item.startsWith('category:')) || '';
+  const failureCategory = categoryRef.startsWith('category:') ? categoryRef.slice('category:'.length) : '';
+  return {
+    kind: QUALITY_GATE_EVENT_KIND,
+    eventId: normalizeText(rawEvent.id),
+    seq: Number.isFinite(rawEvent.seq) ? Math.max(0, Math.floor(rawEvent.seq)) : 0,
+    ts: normalizeText(rawEvent.ts),
+    turnId: normalizeText(turn.turnId),
+    outcome: normalizeText(turn.outcome),
+    environment: normalizeText(turn.environment),
+    nextStateRefs,
+    categoryRef,
+    failureCategory,
+  };
+}
+
 async function readTailText(filePath, maxBytes, stats = null) {
   try {
     const resolvedStats = stats && typeof stats === 'object' ? stats : await fs.stat(filePath);
@@ -208,6 +251,62 @@ async function readLastJsonLine(filePath, { maxBytes = DEFAULT_CHECKPOINT_TAIL_B
       value,
     },
     CHECKPOINT_TAIL_CACHE_MAX_ENTRIES
+  );
+
+  return value;
+}
+
+async function readLatestQualityGateEvent(filePath, { maxBytes = DEFAULT_EVENT_TAIL_BYTES } = {}) {
+  const resolvedMaxBytes = Number.isFinite(maxBytes) ? Math.max(1, Math.floor(maxBytes)) : DEFAULT_EVENT_TAIL_BYTES;
+  const cacheKey = getEventTailCacheKey(filePath, resolvedMaxBytes);
+
+  let stats = null;
+  try {
+    stats = await fs.stat(filePath);
+  } catch {
+    EVENT_TAIL_CACHE.delete(cacheKey);
+    return null;
+  }
+
+  const mtimeMs = Number.isFinite(stats.mtimeMs) ? Math.floor(stats.mtimeMs) : 0;
+  const size = Number(stats.size) || 0;
+  const cached = EVENT_TAIL_CACHE.get(cacheKey);
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+    bumpLruCache(EVENT_TAIL_CACHE, cacheKey);
+    return cached.value;
+  }
+
+  let value = null;
+  const tail = await readTailText(filePath, resolvedMaxBytes, stats);
+  if (tail.trim()) {
+    const lines = tail
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        const parsed = JSON.parse(lines[index]);
+        const event = normalizeQualityGateEvent(parsed);
+        if (event) {
+          value = event;
+          break;
+        }
+      } catch {
+        // ignore malformed rows
+      }
+    }
+  }
+
+  setLruCache(
+    EVENT_TAIL_CACHE,
+    cacheKey,
+    {
+      mtimeMs,
+      size,
+      value,
+    },
+    EVENT_TAIL_CACHE_MAX_ENTRIES
   );
 
   return value;
@@ -716,6 +815,7 @@ export async function readHudState({ rootDir, sessionId = '', provider = '', fas
       sessionState: null,
       latestCheckpoint: null,
       latestDispatch: null,
+      latestQualityGate: null,
       suggestedCommands: [],
       warnings: ['No ContextDB sessions found in this repo.'],
     };
@@ -726,23 +826,27 @@ export async function readHudState({ rootDir, sessionId = '', provider = '', fas
   const metaPath = path.join(sessionDir, 'meta.json');
   const statePath = path.join(sessionDir, 'state.json');
   const checkpointPath = path.join(sessionDir, 'l1-checkpoints.jsonl');
+  const eventsPath = path.join(sessionDir, 'l2-events.jsonl');
 
   let meta = null;
   let state = null;
   let checkpoint = null;
   let dispatch = null;
+  let qualityGateEvent = null;
   let dispatchEvidence = [];
   if (fastMode) {
-    [meta, dispatch] = await Promise.all([
+    [meta, dispatch, qualityGateEvent] = await Promise.all([
       safeReadJsonCached(metaPath),
       findLatestDispatchArtifact(rootDir, selection.sessionId),
+      readLatestQualityGateEvent(eventsPath),
     ]);
   } else {
-    [meta, state, checkpoint, dispatch, dispatchEvidence] = await Promise.all([
+    [meta, state, checkpoint, dispatch, qualityGateEvent, dispatchEvidence] = await Promise.all([
       safeReadJsonCached(metaPath),
       safeReadJsonCached(statePath),
       readLastJsonLine(checkpointPath),
       findLatestDispatchArtifact(rootDir, selection.sessionId),
+      readLatestQualityGateEvent(eventsPath),
       collectRecentDispatchEvidence(rootDir, selection.sessionId),
     ]);
   }
@@ -776,6 +880,7 @@ export async function readHudState({ rootDir, sessionId = '', provider = '', fas
       sessionState: null,
       latestCheckpoint: null,
       latestDispatch,
+      latestQualityGate: qualityGateEvent,
       dispatchHindsight: null,
       dispatchFixHint: null,
       suggestedCommands: [],
@@ -821,6 +926,7 @@ export async function readHudState({ rootDir, sessionId = '', provider = '', fas
     sessionState: state,
     latestCheckpoint: checkpoint,
     latestDispatch,
+    latestQualityGate: qualityGateEvent,
     dispatchHindsight,
     dispatchFixHint,
     suggestedCommands,

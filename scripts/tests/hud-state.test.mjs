@@ -308,10 +308,14 @@ test('computeAdaptiveNextIntervalMs backs off on idle and resets on change', () 
   }), 250);
 });
 
-test('renderHud minimal shows watch visibility line when watchMeta is provided', () => {
+test('renderHud minimal shows watch visibility and quality category labels', () => {
   const rendered = renderHud({
     selection: { sessionId: 's-1', provider: 'codex', agent: 'codex-cli' },
     latestDispatch: { ok: false, blockedJobs: 2 },
+    latestQualityGate: {
+      outcome: 'retry-needed',
+      categoryRef: 'category:quality-logs',
+    },
   }, {
     preset: 'minimal',
     watchMeta: {
@@ -324,6 +328,7 @@ test('renderHud minimal shows watch visibility line when watchMeta is provided',
 
   assert.match(rendered, /session=s-1/);
   assert.match(rendered, /dispatch=blocked\(2\)/);
+  assert.match(rendered, /quality=failed\(category:quality-logs\)/);
   assert.match(rendered, /watch: render=250ms data-refresh=1000ms fast=on data-age=20000ms/);
 });
 
@@ -444,6 +449,30 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
       ],
     },
   });
+  await writeJsonLines(path.join(sessionDir, 'l2-events.jsonl'), [
+    {
+      seq: 1,
+      ts: '2026-04-05T00:58:59.000Z',
+      role: 'assistant',
+      kind: 'orchestration.dispatch-run',
+      text: 'dispatch run',
+    },
+    {
+      seq: 2,
+      ts: '2026-04-05T01:00:00.000Z',
+      role: 'assistant',
+      kind: 'verification.quality-gate',
+      text: 'quality gate failed',
+      turn: {
+        turnId: 'quality-gate:20260405T010000Z:summary',
+        turnType: 'verification',
+        environment: 'quality-gate',
+        hindsightStatus: 'evaluated',
+        outcome: 'retry-needed',
+        nextStateRefs: ['check:logs', 'category:quality-logs'],
+      },
+    },
+  ]);
 
   const state = await readHudState({ rootDir, sessionId });
   assert.equal(state.selection.sessionId, sessionId);
@@ -457,6 +486,11 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
   assert.equal(state.latestDispatch?.blocked?.[0]?.attempts, 2);
   assert.equal(state.latestDispatch?.blocked?.[0]?.failureClass, 'ownership-policy');
   assert.equal(state.latestDispatch?.blocked?.[0]?.retryClass, 'same-hypothesis');
+  assert.equal(state.latestQualityGate?.kind, 'verification.quality-gate');
+  assert.equal(state.latestQualityGate?.turnId, 'quality-gate:20260405T010000Z:summary');
+  assert.equal(state.latestQualityGate?.outcome, 'retry-needed');
+  assert.equal(state.latestQualityGate?.categoryRef, 'category:quality-logs');
+  assert.equal(state.latestQualityGate?.failureCategory, 'quality-logs');
   assert.equal(state.dispatchHindsight?.pairsAnalyzed, 1);
   assert.equal(state.dispatchHindsight?.repeatedBlockedTurns, 1);
   assert.equal(state.dispatchHindsight?.topRepeatedFailureClasses?.[0]?.failureClass, 'ownership-policy');
@@ -580,6 +614,23 @@ test('readHudState fast mode skips non-minimal heavy reads', async () => {
       finalOutputs: [],
     },
   });
+  await writeJsonLines(path.join(sessionDir, 'l2-events.jsonl'), [
+    {
+      seq: 1,
+      ts: '2026-04-06T02:00:00.000Z',
+      role: 'assistant',
+      kind: 'verification.quality-gate',
+      text: 'quality gate failed',
+      turn: {
+        turnId: 'quality-gate:20260406T020000Z:summary',
+        turnType: 'verification',
+        environment: 'quality-gate',
+        hindsightStatus: 'evaluated',
+        outcome: 'retry-needed',
+        nextStateRefs: ['category:quality-logs'],
+      },
+    },
+  ]);
 
   const originalReadFile = fs.readFile;
   const originalOpen = fs.open;
@@ -605,6 +656,8 @@ test('readHudState fast mode skips non-minimal heavy reads', async () => {
     assert.equal(state.latestCheckpoint, null);
     assert.equal(state.latestDispatch?.ok, false);
     assert.equal(state.latestDispatch?.blockedJobs, 1);
+    assert.equal(state.latestQualityGate?.turnId, 'quality-gate:20260406T020000Z:summary');
+    assert.equal(state.latestQualityGate?.categoryRef, 'category:quality-logs');
     assert.equal(state.dispatchHindsight, null);
     assert.equal(state.dispatchFixHint, null);
     assert.deepEqual(state.suggestedCommands, []);
