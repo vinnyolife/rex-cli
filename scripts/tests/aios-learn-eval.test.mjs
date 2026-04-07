@@ -852,6 +852,108 @@ test('runLearnEval preserves json and text output modes', async () => {
   assert.equal(textOutput.indexOf('Observe:') < textOutput.indexOf('Promote:'), true);
 });
 
+test('runLearnEval persists turn-linked hindsight evidence and skips duplicate writes', async () => {
+  const rootDir = await makeRootDir();
+  const sessionId = 'hindsight-evidence-session';
+
+  await writeSession(
+    rootDir,
+    sessionId,
+    { updatedAt: '2026-03-09T01:30:00.000Z' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T01:00:30.000Z',
+        status: 'done',
+        summary: 'Dispatch ready',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'partial', evidence: 'dispatch dry-run ready' },
+          retryCount: 0,
+          elapsedMs: 900,
+        },
+      },
+      {
+        seq: 2,
+        ts: '2026-03-09T01:10:30.000Z',
+        status: 'blocked',
+        summary: 'Dispatch regressed',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'failed', evidence: 'dispatch dry-run blocked' },
+          retryCount: 1,
+          elapsedMs: 1100,
+          failureCategory: 'merge-gate-blocked',
+        },
+      },
+    ]
+  );
+
+  await writeDispatchEvidence(rootDir, sessionId, {
+    seq: 1,
+    ts: '2026-03-09T01:00:00.000Z',
+    ok: true,
+    blockedJobs: 0,
+    artifactName: 'dispatch-run-20260309T010000Z.json',
+  });
+  await writeDispatchEvidence(rootDir, sessionId, {
+    seq: 2,
+    ts: '2026-03-09T01:10:00.000Z',
+    ok: false,
+    blockedJobs: 1,
+    artifactName: 'dispatch-run-20260309T011000Z.json',
+  });
+
+  const logs = [];
+  await runLearnEval(
+    { sessionId, format: 'json' },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const report = JSON.parse(logs.join('\n'));
+  assert.equal(report.hindsightEvidence?.persisted, true);
+  assert.equal(report.hindsightEvidence?.eventKind, 'orchestration.hindsight-eval');
+  assert.equal(report.hindsightEvidence?.parentTurnId, 'dispatch:20260309T011000Z:summary');
+
+  const eventsPath = path.join(rootDir, 'memory', 'context-db', 'sessions', sessionId, 'l2-events.jsonl');
+  const rows = (await fs.readFile(eventsPath, 'utf8'))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  const hindsightRows = rows.filter((item) => item.kind === 'orchestration.hindsight-eval');
+  assert.equal(hindsightRows.length, 1);
+  const hindsightEvent = hindsightRows[0];
+  assert.equal(hindsightEvent.turn?.turnType, 'verification');
+  assert.equal(hindsightEvent.turn?.environment, 'learn-eval');
+  assert.equal(hindsightEvent.turn?.hindsightStatus, 'evaluated');
+  assert.equal(hindsightEvent.turn?.parentTurnId, 'dispatch:20260309T011000Z:summary');
+  assert.equal(Array.isArray(hindsightEvent.turn?.nextStateRefs), true);
+  assert.equal(
+    Array.isArray(hindsightEvent.refs) && hindsightEvent.refs.some((item) => String(item).startsWith('hindsight-summary:20260309T011000Z')),
+    true
+  );
+
+  const logsSecond = [];
+  await runLearnEval(
+    { sessionId, format: 'json' },
+    { rootDir, io: { log: (line) => logsSecond.push(line) } }
+  );
+  const reportSecond = JSON.parse(logsSecond.join('\n'));
+  assert.equal(reportSecond.hindsightEvidence?.persisted, false);
+  assert.equal(reportSecond.hindsightEvidence?.reason, 'already-recorded');
+
+  const rowsSecond = (await fs.readFile(eventsPath, 'utf8'))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const hindsightRowsSecond = rowsSecond.filter((item) => item.kind === 'orchestration.hindsight-eval');
+  assert.equal(hindsightRowsSecond.length, 1);
+});
+
 test('buildLearnEvalReport ignores non-dispatch verification artifacts', async () => {
   const rootDir = await makeRootDir();
   const sessionId = 'dispatch-ignore-quality-gate';

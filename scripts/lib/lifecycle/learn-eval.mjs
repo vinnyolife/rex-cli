@@ -1,5 +1,6 @@
 import { createDefaultLearnEvalOptions, normalizeLearnEvalFormat } from './options.mjs';
 import { buildLearnEvalReport, renderLearnEvalReport } from '../harness/learn-eval.mjs';
+import { persistLearnEvalHindsightEvidence } from '../harness/learn-eval-evidence.mjs';
 
 export function normalizeLearnEvalOptions(rawOptions = {}) {
   const defaults = createDefaultLearnEvalOptions();
@@ -33,9 +34,16 @@ export function planLearnEval(rawOptions = {}) {
   };
 }
 
-export async function runLearnEval(rawOptions = {}, { rootDir, io = console } = {}) {
+export async function runLearnEval(
+  rawOptions = {},
+  { rootDir, io = console, persistHindsightEvidence = persistLearnEvalHindsightEvidence } = {}
+) {
   const { options } = planLearnEval(rawOptions);
   const report = await buildLearnEvalReport(options, { rootDir });
+  const hindsightEvidence = await persistHindsightEvidence({ rootDir, report });
+  if (hindsightEvidence && typeof hindsightEvidence === 'object') {
+    report.hindsightEvidence = hindsightEvidence;
+  }
 
   if (options.format === 'json') {
     io.log(JSON.stringify(report, null, 2));
