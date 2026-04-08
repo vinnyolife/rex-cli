@@ -884,7 +884,7 @@ function buildDispatchFixHint({ sessionId, dispatchHindsight, latestDispatchArti
   };
 }
 
-function buildSuggestedCommands({ sessionId, provider, latestDispatch, dispatchHindsight = null }) {
+function buildSuggestedCommands({ sessionId, provider, latestDispatch, latestSkillCandidate = null, dispatchHindsight = null }) {
   const commands = [];
   if (!sessionId) return commands;
 
@@ -904,7 +904,17 @@ function buildSuggestedCommands({ sessionId, provider, latestDispatch, dispatchH
     );
   }
 
-  return commands;
+  const candidate = latestSkillCandidate && typeof latestSkillCandidate === 'object'
+    ? latestSkillCandidate
+    : null;
+  const draftTargetId = normalizeText(candidate?.sourceDraftTargetId);
+  if (draftTargetId) {
+    commands.push(
+      `node scripts/aios.mjs learn-eval --session ${sessionId} --apply-draft ${draftTargetId} --apply-dry-run`
+    );
+  }
+
+  return normalizeStringArray(commands);
 }
 
 export async function readHudState({ rootDir, sessionId = '', provider = '', fast = false } = {}) {
@@ -1021,6 +1031,7 @@ export async function readHudState({ rootDir, sessionId = '', provider = '', fas
     sessionId: effectiveSelection.sessionId,
     provider: providerInferred,
     latestDispatch,
+    latestSkillCandidate: skillCandidate,
     dispatchHindsight,
   });
   const dispatchFixHint = buildDispatchFixHint({

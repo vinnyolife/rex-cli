@@ -541,6 +541,7 @@ test('readHudState includes latest checkpoint and dispatch evidence', async () =
   assert.ok(Array.isArray(state.suggestedCommands));
   assert.ok(state.suggestedCommands.some((cmd) => cmd.includes('orchestrate') && cmd.includes(sessionId)));
   assert.ok(state.suggestedCommands.some((cmd) => cmd.includes('doctor')));
+  assert.ok(state.suggestedCommands.some((cmd) => cmd.includes('--apply-draft draft.skill.repeat-blocked.ownership-policy')));
 
   const rendered = renderHud(state, { preset: 'focused' });
   assert.match(rendered, /Quality: failed \(quality-logs\)/);
@@ -1088,6 +1089,7 @@ test('runTeamHistory includes dispatch hindsight summary and fix hint', async ()
   assert.equal(record.skillCandidate.failureClass, 'ownership-policy');
   assert.equal(record.skillCandidate.lessonCount, 2);
   assert.equal(record.skillCandidate.reviewMode, 'manual');
+  assert.equal(record.skillCandidate.sourceDraftTargetId, 'draft.skill.repeat-blocked.ownership-policy');
   assert.ok(String(record.skillCandidate.artifactPath || '').includes('skill-candidate-20260405T030100Z-skill-constraints-ownership-policy.json'));
   assert.match(
     record.dispatchFixHint.nextCommand ?? '',

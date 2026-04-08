@@ -468,6 +468,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
           lessonCount: normalizeCounter(skillCandidate.lessonCount),
           reviewMode: normalizeText(skillCandidate.reviewMode) || null,
           reviewStatus: normalizeText(skillCandidate.reviewStatus) || null,
+          sourceDraftTargetId: normalizeText(skillCandidate.sourceDraftTargetId) || null,
           artifactPath: normalizeText(skillCandidate.artifactPath) || null,
         }
         : null,
