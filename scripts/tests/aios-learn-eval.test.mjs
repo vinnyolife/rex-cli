@@ -901,9 +901,20 @@ test('buildLearnEvalReport emits hindsight memo and gate draft candidates for hi
   assert.match(gateDraft?.evidence ?? '', /candidate=gate\.blocked-triage/);
   assert.match(gateDraft?.nextCommand ?? '', /quality-gate pre-pr/);
 
+  const skillDraft = report.recommendations.observe.find((item) => item.targetId === 'draft.skill.repeat-blocked.ownership-policy');
+  assertRecommendationShape(skillDraft, {
+    kind: 'observe',
+    targetType: 'sample',
+    targetId: 'draft.skill.repeat-blocked.ownership-policy',
+  });
+  assert.match(skillDraft?.evidence ?? '', /skill=skill-constraints/);
+  assert.equal(skillDraft?.draftAction?.kind, 'skill-candidate');
+  assert.equal(skillDraft?.draftAction?.skillId, 'skill-constraints');
+
   const rendered = renderLearnEvalReport(report);
   assert.match(rendered, /draft\.memo\.repeat-blocked\.ownership-policy/);
   assert.match(rendered, /draft\.gate\.repeat-blocked\.ownership-policy/);
+  assert.match(rendered, /draft\.skill\.repeat-blocked\.ownership-policy/);
 });
 
 test('runLearnEval preserves json and text output modes', async () => {
@@ -1057,6 +1068,74 @@ test('runLearnEval apply-draft executes selected draft recommendation via inject
   assert.equal(parsed.draftApply.dryRun, true);
   assert.equal(parsed.draftApply.counts.selected, 1);
   assert.equal(parsed.draftApply.counts.dryRun, 1);
+});
+
+test('runLearnEval apply-drafts dry-run includes skill-candidate draft actions', async () => {
+  const rootDir = await makeRootDir();
+  const logs = [];
+
+  await runLearnEval(
+    {
+      sessionId: 'draft-session',
+      format: 'json',
+      applyDrafts: true,
+      applyDryRun: true,
+    },
+    {
+      rootDir,
+      io: { log: (line) => logs.push(line) },
+      persistHindsightEvidence: async () => null,
+      buildReport: async () => ({
+        session: {
+          sessionId: 'draft-session',
+          agent: 'codex-cli',
+          project: 'rex-ai-boot',
+          goal: 'Skill candidate draft',
+          updatedAt: '2026-03-09T07:30:00.000Z',
+        },
+        sample: { totalCheckpoints: 1, analyzedCheckpoints: 1, telemetryCheckpoints: 1, limit: 10 },
+        status: { counts: { running: 0, blocked: 1, done: 0 } },
+        signals: {
+          verification: { counts: { unknown: 0, passed: 0, failed: 1, partial: 0 }, knownCount: 1, passRate: 0, unknownRate: 0 },
+          retry: { total: 0, average: 0, max: 0 },
+          elapsed: { average: 100, max: 100 },
+          failures: { top: [] },
+          cost: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usd: 0 },
+          dispatch: { runs: 0, successfulRuns: 0, blockedRuns: 0, blockedJobs: 0, executorUsage: [], workItems: { total: 0, blocked: 0, done: 0, blockedRate: 0, byType: [], failureClasses: [], retryClasses: [] }, latestArtifactPath: null, latestEventId: null },
+        },
+        recommendations: {
+          all: [
+            {
+              kind: 'observe',
+              targetType: 'sample',
+              targetId: 'draft.skill.repeat-blocked.ownership-policy',
+              title: 'hindsight skill patch candidate',
+              reason: 'Draft skill patch',
+              evidence: 'lessons=2 skill=skill-constraints',
+              priority: 214,
+              nextCommand: 'node scripts/aios.mjs memo add "skill-candidate"',
+              draftAction: {
+                kind: 'skill-candidate',
+                skillId: 'skill-constraints',
+                scope: 'ownership-policy',
+                text: '[skill-candidate] session=draft-session',
+              },
+            },
+          ],
+          fix: [],
+          observe: [],
+          promote: [],
+        },
+      }),
+    }
+  );
+
+  const parsed = JSON.parse(logs.join('\n'));
+  assert.equal(parsed.draftApply.mode, 'all');
+  assert.equal(parsed.draftApply.counts.selected, 1);
+  assert.equal(parsed.draftApply.counts.dryRun, 1);
+  assert.equal(parsed.draftApply.results[0].targetId, 'draft.skill.repeat-blocked.ownership-policy');
+  assert.match(parsed.draftApply.results[0].summary ?? '', /skill-candidate/);
 });
 
 test('runLearnEval apply-draft fails for unknown draft target id', async () => {

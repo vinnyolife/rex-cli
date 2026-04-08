@@ -76,6 +76,38 @@ const HINDSIGHT_DRAFT_GATE_TARGETS = {
   'runtime-error': 'gate.quality-triage',
   'unsupported-job': 'gate.quality-triage',
 };
+const HINDSIGHT_DRAFT_SKILL_PATCH_CANDIDATES = {
+  'ownership-policy': {
+    skillId: 'skill-constraints',
+    scope: 'ownership-policy',
+    patchHint: 'Add ownership boundary and ownedPathPrefixes preflight guidance for parallel phases before execution.',
+  },
+  contract: {
+    skillId: 'skill-constraints',
+    scope: 'handoff-contract',
+    patchHint: 'Reinforce single-JSON handoff contract validation before merge-gate execution.',
+  },
+  timeout: {
+    skillId: 'aios-long-running-harness',
+    scope: 'timeout-budget',
+    patchHint: 'Add timeout budgets and split long work-items before retrying repeated blocked turns.',
+  },
+  'dependency-blocked': {
+    skillId: 'aios-long-running-harness',
+    scope: 'dependency-gating',
+    patchHint: 'Add dependency completion checks before retry-blocked resume workflows.',
+  },
+  'runtime-error': {
+    skillId: 'debug',
+    scope: 'runtime-triage',
+    patchHint: 'Add evidence-first runtime triage sequence before retries in unstable flows.',
+  },
+  'unsupported-job': {
+    skillId: 'aios-project-system',
+    scope: 'runtime-capability',
+    patchHint: 'Clarify executor/job-type compatibility and fallback routing for unsupported job failures.',
+  },
+};
 
 function getQualityGateFixCommand() {
   return 'node scripts/aios.mjs quality-gate pre-pr';
@@ -223,6 +255,26 @@ function buildHindsightMemoDraftText({ sessionId = '', group } = {}) {
   return `[hindsight-draft] session=${normalizedSessionId} kind=${normalizeTargetToken(normalizedGroup.kind)} failure=${normalizeTargetToken(normalizedGroup.failureClass)} count=${Number.isFinite(normalizedGroup.count) ? normalizedGroup.count : 0} jobs=${jobs} workItems=${workItems}; hint=${hint} #hindsight #draft #dispatch`;
 }
 
+function buildSkillPatchCandidateMemoText({
+  sessionId = '',
+  group = null,
+  candidate = null,
+} = {}) {
+  const normalizedSessionId = String(sessionId || '').trim() || 'unknown-session';
+  const normalizedGroup = group && typeof group === 'object' ? group : {};
+  const normalizedCandidate = candidate && typeof candidate === 'object' ? candidate : {};
+  const jobs = Array.isArray(normalizedGroup.jobIds) && normalizedGroup.jobIds.length > 0
+    ? normalizedGroup.jobIds.slice(0, HINDSIGHT_LESSON_DRAFT_MAX_ITEMS).join(',')
+    : 'none';
+  const workItems = Array.isArray(normalizedGroup.workItemRefs) && normalizedGroup.workItemRefs.length > 0
+    ? normalizedGroup.workItemRefs.slice(0, HINDSIGHT_LESSON_DRAFT_MAX_ITEMS).join(',')
+    : 'none';
+  const skillId = String(normalizedCandidate.skillId || '').trim() || 'unknown-skill';
+  const scope = String(normalizedCandidate.scope || '').trim() || 'general';
+  const patchHint = String(normalizedCandidate.patchHint || '').trim() || 'Review hindsight cluster and produce a manual skill patch proposal.';
+  return `[skill-candidate] session=${normalizedSessionId} kind=${normalizeTargetToken(normalizedGroup.kind)} failure=${normalizeTargetToken(normalizedGroup.failureClass)} skill=${skillId} scope=${scope} count=${Number.isFinite(normalizedGroup.count) ? normalizedGroup.count : 0} jobs=${jobs} workItems=${workItems}; patchHint=${patchHint} #skill-candidate #hindsight #draft`;
+}
+
 function buildHindsightDraftRecommendations(summary, recommendations = []) {
   const dispatchHindsight = summary?.signals?.dispatch?.hindsight && typeof summary.signals.dispatch.hindsight === 'object'
     ? summary.signals.dispatch.hindsight
@@ -289,6 +341,33 @@ function buildHindsightDraftRecommendations(summary, recommendations = []) {
         priority: 15,
       }));
     }
+  }
+
+  const skillPatchCandidate = HINDSIGHT_DRAFT_SKILL_PATCH_CANDIDATES[topGroup.failureClass] || null;
+  if (skillPatchCandidate && typeof skillPatchCandidate === 'object') {
+    const skillMemoText = buildSkillPatchCandidateMemoText({
+      sessionId,
+      group: topGroup,
+      candidate: skillPatchCandidate,
+    });
+    drafts.push(createRecommendation({
+      kind: 'observe',
+      targetType: 'sample',
+      targetId: `draft.skill.${normalizedKind}.${normalizedFailureClass}`,
+      title: 'hindsight skill patch candidate',
+      reason: `Hindsight evidence suggests a reusable ${skillPatchCandidate.skillId} patch candidate; keep manual review before editing skill docs.`,
+      evidence: [...evidenceParts, `skill=${skillPatchCandidate.skillId}`, `scope=${skillPatchCandidate.scope}`].join(' '),
+      nextCommand: `node scripts/aios.mjs memo add ${JSON.stringify(skillMemoText)}`,
+      draftAction: {
+        kind: 'skill-candidate',
+        skillId: skillPatchCandidate.skillId,
+        scope: skillPatchCandidate.scope,
+        patchHint: skillPatchCandidate.patchHint,
+        text: skillMemoText,
+      },
+      nextArtifact: latestArtifactPath || undefined,
+      priority: 14,
+    }));
   }
 
   return drafts;

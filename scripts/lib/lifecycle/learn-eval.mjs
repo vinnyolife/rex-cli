@@ -204,6 +204,29 @@ async function executeStructuredDraftAction(draftAction, { rootDir, sessionId, e
     };
   }
 
+  if (actionKind === 'skill-candidate') {
+    const text = String(draftAction?.text || '').trim();
+    const skillId = String(draftAction?.skillId || '').trim() || 'unknown-skill';
+    if (!text) {
+      return {
+        status: 'failed',
+        summary: `Invalid skill-candidate draft action for ${skillId}: missing text`,
+        exitCode: 1,
+        command: 'memo',
+      };
+    }
+
+    const { runMemo } = await import('../memo/memo.mjs');
+    const buffered = createBufferedIo();
+    await runMemo({ argv: ['add', text] }, { io: buffered.io });
+    return {
+      status: 'applied',
+      summary: buffered.lines.at(-1) || `Skill candidate memo added for ${skillId}`,
+      exitCode: 0,
+      command: 'memo',
+    };
+  }
+
   return {
     status: 'failed',
     summary: `Unsupported draftAction kind: ${actionKind || '(unknown)'}`,
