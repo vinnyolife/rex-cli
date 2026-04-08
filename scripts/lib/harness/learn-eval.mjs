@@ -108,6 +108,7 @@ const HINDSIGHT_DRAFT_SKILL_PATCH_CANDIDATES = {
     patchHint: 'Clarify executor/job-type compatibility and fallback routing for unsupported job failures.',
   },
 };
+const HINDSIGHT_SKILL_CANDIDATE_ARTIFACT_KIND = 'learn-eval.skill-candidate';
 
 function getQualityGateFixCommand() {
   return 'node scripts/aios.mjs quality-gate pre-pr';
@@ -275,6 +276,70 @@ function buildSkillPatchCandidateMemoText({
   return `[skill-candidate] session=${normalizedSessionId} kind=${normalizeTargetToken(normalizedGroup.kind)} failure=${normalizeTargetToken(normalizedGroup.failureClass)} skill=${skillId} scope=${scope} count=${Number.isFinite(normalizedGroup.count) ? normalizedGroup.count : 0} jobs=${jobs} workItems=${workItems}; patchHint=${patchHint} #skill-candidate #hindsight #draft`;
 }
 
+function buildSkillPatchCandidateArtifactDraft({
+  sessionId = '',
+  group = null,
+  candidate = null,
+  sourceArtifactPath = '',
+  generatedAt = '',
+  targetId = '',
+} = {}) {
+  const normalizedSessionId = String(sessionId || '').trim() || 'unknown-session';
+  const normalizedGroup = group && typeof group === 'object' ? group : {};
+  const normalizedCandidate = candidate && typeof candidate === 'object' ? candidate : {};
+  const normalizedGeneratedAt = String(generatedAt || '').trim();
+  const normalizedTargetId = String(targetId || '').trim();
+  const skillId = String(normalizedCandidate.skillId || '').trim() || 'unknown-skill';
+  const scope = String(normalizedCandidate.scope || '').trim() || 'general';
+  const patchHint = String(normalizedCandidate.patchHint || '').trim() || 'Review hindsight cluster and produce a manual skill patch proposal.';
+  const jobIds = Array.isArray(normalizedGroup.jobIds)
+    ? normalizedGroup.jobIds
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .slice(0, HINDSIGHT_LESSON_DRAFT_MAX_ITEMS)
+    : [];
+  const workItemRefs = Array.isArray(normalizedGroup.workItemRefs)
+    ? normalizedGroup.workItemRefs
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .slice(0, HINDSIGHT_LESSON_DRAFT_MAX_ITEMS)
+    : [];
+  const hints = Array.isArray(normalizedGroup.hints)
+    ? normalizedGroup.hints
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .slice(0, HINDSIGHT_LESSON_DRAFT_MAX_ITEMS)
+    : [];
+
+  return {
+    schemaVersion: 1,
+    kind: HINDSIGHT_SKILL_CANDIDATE_ARTIFACT_KIND,
+    sessionId: normalizedSessionId,
+    generatedAt: normalizedGeneratedAt || undefined,
+    lessonCluster: {
+      kind: normalizeTargetToken(normalizedGroup.kind),
+      failureClass: normalizeTargetToken(normalizedGroup.failureClass),
+      count: Number.isFinite(normalizedGroup.count) ? Math.max(0, Math.floor(normalizedGroup.count)) : 0,
+      jobIds,
+      workItemRefs,
+      hints,
+    },
+    candidate: {
+      skillId,
+      scope,
+      patchHint,
+    },
+    evidence: {
+      sourceArtifactPath: String(sourceArtifactPath || '').trim() || null,
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: normalizedTargetId || null,
+    },
+  };
+}
+
 function buildHindsightDraftRecommendations(summary, recommendations = []) {
   const dispatchHindsight = summary?.signals?.dispatch?.hindsight && typeof summary.signals.dispatch.hindsight === 'object'
     ? summary.signals.dispatch.hindsight
@@ -345,15 +410,24 @@ function buildHindsightDraftRecommendations(summary, recommendations = []) {
 
   const skillPatchCandidate = HINDSIGHT_DRAFT_SKILL_PATCH_CANDIDATES[topGroup.failureClass] || null;
   if (skillPatchCandidate && typeof skillPatchCandidate === 'object') {
+    const draftSkillTargetId = `draft.skill.${normalizedKind}.${normalizedFailureClass}`;
     const skillMemoText = buildSkillPatchCandidateMemoText({
       sessionId,
       group: topGroup,
       candidate: skillPatchCandidate,
     });
+    const skillArtifactDraft = buildSkillPatchCandidateArtifactDraft({
+      sessionId,
+      group: topGroup,
+      candidate: skillPatchCandidate,
+      sourceArtifactPath: latestArtifactPath,
+      generatedAt: dispatchHindsight?.generatedAt || summary?.session?.updatedAt || '',
+      targetId: draftSkillTargetId,
+    });
     drafts.push(createRecommendation({
       kind: 'observe',
       targetType: 'sample',
-      targetId: `draft.skill.${normalizedKind}.${normalizedFailureClass}`,
+      targetId: draftSkillTargetId,
       title: 'hindsight skill patch candidate',
       reason: `Hindsight evidence suggests a reusable ${skillPatchCandidate.skillId} patch candidate; keep manual review before editing skill docs.`,
       evidence: [...evidenceParts, `skill=${skillPatchCandidate.skillId}`, `scope=${skillPatchCandidate.scope}`].join(' '),
@@ -363,6 +437,9 @@ function buildHindsightDraftRecommendations(summary, recommendations = []) {
         skillId: skillPatchCandidate.skillId,
         scope: skillPatchCandidate.scope,
         patchHint: skillPatchCandidate.patchHint,
+        failureClass: topGroup.failureClass,
+        lessonKind: topGroup.kind,
+        artifactDraft: skillArtifactDraft,
         text: skillMemoText,
       },
       nextArtifact: latestArtifactPath || undefined,

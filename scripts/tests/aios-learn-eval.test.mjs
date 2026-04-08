@@ -910,6 +910,11 @@ test('buildLearnEvalReport emits hindsight memo and gate draft candidates for hi
   assert.match(skillDraft?.evidence ?? '', /skill=skill-constraints/);
   assert.equal(skillDraft?.draftAction?.kind, 'skill-candidate');
   assert.equal(skillDraft?.draftAction?.skillId, 'skill-constraints');
+  assert.equal(skillDraft?.draftAction?.failureClass, 'ownership-policy');
+  assert.equal(skillDraft?.draftAction?.lessonKind, 'repeat-blocked');
+  assert.equal(skillDraft?.draftAction?.artifactDraft?.kind, 'learn-eval.skill-candidate');
+  assert.equal(skillDraft?.draftAction?.artifactDraft?.candidate?.skillId, 'skill-constraints');
+  assert.equal(skillDraft?.draftAction?.artifactDraft?.lessonCluster?.failureClass, 'ownership-policy');
 
   const rendered = renderLearnEvalReport(report);
   assert.match(rendered, /draft\.memo\.repeat-blocked\.ownership-policy/);
@@ -1136,6 +1141,120 @@ test('runLearnEval apply-drafts dry-run includes skill-candidate draft actions',
   assert.equal(parsed.draftApply.counts.dryRun, 1);
   assert.equal(parsed.draftApply.results[0].targetId, 'draft.skill.repeat-blocked.ownership-policy');
   assert.match(parsed.draftApply.results[0].summary ?? '', /skill-candidate/);
+});
+
+test('runLearnEval apply-draft persists skill-candidate artifact for manual review', { concurrency: false }, async () => {
+  const rootDir = await makeRootDir();
+  const logs = [];
+  const cwdBefore = process.cwd();
+
+  try {
+    process.chdir(rootDir);
+    await runLearnEval(
+      {
+        sessionId: 'draft-session',
+        format: 'json',
+        applyDraftId: 'draft.skill.repeat-blocked.ownership-policy',
+      },
+      {
+        rootDir,
+        io: { log: (line) => logs.push(line) },
+        persistHindsightEvidence: async () => null,
+        buildReport: async () => ({
+          session: {
+            sessionId: 'draft-session',
+            agent: 'codex-cli',
+            project: 'rex-ai-boot',
+            goal: 'Skill candidate apply',
+            updatedAt: '2026-03-09T07:45:00.000Z',
+          },
+          sample: { totalCheckpoints: 1, analyzedCheckpoints: 1, telemetryCheckpoints: 1, limit: 10 },
+          status: { counts: { running: 0, blocked: 1, done: 0 } },
+          signals: {
+            verification: { counts: { unknown: 0, passed: 0, failed: 1, partial: 0 }, knownCount: 1, passRate: 0, unknownRate: 0 },
+            retry: { total: 0, average: 0, max: 0 },
+            elapsed: { average: 100, max: 100 },
+            failures: { top: [] },
+            cost: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usd: 0 },
+            dispatch: { runs: 0, successfulRuns: 0, blockedRuns: 0, blockedJobs: 0, executorUsage: [], workItems: { total: 0, blocked: 0, done: 0, blockedRate: 0, byType: [], failureClasses: [], retryClasses: [] }, latestArtifactPath: null, latestEventId: null },
+          },
+          recommendations: {
+            all: [
+              {
+                kind: 'observe',
+                targetType: 'sample',
+                targetId: 'draft.skill.repeat-blocked.ownership-policy',
+                title: 'hindsight skill patch candidate',
+                reason: 'Draft skill patch',
+                evidence: 'lessons=2 skill=skill-constraints',
+                priority: 214,
+                nextCommand: 'node scripts/aios.mjs memo add "skill-candidate"',
+                draftAction: {
+                  kind: 'skill-candidate',
+                  skillId: 'skill-constraints',
+                  scope: 'ownership-policy',
+                  failureClass: 'ownership-policy',
+                  lessonKind: 'repeat-blocked',
+                  patchHint: 'Add ownership boundary preflight guidance.',
+                  text: '[skill-candidate] session=draft-session kind=repeat-blocked failure=ownership-policy skill=skill-constraints scope=ownership-policy',
+                  artifactDraft: {
+                    schemaVersion: 1,
+                    kind: 'learn-eval.skill-candidate',
+                    sessionId: 'draft-session',
+                    generatedAt: '2026-03-09T07:45:00.000Z',
+                    lessonCluster: {
+                      kind: 'repeat-blocked',
+                      failureClass: 'ownership-policy',
+                      count: 2,
+                      jobIds: ['merge.final-checks'],
+                      workItemRefs: ['merge.final-checks'],
+                      hints: ['Add ownership boundary preflight guidance.'],
+                    },
+                    candidate: {
+                      skillId: 'skill-constraints',
+                      scope: 'ownership-policy',
+                      patchHint: 'Add ownership boundary preflight guidance.',
+                    },
+                    evidence: {
+                      sourceArtifactPath: 'memory/context-db/sessions/draft-session/artifacts/dispatch-run-20260309T050800Z.json',
+                    },
+                    review: {
+                      status: 'candidate',
+                      mode: 'manual',
+                      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+                    },
+                  },
+                },
+              },
+            ],
+            fix: [],
+            observe: [],
+            promote: [],
+          },
+        }),
+      }
+    );
+  } finally {
+    process.chdir(cwdBefore);
+  }
+
+  const parsed = JSON.parse(logs.join('\n'));
+  assert.equal(parsed.draftApply.counts.applied, 1);
+  assert.equal(parsed.draftApply.counts.failed, 0);
+  assert.equal(parsed.draftApply.results[0].status, 'applied');
+  assert.match(parsed.draftApply.results[0].summary ?? '', /Memo added:/);
+
+  const artifactsDir = path.join(rootDir, 'memory', 'context-db', 'sessions', 'draft-session', 'artifacts');
+  const artifactEntries = await fs.readdir(artifactsDir);
+  const artifactName = artifactEntries.find((entry) => entry.startsWith('skill-candidate-') && entry.endsWith('.json'));
+  assert.ok(artifactName);
+
+  const artifactPayload = JSON.parse(await fs.readFile(path.join(artifactsDir, artifactName), 'utf8'));
+  assert.equal(artifactPayload.kind, 'learn-eval.skill-candidate');
+  assert.equal(artifactPayload.sessionId, 'draft-session');
+  assert.equal(artifactPayload.candidate.skillId, 'skill-constraints');
+  assert.equal(artifactPayload.lessonCluster.failureClass, 'ownership-policy');
+  assert.match(String(artifactPayload.evidence.sourceMemoText || ''), /\[skill-candidate]/);
 });
 
 test('runLearnEval apply-draft fails for unknown draft target id', async () => {
