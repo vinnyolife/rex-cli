@@ -1373,6 +1373,15 @@ test('runTeamStatus --show-skill-candidates renders detailed candidate rows', as
   assert.match(output, /draft=draft\.skill\.repeat-blocked\.ownership-policy/);
   assert.match(output, /skill=debug/);
   assert.match(output, /draft=draft\.skill\.repeat-blocked\.runtime-error/);
+
+  const limitedLogs = [];
+  await runTeamStatus(
+    { provider: 'codex', sessionId, showSkillCandidates: true, skillCandidateLimit: 1, preset: 'focused' },
+    { rootDir, io: { log: (line) => limitedLogs.push(line) } }
+  );
+  const limitedOutput = limitedLogs.join('\n');
+  assert.match(limitedOutput, /skill=skill-constraints/);
+  assert.doesNotMatch(limitedOutput, /skill=debug/);
 });
 
 test('runHud --show-skill-candidates renders detailed candidate rows', async () => {
@@ -1412,6 +1421,28 @@ test('runHud --show-skill-candidates renders detailed candidate rows', async () 
       sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
     },
   });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T085900Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T08:59:00.000Z',
+    persistedAt: '2026-04-06T08:59:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
 
   const logs = [];
   await runHud(
@@ -1422,6 +1453,15 @@ test('runHud --show-skill-candidates renders detailed candidate rows', async () 
   assert.match(output, /Skill Candidates:/);
   assert.match(output, /skill=debug/);
   assert.match(output, /draft=draft\.skill\.repeat-blocked\.runtime-error/);
+
+  const limitedLogs = [];
+  await runHud(
+    { provider: 'codex', sessionId, showSkillCandidates: true, skillCandidateLimit: 1, preset: 'focused' },
+    { rootDir, io: { log: (line) => limitedLogs.push(line) } }
+  );
+  const limitedOutput = limitedLogs.join('\n');
+  assert.match(limitedOutput, /skill=debug/);
+  assert.doesNotMatch(limitedOutput, /skill=skill-constraints/);
 });
 
 test('runTeamHistory quality-failed-only filters sessions by quality gate outcome', async () => {

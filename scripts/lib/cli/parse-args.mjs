@@ -107,6 +107,7 @@ function createDefaultHudOptions() {
     watch: false,
     fast: false,
     showSkillCandidates: false,
+    skillCandidateLimit: 0,
     json: false,
     intervalMs: 1000,
   };
@@ -155,6 +156,14 @@ function parseHudArgs(argv) {
         break;
       case '--show-skill-candidates':
         options.showSkillCandidates = true;
+        break;
+      case '--skill-candidate-limit':
+        options.skillCandidateLimit = parsePositiveInteger(
+          takeValue(rest, index, '--skill-candidate-limit'),
+          '--skill-candidate-limit'
+        );
+        options.showSkillCandidates = true;
+        index += 1;
         break;
       case '--json':
         options.json = true;
@@ -217,6 +226,7 @@ function createDefaultTeamStatusOptions() {
     watch: false,
     fast: false,
     showSkillCandidates: false,
+    skillCandidateLimit: 0,
     json: false,
     intervalMs: 1000,
   };
@@ -272,6 +282,14 @@ function parseTeamStatusArgs(argv) {
         break;
       case '--show-skill-candidates':
         options.showSkillCandidates = true;
+        break;
+      case '--skill-candidate-limit':
+        options.skillCandidateLimit = parsePositiveInteger(
+          takeValue(rest, index, '--skill-candidate-limit'),
+          '--skill-candidate-limit'
+        );
+        options.showSkillCandidates = true;
+        index += 1;
         break;
       case '--no-fast':
         options.fast = false;

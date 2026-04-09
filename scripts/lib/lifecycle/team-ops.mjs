@@ -6,6 +6,8 @@ import { resolveWatchCadence } from '../hud/watch-cadence.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
 
 const FAST_WATCH_DATA_REFRESH_MS = 1000;
+const DEFAULT_SKILL_CANDIDATE_LIMIT = 6;
+const MAX_SKILL_CANDIDATE_LIMIT = 20;
 
 function normalizeText(value) {
   return String(value ?? '').trim();
@@ -115,8 +117,14 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
   const watch = rawOptions.watch === true;
   const fast = rawOptions.fast === true;
   const json = rawOptions.json === true;
-  const showSkillCandidates = rawOptions.showSkillCandidates === true;
-  const skillCandidateLimit = showSkillCandidates ? 6 : 0;
+  const requestedSkillCandidateLimit = Number.isFinite(rawOptions.skillCandidateLimit)
+    ? Math.max(0, Math.floor(rawOptions.skillCandidateLimit))
+    : 0;
+  const showSkillCandidates = rawOptions.showSkillCandidates === true || requestedSkillCandidateLimit > 0;
+  const resolvedSkillCandidateLimit = Math.min(MAX_SKILL_CANDIDATE_LIMIT, requestedSkillCandidateLimit);
+  const skillCandidateLimit = showSkillCandidates
+    ? Math.max(1, resolvedSkillCandidateLimit || DEFAULT_SKILL_CANDIDATE_LIMIT)
+    : 0;
   const watchCadence = resolveWatchCadence(rawOptions.intervalMs, { fallbackMs: 1000 });
   const intervalMs = watchCadence.renderIntervalMs;
   const fastWatchMinimal = fast && watch && !json && preset === 'minimal';

@@ -240,6 +240,12 @@ test('parseArgs accepts hud command options', () => {
   const showSkillCandidates = parseArgs(['hud', '--show-skill-candidates']);
   assert.equal(showSkillCandidates.command, 'hud');
   assert.equal(showSkillCandidates.options.showSkillCandidates, true);
+  assert.equal(showSkillCandidates.options.skillCandidateLimit, 0);
+
+  const skillCandidateLimit = parseArgs(['hud', '--skill-candidate-limit', '4']);
+  assert.equal(skillCandidateLimit.command, 'hud');
+  assert.equal(skillCandidateLimit.options.showSkillCandidates, true);
+  assert.equal(skillCandidateLimit.options.skillCandidateLimit, 4);
 
   const sessionResult = parseArgs(['hud', '--session', 'session-123', '--preset', 'full']);
   assert.equal(sessionResult.command, 'hud');
@@ -297,6 +303,13 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(statusShowSkillCandidates.command, 'team');
   assert.equal(statusShowSkillCandidates.options.subcommand, 'status');
   assert.equal(statusShowSkillCandidates.options.showSkillCandidates, true);
+  assert.equal(statusShowSkillCandidates.options.skillCandidateLimit, 0);
+
+  const statusSkillCandidateLimit = parseArgs(['team', 'status', '--skill-candidate-limit', '3']);
+  assert.equal(statusSkillCandidateLimit.command, 'team');
+  assert.equal(statusSkillCandidateLimit.options.subcommand, 'status');
+  assert.equal(statusSkillCandidateLimit.options.showSkillCandidates, true);
+  assert.equal(statusSkillCandidateLimit.options.skillCandidateLimit, 3);
 
   const statusWatchDefaults = parseArgs(['team', 'status', '--watch']);
   assert.equal(statusWatchDefaults.command, 'team');
@@ -393,6 +406,17 @@ test('parseArgs rejects invalid mode', () => {
 
 test('parseArgs rejects invalid watch interval token', () => {
   assert.throws(() => parseArgs(['hud', '--watch', '--interval-ms', 'fast']), /--interval-ms must be a positive integer or \"auto\"/);
+});
+
+test('parseArgs rejects invalid skill-candidate-limit', () => {
+  assert.throws(
+    () => parseArgs(['hud', '--skill-candidate-limit', '0']),
+    /--skill-candidate-limit must be a positive integer/
+  );
+  assert.throws(
+    () => parseArgs(['team', 'status', '--skill-candidate-limit', '0']),
+    /--skill-candidate-limit must be a positive integer/
+  );
 });
 
 test('parseArgs rejects invalid team history quality prefix mode', () => {

@@ -6,6 +6,8 @@ import { resolveWatchCadence } from '../hud/watch-cadence.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
 
 const FAST_WATCH_DATA_REFRESH_MS = 1000;
+const DEFAULT_SKILL_CANDIDATE_LIMIT = 6;
+const MAX_SKILL_CANDIDATE_LIMIT = 20;
 
 function normalizeText(value) {
   return String(value ?? '').trim();
@@ -13,6 +15,9 @@ function normalizeText(value) {
 
 export function normalizeHudOptions(rawOptions = {}) {
   const cadence = resolveWatchCadence(rawOptions.intervalMs, { fallbackMs: 1000 });
+  const requestedSkillCandidateLimit = Number.isFinite(rawOptions.skillCandidateLimit)
+    ? Math.max(0, Math.floor(rawOptions.skillCandidateLimit))
+    : 0;
   return {
     sessionId: normalizeText(rawOptions.sessionId),
     provider: normalizeText(rawOptions.provider).toLowerCase(),
@@ -20,6 +25,7 @@ export function normalizeHudOptions(rawOptions = {}) {
     watch: rawOptions.watch === true,
     fast: rawOptions.fast === true,
     showSkillCandidates: rawOptions.showSkillCandidates === true,
+    skillCandidateLimit: requestedSkillCandidateLimit,
     json: rawOptions.json === true,
     intervalMs: cadence.renderIntervalMs,
     intervalLabel: cadence.renderIntervalLabel,
@@ -29,7 +35,11 @@ export function normalizeHudOptions(rawOptions = {}) {
 
 export async function runHud(rawOptions = {}, { rootDir, io = console, env = process.env } = {}) {
   const options = normalizeHudOptions(rawOptions);
-  const skillCandidateLimit = options.showSkillCandidates ? 6 : 0;
+  const showSkillCandidates = options.showSkillCandidates || options.skillCandidateLimit > 0;
+  const resolvedSkillCandidateLimit = Math.min(MAX_SKILL_CANDIDATE_LIMIT, options.skillCandidateLimit);
+  const skillCandidateLimit = showSkillCandidates
+    ? Math.max(1, resolvedSkillCandidateLimit || DEFAULT_SKILL_CANDIDATE_LIMIT)
+    : 0;
   const fastWatchMinimal = options.fast && options.watch && !options.json && options.preset === 'minimal';
   const dataRefreshMs = fastWatchMinimal
     ? Math.max(options.intervalMs, FAST_WATCH_DATA_REFRESH_MS)
@@ -66,7 +76,7 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
         })
         : null,
     }).trimEnd();
-    const skillCandidateText = options.showSkillCandidates
+    const skillCandidateText = showSkillCandidates
       ? formatSkillCandidateDetails(state, { limit: skillCandidateLimit })
       : '';
     io.log([hudText, skillCandidateText].filter(Boolean).join('\n') + '\n');
@@ -98,7 +108,7 @@ export async function runHud(rawOptions = {}, { rootDir, io = console, env = pro
         fast: fastWatchMinimal,
       }),
     }).trimEnd();
-    const skillCandidateText = options.showSkillCandidates
+    const skillCandidateText = showSkillCandidates
       ? formatSkillCandidateDetails(state, { limit: skillCandidateLimit })
       : '';
     return [hudText, skillCandidateText].filter(Boolean).join('\n') + '\n';

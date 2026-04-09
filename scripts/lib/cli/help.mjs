@@ -181,6 +181,7 @@ Options:
   --concurrency <n>             (team history) Process sessions concurrently (default: 4)
   --fast                        (team history) Skip dispatch hindsight evaluation for faster scans
   --show-skill-candidates       (team status) Show detailed skill-candidate artifact rows under HUD output
+  --skill-candidate-limit <n>   (team status/hud) Cap detailed skill-candidate rows (implies --show-skill-candidates, default 6)
   --quality-failed-only         (team history) Only include sessions with failed quality-gate outcomes
   --quality-category <name>     (team history) Only include sessions with failed quality-gate category match
   --quality-category-prefix <name> (team history) Only include sessions with failed quality-gate category prefix match (comma-separated)
@@ -205,6 +206,7 @@ Options:
   --fast                        In --watch + minimal preset, skip heavy reads and throttle state refresh to ~1s
   --no-fast                     Force disable fast mode (overrides auto-fast)
   --show-skill-candidates       Show detailed skill-candidate artifact rows under HUD output
+  --skill-candidate-limit <n>   Cap detailed skill-candidate rows (implies --show-skill-candidates, default 6)
   --interval-ms <n|auto>        Watch refresh interval (default: 1000; use "auto" for 250-2000ms adaptive cadence; auto-fast enabled when <=500 or auto with watch+minimal)
   --json                        Output structured JSON instead of text
   -h, --help
