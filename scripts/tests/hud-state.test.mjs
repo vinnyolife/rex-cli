@@ -9,7 +9,13 @@ import { readHudDispatchSummary, readHudState, selectHudSessionId } from '../lib
 import { renderHud } from '../lib/hud/render.mjs';
 import { computeAdaptiveNextIntervalMs, createThrottledWatchRender, watchRenderLoop } from '../lib/hud/watch.mjs';
 import { runHud } from '../lib/lifecycle/hud.mjs';
-import { resolveStatusSkillCandidateOptions, runTeamHistory, runTeamStatus } from '../lib/lifecycle/team-ops.mjs';
+import {
+  resolveStatusSkillCandidateOptions,
+  runTeamHistory,
+  runTeamSkillCandidatesList,
+  runTeamSkillCandidatesExport,
+  runTeamStatus,
+} from '../lib/lifecycle/team-ops.mjs';
 
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -316,7 +322,13 @@ test('resolveStatusSkillCandidateOptions adapts default limit for fast watch', (
       requestedSkillCandidateLimit: 0,
       fastWatchMinimal: false,
     }),
-    { showSkillCandidates: false, skillCandidateLimit: 0 }
+    {
+      showSkillCandidates: false,
+      skillCandidateLimit: 0,
+      skillCandidateView: 'inline',
+      exportSkillCandidatePatchTemplate: false,
+      draftId: '',
+    }
   );
 
   assert.deepEqual(
@@ -325,7 +337,13 @@ test('resolveStatusSkillCandidateOptions adapts default limit for fast watch', (
       requestedSkillCandidateLimit: 0,
       fastWatchMinimal: false,
     }),
-    { showSkillCandidates: true, skillCandidateLimit: 6 }
+    {
+      showSkillCandidates: true,
+      skillCandidateLimit: 6,
+      skillCandidateView: 'inline',
+      exportSkillCandidatePatchTemplate: false,
+      draftId: '',
+    }
   );
 
   assert.deepEqual(
@@ -334,7 +352,13 @@ test('resolveStatusSkillCandidateOptions adapts default limit for fast watch', (
       requestedSkillCandidateLimit: 0,
       fastWatchMinimal: true,
     }),
-    { showSkillCandidates: true, skillCandidateLimit: 3 }
+    {
+      showSkillCandidates: true,
+      skillCandidateLimit: 3,
+      skillCandidateView: 'inline',
+      exportSkillCandidatePatchTemplate: false,
+      draftId: '',
+    }
   );
 
   assert.deepEqual(
@@ -343,7 +367,13 @@ test('resolveStatusSkillCandidateOptions adapts default limit for fast watch', (
       requestedSkillCandidateLimit: 4,
       fastWatchMinimal: true,
     }),
-    { showSkillCandidates: true, skillCandidateLimit: 4 }
+    {
+      showSkillCandidates: true,
+      skillCandidateLimit: 4,
+      skillCandidateView: 'inline',
+      exportSkillCandidatePatchTemplate: false,
+      draftId: '',
+    }
   );
 
   assert.deepEqual(
@@ -352,7 +382,46 @@ test('resolveStatusSkillCandidateOptions adapts default limit for fast watch', (
       requestedSkillCandidateLimit: 99,
       fastWatchMinimal: false,
     }),
-    { showSkillCandidates: true, skillCandidateLimit: 20 }
+    {
+      showSkillCandidates: true,
+      skillCandidateLimit: 20,
+      skillCandidateView: 'inline',
+      exportSkillCandidatePatchTemplate: false,
+      draftId: '',
+    }
+  );
+
+  assert.deepEqual(
+    resolveStatusSkillCandidateOptions({
+      showSkillCandidates: true,
+      requestedSkillCandidateLimit: 0,
+      skillCandidateView: 'detail',
+      exportSkillCandidatePatchTemplate: true,
+      fastWatchMinimal: false,
+    }),
+    {
+      showSkillCandidates: true,
+      skillCandidateLimit: 6,
+      skillCandidateView: 'detail',
+      exportSkillCandidatePatchTemplate: true,
+      draftId: '',
+    }
+  );
+
+  assert.deepEqual(
+    resolveStatusSkillCandidateOptions({
+      showSkillCandidates: false,
+      requestedSkillCandidateLimit: 0,
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+      fastWatchMinimal: false,
+    }),
+    {
+      showSkillCandidates: true,
+      skillCandidateLimit: 6,
+      skillCandidateView: 'inline',
+      exportSkillCandidatePatchTemplate: false,
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+    }
   );
 });
 
@@ -918,7 +987,14 @@ test('readHudState caches skill-candidate artifact reads until files change', as
       },
     });
 
-    const third = await readHudState({ rootDir, sessionId, fast: true, skillCandidateLimit: 3 });
+    let third = null;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      third = await readHudState({ rootDir, sessionId, fast: true, skillCandidateLimit: 3 });
+      if (third.latestSkillCandidate?.patchHint === 'updated hint') {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     assert.equal(third.latestSkillCandidate?.patchHint, 'updated hint');
     assert.ok(reads.candidate > firstReadCount);
   } finally {
@@ -1431,6 +1507,207 @@ test('runTeamStatus --show-skill-candidates renders detailed candidate rows', as
   assert.doesNotMatch(limitedOutput, /skill=debug/);
 });
 
+test('runTeamStatus supports direct skill-candidate detail mode', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-status-skill-candidates-detail-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'status-skill-candidate-detail-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T10:00:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T10:00:00.000Z',
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T100000Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T10:00:00.000Z',
+    persistedAt: '2026-04-06T10:00:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+
+  const logs = [];
+  await runTeamStatus(
+    { provider: 'codex', sessionId, showSkillCandidates: true, skillCandidateView: 'detail', preset: 'focused' },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const output = logs.join('\n');
+  assert.match(output, /Skill Candidates:/);
+  assert.match(output, /skill=debug/);
+  assert.doesNotMatch(output, /AIOS Team Status/);
+  assert.doesNotMatch(output, /Checkpoint:/);
+});
+
+test('runTeamStatus exports skill-candidate patch template artifact in one command', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-status-skill-candidates-patch-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'status-skill-candidate-patch-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T11:00:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T11:00:00.000Z',
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T110000Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T11:00:00.000Z',
+    persistedAt: '2026-04-06T11:00:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 3,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
+
+  const logs = [];
+  await runTeamStatus(
+    {
+      provider: 'codex',
+      sessionId,
+      showSkillCandidates: true,
+      skillCandidateView: 'detail',
+      exportSkillCandidatePatchTemplate: true,
+      preset: 'focused',
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /Skill candidate patch template artifact:/);
+  const artifactMatch = output.match(/Skill candidate patch template artifact: ([^\s]+)/);
+  assert.ok(artifactMatch?.[1]);
+  const artifactPath = String(artifactMatch[1]);
+  const artifactAbsPath = path.join(rootDir, artifactPath);
+  const artifactText = await fs.readFile(artifactAbsPath, 'utf8');
+
+  assert.match(artifactText, /# Skill Candidate Patch Templates/);
+  assert.match(artifactText, /\*\*\* Begin Patch/);
+  assert.match(artifactText, /\*\*\* Update File: \.codex\/skills\/skill-constraints\/SKILL\.md/);
+  assert.match(artifactText, /draft\.skill\.repeat-blocked\.ownership-policy/);
+  assert.match(artifactText, /Add ownership boundary guidance/);
+});
+
+test('runTeamStatus --draft-id filters skill candidates for detail and patch export', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-status-skill-candidates-draft-id-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'status-skill-candidate-draft-id-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T11:30:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T11:30:00.000Z',
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T113000Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T11:30:00.000Z',
+    persistedAt: '2026-04-06T11:30:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T112900Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T11:29:00.000Z',
+    persistedAt: '2026-04-06T11:29:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
+
+  const logs = [];
+  await runTeamStatus(
+    {
+      provider: 'codex',
+      sessionId,
+      showSkillCandidates: true,
+      skillCandidateView: 'detail',
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+      exportSkillCandidatePatchTemplate: true,
+      preset: 'focused',
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+
+  const output = logs.join('\n');
+  assert.match(output, /skill=debug/);
+  assert.doesNotMatch(output, /skill=skill-constraints/);
+  const artifactMatch = output.match(/Skill candidate patch template artifact: ([^\s]+)/);
+  assert.ok(artifactMatch?.[1]);
+  const artifactPath = String(artifactMatch[1]);
+  const artifactText = await fs.readFile(path.join(rootDir, artifactPath), 'utf8');
+  assert.match(artifactText, /Candidate 1: debug \/ runtime-error/);
+  assert.doesNotMatch(artifactText, /skill-constraints/);
+});
+
 test('runHud --show-skill-candidates renders detailed candidate rows', async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-skill-candidates-'));
   const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
@@ -1509,6 +1786,92 @@ test('runHud --show-skill-candidates renders detailed candidate rows', async () 
   const limitedOutput = limitedLogs.join('\n');
   assert.match(limitedOutput, /skill=debug/);
   assert.doesNotMatch(limitedOutput, /skill=skill-constraints/);
+});
+
+test('runHud supports direct skill-candidate detail mode, draft filtering, and patch export', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-hud-skill-candidates-detail-export-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'hud-skill-candidate-detail-export-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T11:45:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T11:45:00.000Z',
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T114500Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T11:45:00.000Z',
+    persistedAt: '2026-04-06T11:45:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T114400Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T11:44:00.000Z',
+    persistedAt: '2026-04-06T11:44:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
+
+  const logs = [];
+  await runHud(
+    {
+      provider: 'codex',
+      sessionId,
+      showSkillCandidates: true,
+      skillCandidateView: 'detail',
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+      exportSkillCandidatePatchTemplate: true,
+      preset: 'focused',
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const output = logs.join('\n');
+  assert.match(output, /Skill Candidates:/);
+  assert.match(output, /skill=debug/);
+  assert.doesNotMatch(output, /skill=skill-constraints/);
+  assert.doesNotMatch(output, /AIOS Team Status/);
+  const artifactMatch = output.match(/Skill candidate patch template artifact: ([^\s]+)/);
+  assert.ok(artifactMatch?.[1]);
+  const artifactPath = String(artifactMatch[1]);
+  const artifactText = await fs.readFile(path.join(rootDir, artifactPath), 'utf8');
+  assert.match(artifactText, /Candidate 1: debug \/ runtime-error/);
+  assert.doesNotMatch(artifactText, /skill-constraints/);
 });
 
 test('runTeamHistory quality-failed-only filters sessions by quality gate outcome', async () => {
@@ -1841,6 +2204,309 @@ test('runTeamHistory quality-category-prefix mode=all requires all prefixes to m
   assert.equal(report.summary.total, 1);
   assert.equal(report.records.length, 1);
   assert.equal(report.records[0].sessionId, failedLogsSessionId);
+});
+
+test('runTeamHistory --draft-id filters sessions by latest skill-candidate draft target id', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-history-draft-id-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const runtimeSessionId = 'history-draft-id-runtime';
+  const ownershipSessionId = 'history-draft-id-ownership';
+
+  await writeJson(
+    path.join(sessionsRoot, runtimeSessionId, 'meta.json'),
+    makeSessionMeta({ sessionId: runtimeSessionId, agent: 'codex-cli', updatedAt: '2026-04-06T12:00:00.000Z' })
+  );
+  await writeJson(
+    path.join(sessionsRoot, ownershipSessionId, 'meta.json'),
+    makeSessionMeta({ sessionId: ownershipSessionId, agent: 'codex-cli', updatedAt: '2026-04-06T11:00:00.000Z' })
+  );
+
+  await writeJson(path.join(sessionsRoot, runtimeSessionId, 'artifacts', 'skill-candidate-20260406T120000Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId: runtimeSessionId,
+    generatedAt: '2026-04-06T12:00:00.000Z',
+    persistedAt: '2026-04-06T12:00:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+  await writeJson(path.join(sessionsRoot, ownershipSessionId, 'artifacts', 'skill-candidate-20260406T110000Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId: ownershipSessionId,
+    generatedAt: '2026-04-06T11:00:00.000Z',
+    persistedAt: '2026-04-06T11:00:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
+
+  const logs = [];
+  await runTeamHistory(
+    {
+      provider: 'codex',
+      limit: 5,
+      json: true,
+      fast: true,
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const report = JSON.parse(logs.at(-1));
+  assert.equal(report.draftId, 'draft.skill.repeat-blocked.runtime-error');
+  assert.equal(report.summary.total, 1);
+  assert.equal(report.records.length, 1);
+  assert.equal(report.records[0].sessionId, runtimeSessionId);
+  assert.equal(report.records[0].skillCandidate.sourceDraftTargetId, 'draft.skill.repeat-blocked.runtime-error');
+});
+
+test('runTeamSkillCandidatesList renders filtered candidate rows without status framing', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-skill-candidates-list-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'team-skill-candidates-list-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T12:30:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T12:30:00.000Z',
+  });
+
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T123000Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T12:30:00.000Z',
+    persistedAt: '2026-04-06T12:30:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T122900Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T12:29:00.000Z',
+    persistedAt: '2026-04-06T12:29:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
+
+  const logs = [];
+  const result = await runTeamSkillCandidatesList(
+    {
+      provider: 'codex',
+      sessionId,
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+      skillCandidateLimit: 6,
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.result.candidateCount, 1);
+  const output = logs.join('\n');
+  assert.match(output, /Skill Candidates:/);
+  assert.match(output, /skill=debug/);
+  assert.doesNotMatch(output, /skill-constraints/);
+  assert.doesNotMatch(output, /AIOS Team Status/);
+  assert.doesNotMatch(output, /Checkpoint:/);
+});
+
+test('runTeamSkillCandidatesExport exports patch template artifact without status rendering', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-skill-candidates-export-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'team-skill-candidates-export-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T12:30:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T12:30:00.000Z',
+  });
+
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T123000Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T12:30:00.000Z',
+    persistedAt: '2026-04-06T12:30:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T122900Z-skill-constraints-ownership-policy.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T12:29:00.000Z',
+    persistedAt: '2026-04-06T12:29:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'ownership-policy',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'skill-constraints',
+      scope: 'ownership-policy',
+      patchHint: 'Add ownership boundary guidance.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.ownership-policy',
+    },
+  });
+
+  const logs = [];
+  const result = await runTeamSkillCandidatesExport(
+    {
+      provider: 'codex',
+      sessionId,
+      draftId: 'draft.skill.repeat-blocked.runtime-error',
+      skillCandidateLimit: 6,
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  assert.equal(result.exitCode, 0);
+  const output = logs.join('\n');
+  assert.match(output, /Skill candidate patch template artifact:/);
+  assert.doesNotMatch(output, /AIOS Team Status/);
+  assert.doesNotMatch(output, /Checkpoint:/);
+  const artifactMatch = output.match(/Skill candidate patch template artifact: ([^\s]+)/);
+  assert.ok(artifactMatch?.[1]);
+  const artifactPath = String(artifactMatch[1]);
+  const artifactText = await fs.readFile(path.join(rootDir, artifactPath), 'utf8');
+  assert.match(artifactText, /Candidate 1: debug \/ runtime-error/);
+  assert.doesNotMatch(artifactText, /skill-constraints/);
+});
+
+test('runTeamSkillCandidatesExport supports explicit output path', async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-team-skill-candidates-export-path-'));
+  const sessionsRoot = path.join(rootDir, 'memory', 'context-db', 'sessions');
+  const sessionId = 'team-skill-candidates-export-path-session';
+  const sessionDir = path.join(sessionsRoot, sessionId);
+  const explicitOutputPath = 'tmp/skill-candidates/manual-export.md';
+
+  await writeJson(
+    path.join(sessionDir, 'meta.json'),
+    makeSessionMeta({ sessionId, agent: 'codex-cli', updatedAt: '2026-04-06T12:30:00.000Z' })
+  );
+  await writeJson(path.join(sessionDir, 'state.json'), {
+    sessionId,
+    status: 'running',
+    updatedAt: '2026-04-06T12:30:00.000Z',
+  });
+
+  await writeJson(path.join(sessionDir, 'artifacts', 'skill-candidate-20260406T123000Z-debug-runtime-error.json'), {
+    schemaVersion: 1,
+    kind: 'learn-eval.skill-candidate',
+    sessionId,
+    generatedAt: '2026-04-06T12:30:00.000Z',
+    persistedAt: '2026-04-06T12:30:00.000Z',
+    lessonCluster: {
+      kind: 'repeat-blocked',
+      failureClass: 'runtime-error',
+      count: 2,
+    },
+    candidate: {
+      skillId: 'debug',
+      scope: 'runtime-triage',
+      patchHint: 'Run evidence-first runtime triage.',
+    },
+    review: {
+      status: 'candidate',
+      mode: 'manual',
+      sourceDraftTargetId: 'draft.skill.repeat-blocked.runtime-error',
+    },
+  });
+
+  const logs = [];
+  const result = await runTeamSkillCandidatesExport(
+    {
+      provider: 'codex',
+      sessionId,
+      outputPath: explicitOutputPath,
+      skillCandidateLimit: 6,
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.result.requestedOutputPath, explicitOutputPath);
+  assert.equal(result.result.artifactPath, explicitOutputPath);
+  const output = logs.join('\n');
+  assert.match(output, /Skill candidate patch template artifact: tmp\/skill-candidates\/manual-export\.md/);
+  const artifactText = await fs.readFile(path.join(rootDir, explicitOutputPath), 'utf8');
+  assert.match(artifactText, /Candidate 1: debug \/ runtime-error/);
 });
 
 test('runTeamHistory preserves session ordering under concurrency', async () => {

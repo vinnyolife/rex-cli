@@ -2147,6 +2147,16 @@ test('runOrchestrate persists dry-run evidence into ContextDB JSONL and SQLite s
     artifact.workItemTelemetry.items.every((item) => item.artifactRefs.includes(report.dispatchEvidence.artifactPath)),
     true
   );
+  assert.equal(
+    artifact.dispatchRun.jobRuns.every((jobRun) => String(jobRun.turnId || '').length > 0),
+    true
+  );
+  const implementRun = artifact.dispatchRun.jobRuns.find((jobRun) => String(jobRun.jobId || '').startsWith('phase.implement'));
+  assert.ok(implementRun, 'expected implement job run');
+  assert.equal(Array.isArray(implementRun.workItemRefs), true);
+  assert.equal((implementRun.workItemRefs || []).length >= 1, true);
+  assert.equal((implementRun.refs || []).some((ref) => String(ref).startsWith('turn:')), true);
+  assert.equal((implementRun.refs || []).some((ref) => String(ref).startsWith('work-item:')), true);
 
   const eventsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'security-stable', 'l2-events.jsonl'), 'utf8');
   const checkpointsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', 'security-stable', 'l1-checkpoints.jsonl'), 'utf8');
@@ -2155,6 +2165,12 @@ test('runOrchestrate persists dry-run evidence into ContextDB JSONL and SQLite s
 
   assert.equal(lastEvent.kind, 'orchestration.dispatch-run');
   assert.equal(lastEvent.refs.includes(report.dispatchEvidence.artifactPath), true);
+  assert.match(String(lastEvent.turn?.turnId || ''), /^dispatch:/);
+  assert.equal(lastEvent.turn?.turnType, 'verification');
+  assert.equal(lastEvent.turn?.environment, 'orchestrate');
+  assert.equal(lastEvent.turn?.hindsightStatus, 'evaluated');
+  assert.equal(Array.isArray(lastEvent.turn?.workItemRefs), true);
+  assert.equal((lastEvent.turn?.workItemRefs || []).length >= 1, true);
   assert.match(lastCheckpoint.summary, /dry-run/);
   assert.equal(lastCheckpoint.telemetry.verification.result, 'partial');
   assert.equal(lastCheckpoint.artifacts.includes(report.dispatchEvidence.artifactPath), true);
@@ -2846,6 +2862,83 @@ test('persistDispatchEvidence uses millisecond artifact stamps to avoid collisio
   const secondAbs = path.join(rootDir, second.artifactPath);
   assert.equal(Boolean(await fs.stat(firstAbs)), true);
   assert.equal(Boolean(await fs.stat(secondAbs)), true);
+});
+
+test('persistDispatchEvidence writes turn envelope work-item refs and enriches job turn refs', async () => {
+  const rootDir = await makeRootDir();
+  const sessionId = 'dispatch-envelope-session';
+
+  await writeSession(
+    rootDir,
+    sessionId,
+    { updatedAt: '2026-04-06T00:00:00.000Z', goal: 'Validate dispatch turn envelope linkage' },
+    []
+  );
+
+  const report = {
+    blueprint: 'feature',
+    taskTitle: 'Dispatch envelope linkage',
+    contextSummary: 'Validate turn/work-item correlation',
+    workItems: [
+      { itemId: 'wi.1', title: 'Implement fix' },
+      { itemId: 'wi.2', title: 'Review fix' },
+    ],
+    dispatchPlan: {
+      jobs: [
+        {
+          jobId: 'phase.implement.wi.1',
+          launchSpec: {
+            workItemRefs: ['wi.1'],
+          },
+        },
+      ],
+    },
+    dispatchRun: {
+      ok: true,
+      mode: 'dry-run',
+      executorRegistry: ['local-phase'],
+      jobRuns: [
+        {
+          jobId: 'phase.implement.wi.1',
+          jobType: 'phase',
+          role: 'implementer',
+          status: 'simulated',
+          output: { outputType: 'handoff' },
+        },
+      ],
+      finalOutputs: [
+        { jobId: 'phase.implement.wi.1', outputType: 'handoff' },
+      ],
+    },
+  };
+
+  const evidence = await persistDispatchEvidence({
+    rootDir,
+    sessionId,
+    report,
+    elapsedMs: 9,
+    now: new Date('2026-04-06T00:00:00.222Z'),
+  });
+  assert.equal(evidence.persisted, true);
+  assert.match(String(evidence.artifactPath || ''), /dispatch-run-20260406T000000222Z\.json$/);
+
+  const artifact = JSON.parse(await fs.readFile(path.join(rootDir, evidence.artifactPath), 'utf8'));
+  const jobRun = artifact.dispatchRun?.jobRuns?.[0];
+  assert.ok(jobRun, 'expected enriched job run');
+  assert.match(String(jobRun.turnId || ''), /phase\.implement\.wi\.1:a1$/);
+  assert.deepEqual(jobRun.workItemRefs, ['wi.1']);
+  assert.equal(Array.isArray(jobRun.refs), true);
+  assert.equal(jobRun.refs.includes(`turn:${jobRun.turnId}`), true);
+  assert.equal(jobRun.refs.includes('work-item:wi.1'), true);
+
+  const eventsRaw = await fs.readFile(path.join(rootDir, 'memory', 'context-db', 'sessions', sessionId, 'l2-events.jsonl'), 'utf8');
+  const lastEvent = JSON.parse(eventsRaw.trim().split('\n').at(-1));
+  assert.equal(lastEvent.kind, 'orchestration.dispatch-run');
+  assert.match(String(lastEvent.turn?.turnId || ''), /^dispatch:/);
+  assert.equal(lastEvent.turn?.turnType, 'verification');
+  assert.equal(lastEvent.turn?.environment, 'orchestrate');
+  assert.equal(lastEvent.turn?.hindsightStatus, 'evaluated');
+  assert.deepEqual((lastEvent.turn?.workItemRefs || []).sort(), ['wi.1', 'wi.2']);
 });
 
 test('renderOrchestrationReport includes dispatch evidence reasons when present', () => {

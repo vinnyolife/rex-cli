@@ -151,6 +151,7 @@ Options:
   node scripts/aios.mjs team [<workers:provider>] [task] [options]
   node scripts/aios.mjs team status [options]
   node scripts/aios.mjs team history [options]
+  node scripts/aios.mjs team skill-candidates [list|export] [options]
 
 Examples:
   node scripts/aios.mjs team 3:codex "Ship X"
@@ -158,7 +159,10 @@ Examples:
   node scripts/aios.mjs team --resume <id> --retry-blocked --provider codex --workers 2
   node scripts/aios.mjs team --provider gemini --workers 2 --task "Refactor Y" --dry-run
   node scripts/aios.mjs team status --provider codex --watch
+  node scripts/aios.mjs team status --session <id> --show-skill-candidates detail --export-skill-candidate-patch-template
   node scripts/aios.mjs team history --provider claude --limit 10
+  node scripts/aios.mjs team skill-candidates list --session <id> --draft-id <targetId> --json
+  node scripts/aios.mjs team skill-candidates export --session <id> --draft-id <targetId>
 
 Options:
   --workers <n>                 Team worker concurrency (default: 3)
@@ -177,11 +181,15 @@ Options:
   --dry-run                     Local dispatch dry-run (no model calls)
   --live                        Force live execution (default)
   --watch                       (team status) Refresh display on an interval (TTY-only)
-  --json                        (team status/history) Output structured JSON instead of text
+  --json                        (team status/history/skill-candidates list|export) Output structured JSON instead of text
   --concurrency <n>             (team history) Process sessions concurrently (default: 4)
   --fast                        (team history) Skip dispatch hindsight evaluation for faster scans
-  --show-skill-candidates       (team status) Show detailed skill-candidate artifact rows under HUD output
-  --skill-candidate-limit <n>   (team status/hud) Cap detailed skill-candidate rows (implies --show-skill-candidates; default 6, team status --watch --fast defaults to 3)
+  --show-skill-candidates [inline|detail] (team status) Show skill-candidate artifact rows (default mode: inline; "detail" prints candidate view directly)
+  --skill-candidate-view <inline|detail> (team status) Explicitly choose how skill candidates are rendered
+  --skill-candidate-limit <n>   (team status/hud/skill-candidates export) Cap detailed skill-candidate rows (implies --show-skill-candidates; default 6, team status --watch --fast defaults to 3)
+  --draft-id <targetId>          (team status/history/hud/skill-candidates export) Filter skill-candidate rows/export by sourceDraftTargetId
+  --output <path>               (team skill-candidates export) Write patch-template artifact to an explicit path
+  --export-skill-candidate-patch-template (team status/hud) Export apply_patch templates derived from surfaced skill-candidate artifacts
   --quality-failed-only         (team history) Only include sessions with failed quality-gate outcomes
   --quality-category <name>     (team history) Only include sessions with failed quality-gate category match
   --quality-category-prefix <name> (team history) Only include sessions with failed quality-gate category prefix match (comma-separated)
@@ -205,8 +213,11 @@ Options:
   --watch                       Refresh display on an interval (TTY-only)
   --fast                        In --watch + minimal preset, skip heavy reads and throttle state refresh to ~1s
   --no-fast                     Force disable fast mode (overrides auto-fast)
-  --show-skill-candidates       Show detailed skill-candidate artifact rows under HUD output
+  --show-skill-candidates [inline|detail] Show skill-candidate artifact rows (default mode: inline; "detail" prints candidate view directly)
+  --skill-candidate-view <inline|detail> Explicitly choose how skill candidates are rendered
   --skill-candidate-limit <n>   Cap detailed skill-candidate rows (implies --show-skill-candidates, default 6)
+  --draft-id <targetId>         Filter skill-candidate rows/export by sourceDraftTargetId
+  --export-skill-candidate-patch-template Export apply_patch templates derived from surfaced skill-candidate artifacts
   --interval-ms <n|auto>        Watch refresh interval (default: 1000; use "auto" for 250-2000ms adaptive cadence; auto-fast enabled when <=500 or auto with watch+minimal)
   --json                        Output structured JSON instead of text
   -h, --help

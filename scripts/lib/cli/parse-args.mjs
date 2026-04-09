@@ -28,6 +28,7 @@ const INTERNAL_TARGETS = new Set(['shell', 'skills', 'native', 'superpowers', 'b
 const PRIVACY_MODES = new Set(['regex', 'ollama', 'hybrid']);
 const TEAM_PROVIDERS = new Set(['codex', 'claude', 'gemini']);
 const HUD_PRESETS = new Set(['minimal', 'focused', 'full']);
+const SKILL_CANDIDATE_VIEWS = new Set(['inline', 'detail', 'list']);
 const TEAM_PROVIDER_CLIENT_MAP = Object.freeze({
   codex: 'codex-cli',
   claude: 'claude-code',
@@ -99,6 +100,14 @@ function normalizeHudPreset(raw = '') {
   return value;
 }
 
+function normalizeSkillCandidateView(raw, flag = '--skill-candidate-view') {
+  const value = String(raw || '').trim().toLowerCase();
+  if (!SKILL_CANDIDATE_VIEWS.has(value)) {
+    throw new Error(`${flag} must be one of: inline, detail`);
+  }
+  return value === 'list' ? 'detail' : value;
+}
+
 function createDefaultHudOptions() {
   return {
     sessionId: '',
@@ -107,7 +116,10 @@ function createDefaultHudOptions() {
     watch: false,
     fast: false,
     showSkillCandidates: false,
+    skillCandidateView: 'inline',
     skillCandidateLimit: 0,
+    exportSkillCandidatePatchTemplate: false,
+    draftId: '',
     json: false,
     intervalMs: 1000,
   };
@@ -156,6 +168,30 @@ function parseHudArgs(argv) {
         break;
       case '--show-skill-candidates':
         options.showSkillCandidates = true;
+        if (rest[index + 1] && !String(rest[index + 1]).startsWith('-')) {
+          const nextToken = String(rest[index + 1] || '').trim().toLowerCase();
+          if (SKILL_CANDIDATE_VIEWS.has(nextToken)) {
+            options.skillCandidateView = normalizeSkillCandidateView(rest[index + 1], '--show-skill-candidates');
+            index += 1;
+          }
+        }
+        break;
+      case '--skill-candidate-view':
+        options.skillCandidateView = normalizeSkillCandidateView(
+          takeValue(rest, index, '--skill-candidate-view'),
+          '--skill-candidate-view'
+        );
+        options.showSkillCandidates = true;
+        index += 1;
+        break;
+      case '--export-skill-candidate-patch-template':
+        options.exportSkillCandidatePatchTemplate = true;
+        options.showSkillCandidates = true;
+        break;
+      case '--draft-id':
+        options.draftId = takeValue(rest, index, '--draft-id');
+        options.showSkillCandidates = true;
+        index += 1;
         break;
       case '--skill-candidate-limit':
         options.skillCandidateLimit = parsePositiveInteger(
@@ -226,7 +262,10 @@ function createDefaultTeamStatusOptions() {
     watch: false,
     fast: false,
     showSkillCandidates: false,
+    skillCandidateView: 'inline',
     skillCandidateLimit: 0,
+    exportSkillCandidatePatchTemplate: false,
+    draftId: '',
     json: false,
     intervalMs: 1000,
   };
@@ -282,6 +321,30 @@ function parseTeamStatusArgs(argv) {
         break;
       case '--show-skill-candidates':
         options.showSkillCandidates = true;
+        if (rest[index + 1] && !String(rest[index + 1]).startsWith('-')) {
+          const nextToken = String(rest[index + 1] || '').trim().toLowerCase();
+          if (SKILL_CANDIDATE_VIEWS.has(nextToken)) {
+            options.skillCandidateView = normalizeSkillCandidateView(rest[index + 1], '--show-skill-candidates');
+            index += 1;
+          }
+        }
+        break;
+      case '--skill-candidate-view':
+        options.skillCandidateView = normalizeSkillCandidateView(
+          takeValue(rest, index, '--skill-candidate-view'),
+          '--skill-candidate-view'
+        );
+        options.showSkillCandidates = true;
+        index += 1;
+        break;
+      case '--export-skill-candidate-patch-template':
+        options.exportSkillCandidatePatchTemplate = true;
+        options.showSkillCandidates = true;
+        break;
+      case '--draft-id':
+        options.draftId = takeValue(rest, index, '--draft-id');
+        options.showSkillCandidates = true;
+        index += 1;
         break;
       case '--skill-candidate-limit':
         options.skillCandidateLimit = parsePositiveInteger(
@@ -341,8 +404,24 @@ function createDefaultTeamHistoryOptions() {
     qualityCategory: '',
     qualityCategoryPrefix: '',
     qualityCategoryPrefixMode: 'any',
+    draftId: '',
     since: '',
     status: '',
+    json: false,
+  };
+}
+
+function createDefaultTeamSkillCandidatesExportOptions() {
+  return {
+    subcommand: 'skill-candidates',
+    action: 'export',
+    provider: 'codex',
+    clientId: TEAM_PROVIDER_CLIENT_MAP.codex,
+    sessionId: '',
+    resumeSessionId: '',
+    skillCandidateLimit: 0,
+    draftId: '',
+    outputPath: '',
     json: false,
   };
 }
@@ -407,6 +486,10 @@ function parseTeamHistoryArgs(argv) {
         options.qualityCategoryPrefixMode = normalizeQualityCategoryPrefixMode(takeValue(rest, index, '--quality-category-prefix-mode'));
         index += 1;
         break;
+      case '--draft-id':
+        options.draftId = String(takeValue(rest, index, '--draft-id') ?? '').trim();
+        index += 1;
+        break;
       case '--since':
         options.since = normalizeSinceIso(takeValue(rest, index, '--since'));
         index += 1;
@@ -434,6 +517,82 @@ function parseTeamHistoryArgs(argv) {
   };
 }
 
+function parseTeamSkillCandidatesArgs(argv) {
+  const rest = argv.slice(2);
+  const options = createDefaultTeamSkillCandidatesExportOptions();
+  let help = false;
+  let index = 0;
+
+  if (rest[0] && !String(rest[0]).startsWith('-')) {
+    const action = String(rest[0] || '').trim().toLowerCase();
+    if (!['list', 'export'].includes(action)) {
+      throw new Error('team skill-candidates action must be one of: list, export');
+    }
+    options.action = action;
+    index = 1;
+  }
+
+  for (; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === '--') continue;
+    if (arg === '-h' || arg === '--help') {
+      help = true;
+      continue;
+    }
+
+    switch (arg) {
+      case '--provider':
+        options.provider = normalizeTeamProvider(takeValue(rest, index, '--provider'));
+        index += 1;
+        break;
+      case '--session':
+        options.sessionId = String(takeValue(rest, index, '--session') ?? '').trim();
+        index += 1;
+        break;
+      case '--resume':
+        options.resumeSessionId = String(takeValue(rest, index, '--resume') ?? '').trim();
+        index += 1;
+        break;
+      case '--skill-candidate-limit':
+        options.skillCandidateLimit = parsePositiveInteger(
+          takeValue(rest, index, '--skill-candidate-limit'),
+          '--skill-candidate-limit'
+        );
+        index += 1;
+        break;
+      case '--draft-id':
+        options.draftId = String(takeValue(rest, index, '--draft-id') ?? '').trim();
+        index += 1;
+        break;
+      case '--output':
+        options.outputPath = String(takeValue(rest, index, '--output') ?? '').trim();
+        index += 1;
+        break;
+      case '--json':
+        options.json = true;
+        break;
+      default:
+        throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+
+  options.provider = normalizeTeamProvider(options.provider);
+  options.clientId = TEAM_PROVIDER_CLIENT_MAP[options.provider];
+  if (!options.sessionId && options.resumeSessionId) {
+    options.sessionId = options.resumeSessionId;
+  }
+  if (options.action !== 'export' && options.outputPath) {
+    throw new Error('--output is only supported by team skill-candidates export');
+  }
+
+  return {
+    mode: help ? 'help' : 'command',
+    help,
+    command: 'team',
+    options,
+  };
+}
+
 function parseTeamArgs(argv) {
   const rest = argv.slice(1);
   const subcommand = rest[0] && !rest[0].startsWith('-') ? String(rest[0]).trim().toLowerCase() : '';
@@ -442,6 +601,9 @@ function parseTeamArgs(argv) {
   }
   if (subcommand === 'history') {
     return parseTeamHistoryArgs(argv);
+  }
+  if (subcommand === 'skill-candidates') {
+    return parseTeamSkillCandidatesArgs(argv);
   }
 
   const options = createDefaultTeamOptions();

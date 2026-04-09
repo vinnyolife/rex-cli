@@ -242,6 +242,24 @@ async function main() {
       }
       return;
     }
+    if (parsed.options.subcommand === 'skill-candidates') {
+      if (parsed.options.action === 'list') {
+        const { runTeamSkillCandidatesList } = await import('./lib/lifecycle/team-ops.mjs');
+        const result = await runTeamSkillCandidatesList(parsed.options, { rootDir });
+        if (result.exitCode !== 0) {
+          process.exitCode = result.exitCode;
+        }
+        return;
+      }
+      if (parsed.options.action === 'export') {
+        const { runTeamSkillCandidatesExport } = await import('./lib/lifecycle/team-ops.mjs');
+        const result = await runTeamSkillCandidatesExport(parsed.options, { rootDir });
+        if (result.exitCode !== 0) {
+          process.exitCode = result.exitCode;
+        }
+        return;
+      }
+    }
 
     const { runOrchestrate } = await import('./lib/lifecycle/orchestrate.mjs');
     const runtimeEnv = buildTeamRuntimeEnv(parsed.options, process.env);

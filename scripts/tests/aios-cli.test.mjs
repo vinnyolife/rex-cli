@@ -241,6 +241,27 @@ test('parseArgs accepts hud command options', () => {
   assert.equal(showSkillCandidates.command, 'hud');
   assert.equal(showSkillCandidates.options.showSkillCandidates, true);
   assert.equal(showSkillCandidates.options.skillCandidateLimit, 0);
+  assert.equal(showSkillCandidates.options.skillCandidateView, 'inline');
+
+  const showSkillCandidatesDetail = parseArgs(['hud', '--show-skill-candidates', 'detail']);
+  assert.equal(showSkillCandidatesDetail.command, 'hud');
+  assert.equal(showSkillCandidatesDetail.options.showSkillCandidates, true);
+  assert.equal(showSkillCandidatesDetail.options.skillCandidateView, 'detail');
+
+  const skillCandidateView = parseArgs(['hud', '--skill-candidate-view', 'detail']);
+  assert.equal(skillCandidateView.command, 'hud');
+  assert.equal(skillCandidateView.options.showSkillCandidates, true);
+  assert.equal(skillCandidateView.options.skillCandidateView, 'detail');
+
+  const patchTemplateExport = parseArgs(['hud', '--export-skill-candidate-patch-template']);
+  assert.equal(patchTemplateExport.command, 'hud');
+  assert.equal(patchTemplateExport.options.showSkillCandidates, true);
+  assert.equal(patchTemplateExport.options.exportSkillCandidatePatchTemplate, true);
+
+  const draftIdFilter = parseArgs(['hud', '--draft-id', 'draft.skill.repeat-blocked.runtime-error']);
+  assert.equal(draftIdFilter.command, 'hud');
+  assert.equal(draftIdFilter.options.showSkillCandidates, true);
+  assert.equal(draftIdFilter.options.draftId, 'draft.skill.repeat-blocked.runtime-error');
 
   const skillCandidateLimit = parseArgs(['hud', '--skill-candidate-limit', '4']);
   assert.equal(skillCandidateLimit.command, 'hud');
@@ -298,12 +319,40 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(statusDefaults.options.preset, 'focused');
   assert.equal(statusDefaults.options.watch, false);
   assert.equal(statusDefaults.options.showSkillCandidates, false);
+  assert.equal(statusDefaults.options.skillCandidateView, 'inline');
+  assert.equal(statusDefaults.options.exportSkillCandidatePatchTemplate, false);
+  assert.equal(statusDefaults.options.draftId, '');
 
   const statusShowSkillCandidates = parseArgs(['team', 'status', '--show-skill-candidates']);
   assert.equal(statusShowSkillCandidates.command, 'team');
   assert.equal(statusShowSkillCandidates.options.subcommand, 'status');
   assert.equal(statusShowSkillCandidates.options.showSkillCandidates, true);
   assert.equal(statusShowSkillCandidates.options.skillCandidateLimit, 0);
+  assert.equal(statusShowSkillCandidates.options.skillCandidateView, 'inline');
+
+  const statusShowSkillCandidatesDetail = parseArgs(['team', 'status', '--show-skill-candidates', 'detail']);
+  assert.equal(statusShowSkillCandidatesDetail.command, 'team');
+  assert.equal(statusShowSkillCandidatesDetail.options.subcommand, 'status');
+  assert.equal(statusShowSkillCandidatesDetail.options.showSkillCandidates, true);
+  assert.equal(statusShowSkillCandidatesDetail.options.skillCandidateView, 'detail');
+
+  const statusSkillCandidateView = parseArgs(['team', 'status', '--skill-candidate-view', 'detail']);
+  assert.equal(statusSkillCandidateView.command, 'team');
+  assert.equal(statusSkillCandidateView.options.subcommand, 'status');
+  assert.equal(statusSkillCandidateView.options.showSkillCandidates, true);
+  assert.equal(statusSkillCandidateView.options.skillCandidateView, 'detail');
+
+  const statusPatchTemplateExport = parseArgs(['team', 'status', '--export-skill-candidate-patch-template']);
+  assert.equal(statusPatchTemplateExport.command, 'team');
+  assert.equal(statusPatchTemplateExport.options.subcommand, 'status');
+  assert.equal(statusPatchTemplateExport.options.showSkillCandidates, true);
+  assert.equal(statusPatchTemplateExport.options.exportSkillCandidatePatchTemplate, true);
+
+  const statusDraftIdFilter = parseArgs(['team', 'status', '--draft-id', 'draft.skill.repeat-blocked.runtime-error']);
+  assert.equal(statusDraftIdFilter.command, 'team');
+  assert.equal(statusDraftIdFilter.options.subcommand, 'status');
+  assert.equal(statusDraftIdFilter.options.showSkillCandidates, true);
+  assert.equal(statusDraftIdFilter.options.draftId, 'draft.skill.repeat-blocked.runtime-error');
 
   const statusSkillCandidateLimit = parseArgs(['team', 'status', '--skill-candidate-limit', '3']);
   assert.equal(statusSkillCandidateLimit.command, 'team');
@@ -371,6 +420,7 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(historyDefaults.options.qualityCategory, '');
   assert.equal(historyDefaults.options.qualityCategoryPrefix, '');
   assert.equal(historyDefaults.options.qualityCategoryPrefixMode, 'any');
+  assert.equal(historyDefaults.options.draftId, '');
 
   const history = parseArgs([
     'team',
@@ -398,6 +448,62 @@ test('parseArgs accepts team status/history subcommands', () => {
   assert.equal(history.options.qualityCategory, 'quality-logs');
   assert.equal(history.options.qualityCategoryPrefix, 'quality-, contextdb-quality-');
   assert.equal(history.options.qualityCategoryPrefixMode, 'all');
+
+  const historyDraftId = parseArgs(['team', 'history', '--draft-id', 'draft.skill.repeat-blocked.runtime-error']);
+  assert.equal(historyDraftId.command, 'team');
+  assert.equal(historyDraftId.options.subcommand, 'history');
+  assert.equal(historyDraftId.options.draftId, 'draft.skill.repeat-blocked.runtime-error');
+
+  const skillCandidatesExport = parseArgs([
+    'team',
+    'skill-candidates',
+    'export',
+    '--provider',
+    'claude',
+    '--session',
+    'session-123',
+    '--skill-candidate-limit',
+    '2',
+    '--draft-id',
+    'draft.skill.repeat-blocked.runtime-error',
+    '--output',
+    'tmp/skill-candidates/export.md',
+    '--json',
+  ]);
+  assert.equal(skillCandidatesExport.command, 'team');
+  assert.equal(skillCandidatesExport.options.subcommand, 'skill-candidates');
+  assert.equal(skillCandidatesExport.options.action, 'export');
+  assert.equal(skillCandidatesExport.options.provider, 'claude');
+  assert.equal(skillCandidatesExport.options.clientId, 'claude-code');
+  assert.equal(skillCandidatesExport.options.sessionId, 'session-123');
+  assert.equal(skillCandidatesExport.options.skillCandidateLimit, 2);
+  assert.equal(skillCandidatesExport.options.draftId, 'draft.skill.repeat-blocked.runtime-error');
+  assert.equal(skillCandidatesExport.options.outputPath, 'tmp/skill-candidates/export.md');
+  assert.equal(skillCandidatesExport.options.json, true);
+
+  const skillCandidatesList = parseArgs([
+    'team',
+    'skill-candidates',
+    'list',
+    '--provider',
+    'gemini',
+    '--session',
+    'session-456',
+    '--skill-candidate-limit',
+    '3',
+    '--draft-id',
+    'draft.skill.repeat-blocked.runtime-error',
+    '--json',
+  ]);
+  assert.equal(skillCandidatesList.command, 'team');
+  assert.equal(skillCandidatesList.options.subcommand, 'skill-candidates');
+  assert.equal(skillCandidatesList.options.action, 'list');
+  assert.equal(skillCandidatesList.options.provider, 'gemini');
+  assert.equal(skillCandidatesList.options.clientId, 'gemini-cli');
+  assert.equal(skillCandidatesList.options.sessionId, 'session-456');
+  assert.equal(skillCandidatesList.options.skillCandidateLimit, 3);
+  assert.equal(skillCandidatesList.options.draftId, 'draft.skill.repeat-blocked.runtime-error');
+  assert.equal(skillCandidatesList.options.json, true);
 });
 
 test('parseArgs rejects invalid mode', () => {
@@ -423,6 +529,34 @@ test('parseArgs rejects invalid team history quality prefix mode', () => {
   assert.throws(
     () => parseArgs(['team', 'history', '--quality-category-prefix-mode', 'strict']),
     /--quality-category-prefix-mode must be one of: any, all/
+  );
+});
+
+test('parseArgs rejects invalid team status skill-candidate view', () => {
+  assert.throws(
+    () => parseArgs(['team', 'status', '--skill-candidate-view', 'verbose']),
+    /--skill-candidate-view must be one of: inline, detail/
+  );
+});
+
+test('parseArgs rejects invalid team skill-candidates action', () => {
+  assert.throws(
+    () => parseArgs(['team', 'skill-candidates', 'sync']),
+    /team skill-candidates action must be one of: list, export/
+  );
+});
+
+test('parseArgs rejects --output for team skill-candidates list', () => {
+  assert.throws(
+    () => parseArgs(['team', 'skill-candidates', 'list', '--output', 'tmp/skill-candidates/export.md']),
+    /--output is only supported by team skill-candidates export/
+  );
+});
+
+test('parseArgs rejects invalid hud skill-candidate view', () => {
+  assert.throws(
+    () => parseArgs(['hud', '--skill-candidate-view', 'verbose']),
+    /--skill-candidate-view must be one of: inline, detail/
   );
 });
 

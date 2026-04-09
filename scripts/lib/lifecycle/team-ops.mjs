@@ -1,6 +1,13 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
 import { listContextDbSessions, readHudDispatchSummary, readHudState } from '../hud/state.mjs';
 import { normalizeHudPreset, renderHud } from '../hud/render.mjs';
-import { formatSkillCandidateDetails } from '../hud/skill-candidates.mjs';
+import {
+  filterSkillCandidateState,
+  formatSkillCandidateDetails,
+  formatSkillCandidatePatchTemplateDocument,
+} from '../hud/skill-candidates.mjs';
 import { buildWatchMeta } from '../hud/watch-meta.mjs';
 import { resolveWatchCadence } from '../hud/watch-cadence.mjs';
 import { createThrottledWatchRender, watchRenderLoop } from '../hud/watch.mjs';
@@ -9,6 +16,7 @@ const FAST_WATCH_DATA_REFRESH_MS = 1000;
 const DEFAULT_SKILL_CANDIDATE_LIMIT = 6;
 const FAST_WATCH_MINIMAL_SKILL_CANDIDATE_LIMIT = 3;
 const MAX_SKILL_CANDIDATE_LIMIT = 20;
+const SKILL_CANDIDATE_VIEWS = new Set(['inline', 'detail']);
 
 function normalizeText(value) {
   return String(value ?? '').trim();
@@ -16,6 +24,21 @@ function normalizeText(value) {
 
 function normalizeCounter(value) {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function toPosixPath(filePath = '') {
+  return String(filePath || '').replace(/\\/g, '/');
+}
+
+function normalizeSkillCandidateView(value, fallback = 'inline') {
+  const normalized = normalizeText(value).toLowerCase();
+  if (SKILL_CANDIDATE_VIEWS.has(normalized)) return normalized;
+  if (normalized === 'list') return 'detail';
+  return fallback;
+}
+
+function formatArtifactTimestamp(ts = new Date()) {
+  return ts.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
 function normalizeConcurrency(value, fallback = 4) {
@@ -114,12 +137,17 @@ async function mapWithConcurrency(items, concurrency, mapper) {
 export function resolveStatusSkillCandidateOptions({
   showSkillCandidates = false,
   requestedSkillCandidateLimit = 0,
+  skillCandidateView = 'inline',
+  exportSkillCandidatePatchTemplate = false,
+  draftId = '',
   fastWatchMinimal = false,
 } = {}) {
   const requestedLimit = Number.isFinite(requestedSkillCandidateLimit)
     ? Math.max(0, Math.floor(requestedSkillCandidateLimit))
     : 0;
-  const shouldShowSkillCandidates = showSkillCandidates === true || requestedLimit > 0;
+  const normalizedDraftId = normalizeText(draftId);
+  const shouldExportPatchTemplate = exportSkillCandidatePatchTemplate === true;
+  const shouldShowSkillCandidates = showSkillCandidates === true || requestedLimit > 0 || shouldExportPatchTemplate || Boolean(normalizedDraftId);
   const boundedRequestedLimit = Math.min(MAX_SKILL_CANDIDATE_LIMIT, requestedLimit);
   const defaultLimit = fastWatchMinimal
     ? FAST_WATCH_MINIMAL_SKILL_CANDIDATE_LIMIT
@@ -127,10 +155,93 @@ export function resolveStatusSkillCandidateOptions({
   const skillCandidateLimit = shouldShowSkillCandidates
     ? Math.max(1, boundedRequestedLimit || defaultLimit)
     : 0;
+  const resolvedSkillCandidateView = shouldShowSkillCandidates
+    ? normalizeSkillCandidateView(skillCandidateView, 'inline')
+    : 'inline';
 
   return {
     showSkillCandidates: shouldShowSkillCandidates,
     skillCandidateLimit,
+    skillCandidateView: resolvedSkillCandidateView,
+    exportSkillCandidatePatchTemplate: shouldExportPatchTemplate && shouldShowSkillCandidates,
+    draftId: normalizedDraftId,
+  };
+}
+
+function buildSkillCandidatePatchTemplateArtifactPath(sessionId, { stamp = '' } = {}) {
+  const normalizedSessionId = normalizeText(sessionId);
+  const normalizedStamp = normalizeText(stamp) || formatArtifactTimestamp();
+  return path.join(
+    'memory',
+    'context-db',
+    'sessions',
+    normalizedSessionId,
+    'artifacts',
+    `skill-candidate-patch-template-${normalizedStamp}.md`
+  );
+}
+
+function resolveSkillCandidatePatchTemplateOutputPath({
+  rootDir = '',
+  sessionId = '',
+  generatedAt = '',
+  outputPath = '',
+} = {}) {
+  const normalizedRootDir = normalizeText(rootDir) || process.cwd();
+  const normalizedOutputPath = normalizeText(outputPath);
+  if (normalizedOutputPath) {
+    const normalizedPath = path.normalize(normalizedOutputPath);
+    if (path.isAbsolute(normalizedPath)) {
+      return {
+        artifactPath: toPosixPath(normalizedPath),
+        artifactAbsPath: normalizedPath,
+      };
+    }
+    return {
+      artifactPath: toPosixPath(normalizedPath),
+      artifactAbsPath: path.join(normalizedRootDir, normalizedPath),
+    };
+  }
+
+  const artifactPath = buildSkillCandidatePatchTemplateArtifactPath(sessionId, {
+    stamp: formatArtifactTimestamp(new Date(generatedAt)),
+  });
+  return {
+    artifactPath: toPosixPath(artifactPath),
+    artifactAbsPath: path.join(normalizedRootDir, artifactPath),
+  };
+}
+
+async function persistSkillCandidatePatchTemplateArtifact({
+  rootDir,
+  state,
+  skillCandidateLimit = DEFAULT_SKILL_CANDIDATE_LIMIT,
+  draftId = '',
+  outputPath = '',
+} = {}) {
+  const sessionId = normalizeText(state?.selection?.sessionId) || normalizeText(state?.session?.sessionId);
+  if (!sessionId) return null;
+
+  const generatedAt = new Date().toISOString();
+  const resolvedOutputPath = resolveSkillCandidatePatchTemplateOutputPath({
+    rootDir,
+    sessionId,
+    generatedAt,
+    outputPath,
+  });
+  const content = formatSkillCandidatePatchTemplateDocument(state, {
+    rootDir,
+    limit: skillCandidateLimit,
+    generatedAt,
+    draftId,
+  });
+
+  await fs.mkdir(path.dirname(resolvedOutputPath.artifactAbsPath), { recursive: true });
+  await fs.writeFile(resolvedOutputPath.artifactAbsPath, `${content}\n`, 'utf8');
+
+  return {
+    artifactPath: resolvedOutputPath.artifactPath,
+    generatedAt,
   };
 }
 
@@ -138,17 +249,45 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
   const sessionId = normalizeText(rawOptions.sessionId || rawOptions.resumeSessionId);
   const provider = normalizeProvider(rawOptions.provider);
   const preset = normalizeHudPreset(rawOptions.preset || 'focused');
-  const watch = rawOptions.watch === true;
+  let watch = rawOptions.watch === true;
   const fast = rawOptions.fast === true;
   const json = rawOptions.json === true;
   const watchCadence = resolveWatchCadence(rawOptions.intervalMs, { fallbackMs: 1000 });
   const intervalMs = watchCadence.renderIntervalMs;
-  const fastWatchMinimal = fast && watch && !json && preset === 'minimal';
-  const { showSkillCandidates, skillCandidateLimit } = resolveStatusSkillCandidateOptions({
+  let fastWatchMinimal = fast && watch && !json && preset === 'minimal';
+  let {
+    showSkillCandidates,
+    skillCandidateLimit,
+    skillCandidateView,
+    exportSkillCandidatePatchTemplate,
+    draftId,
+  } = resolveStatusSkillCandidateOptions({
     showSkillCandidates: rawOptions.showSkillCandidates === true,
     requestedSkillCandidateLimit: rawOptions.skillCandidateLimit,
+    skillCandidateView: rawOptions.skillCandidateView,
+    exportSkillCandidatePatchTemplate: rawOptions.exportSkillCandidatePatchTemplate === true,
+    draftId: rawOptions.draftId,
     fastWatchMinimal,
   });
+  if (watch && exportSkillCandidatePatchTemplate) {
+    io.log('[warn] team status --watch is ignored when --export-skill-candidate-patch-template is set.');
+    watch = false;
+    fastWatchMinimal = false;
+    ({
+      showSkillCandidates,
+      skillCandidateLimit,
+      skillCandidateView,
+      exportSkillCandidatePatchTemplate,
+      draftId,
+    } = resolveStatusSkillCandidateOptions({
+      showSkillCandidates: rawOptions.showSkillCandidates === true,
+      requestedSkillCandidateLimit: rawOptions.skillCandidateLimit,
+      skillCandidateView: rawOptions.skillCandidateView,
+      exportSkillCandidatePatchTemplate: rawOptions.exportSkillCandidatePatchTemplate === true,
+      draftId: rawOptions.draftId,
+      fastWatchMinimal,
+    }));
+  }
   const dataRefreshMs = fastWatchMinimal
     ? Math.max(intervalMs, FAST_WATCH_DATA_REFRESH_MS)
     : intervalMs;
@@ -166,14 +305,19 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
       fast: fastWatchMinimal,
       skillCandidateLimit,
     });
+    const filteredState = filterSkillCandidateState(state, { draftId });
     if (json) {
-      io.log(JSON.stringify(state, null, 2));
-      return { exitCode: state.selection?.sessionId ? 0 : 1 };
+      if (exportSkillCandidatePatchTemplate) {
+        io.log('[warn] team status --export-skill-candidate-patch-template is ignored when --json is set.');
+      }
+      io.log(JSON.stringify(filteredState, null, 2));
+      return { exitCode: filteredState.selection?.sessionId ? 0 : 1 };
     }
-    const hudText = renderHud(state, {
+
+    const hudText = renderHud(filteredState, {
       preset,
       watchMeta: watch
-        ? buildWatchMeta(state, {
+        ? buildWatchMeta(filteredState, {
           renderIntervalMs: intervalMs,
           renderIntervalLabel: watchCadence.renderIntervalLabel,
           dataRefreshMs,
@@ -183,10 +327,32 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
         : null,
     }).trimEnd();
     const skillCandidateText = showSkillCandidates
-      ? formatSkillCandidateDetails(state, { limit: skillCandidateLimit })
+      ? formatSkillCandidateDetails(filteredState, {
+        limit: skillCandidateLimit,
+        standalone: skillCandidateView === 'detail',
+      })
       : '';
-    io.log([hudText, skillCandidateText].filter(Boolean).join('\n') + '\n');
-    return { exitCode: state.selection?.sessionId ? 0 : 1 };
+
+    const outputBlocks = skillCandidateView === 'detail'
+      ? [skillCandidateText]
+      : [hudText, skillCandidateText];
+
+    if (exportSkillCandidatePatchTemplate) {
+      const artifact = await persistSkillCandidatePatchTemplateArtifact({
+        rootDir,
+        state: filteredState,
+        skillCandidateLimit,
+        draftId,
+      });
+      if (artifact?.artifactPath) {
+        outputBlocks.push(`Skill candidate patch template artifact: ${artifact.artifactPath}`);
+      } else {
+        outputBlocks.push('Skill candidate patch template export skipped: no session selected.');
+      }
+    }
+
+    io.log(outputBlocks.filter(Boolean).join('\n') + '\n');
+    return { exitCode: filteredState.selection?.sessionId ? 0 : 1 };
   };
 
   if (!watch || json) {
@@ -204,9 +370,10 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
       fast: fastWatchMinimal,
       skillCandidateLimit,
     });
-    const hudText = renderHud(state, {
+    const filteredState = filterSkillCandidateState(state, { draftId });
+    const hudText = renderHud(filteredState, {
       preset,
-      watchMeta: buildWatchMeta(state, {
+      watchMeta: buildWatchMeta(filteredState, {
         renderIntervalMs: intervalMs,
         renderIntervalLabel: watchCadence.renderIntervalLabel,
         dataRefreshMs,
@@ -215,9 +382,15 @@ export async function runTeamStatus(rawOptions = {}, { rootDir, io = console, en
       }),
     }).trimEnd();
     const skillCandidateText = showSkillCandidates
-      ? formatSkillCandidateDetails(state, { limit: skillCandidateLimit })
+      ? formatSkillCandidateDetails(filteredState, {
+        limit: skillCandidateLimit,
+        standalone: skillCandidateView === 'detail',
+      })
       : '';
-    return [hudText, skillCandidateText].filter(Boolean).join('\n') + '\n';
+    const outputBlocks = skillCandidateView === 'detail'
+      ? [skillCandidateText]
+      : [hudText, skillCandidateText];
+    return outputBlocks.filter(Boolean).join('\n') + '\n';
   };
 
   const watchRender = fastWatchMinimal
@@ -423,6 +596,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   );
   const qualityCategoryPrefixMode = normalizeQualityCategoryPrefixMode(rawOptions.qualityCategoryPrefixMode);
   const qualityCategoryPrefixEnabled = qualityCategoryPrefixFilters.length > 0;
+  const draftIdFilter = normalizeText(rawOptions.draftId);
   const sinceIso = normalizeText(rawOptions.since);
   const statusFilter = normalizeText(rawOptions.status);
 
@@ -432,7 +606,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
       ? 'gemini-cli'
       : 'codex-cli';
 
-  const scanLimit = (sinceIso || statusFilter || qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled)
+  const scanLimit = (sinceIso || statusFilter || qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled || draftIdFilter)
     ? Math.max(resolvedLimit, resolvedLimit * 8)
     : resolvedLimit;
   const sessions = await listContextDbSessions(rootDir, { agent, limit: scanLimit });
@@ -536,9 +710,12 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   const filteredByCategoryPrefix = qualityCategoryPrefixEnabled
     ? filteredByCategory.filter((record) => matchesQualityCategoryPrefix(record, qualityCategoryPrefixFilters, qualityCategoryPrefixMode))
     : filteredByCategory;
-  const selectedRecords = (qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled)
-    ? filteredByCategoryPrefix.slice(0, resolvedLimit)
+  const filteredByDraftId = draftIdFilter
+    ? filteredByCategoryPrefix.filter((record) => normalizeText(record?.skillCandidate?.sourceDraftTargetId) === draftIdFilter)
     : filteredByCategoryPrefix;
+  const selectedRecords = (qualityFailedOnly || qualityCategoryFilter || qualityCategoryPrefixEnabled || draftIdFilter)
+    ? filteredByDraftId.slice(0, resolvedLimit)
+    : filteredByDraftId;
   const summary = summarizeHistory(selectedRecords);
   if (json) {
     io.log(JSON.stringify({
@@ -553,6 +730,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
       qualityCategoryPrefix: qualityCategoryPrefix || null,
       qualityCategoryPrefixes: qualityCategoryPrefixEnabled ? qualityCategoryPrefixFilters : null,
       qualityCategoryPrefixMode,
+      draftId: draftIdFilter || null,
       since: sinceIso || null,
       status: statusFilter || null,
       summary,
@@ -566,6 +744,7 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   if (qualityCategoryFilter) filterLabels.push(`quality-category=${qualityCategory}`);
   if (qualityCategoryPrefixEnabled) filterLabels.push(`quality-category-prefix=${qualityCategoryPrefixFilters.join(',')}`);
   if (qualityCategoryPrefixEnabled) filterLabels.push(`quality-category-prefix-mode=${qualityCategoryPrefixMode}`);
+  if (draftIdFilter) filterLabels.push(`draft-id=${draftIdFilter}`);
 
   const lines = [
     `AIOS Team History (provider=${provider} agent=${agent})`,
@@ -575,4 +754,144 @@ export async function runTeamHistory(rawOptions = {}, { rootDir, io = console } 
   ];
   io.log(lines.join('\n') + '\n');
   return { exitCode: 0 };
+}
+
+function collectSkillCandidateItems(state = null, limit = DEFAULT_SKILL_CANDIDATE_LIMIT) {
+  const resolvedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.floor(limit))
+    : DEFAULT_SKILL_CANDIDATE_LIMIT;
+  const recent = Array.isArray(state?.recentSkillCandidates)
+    ? state.recentSkillCandidates
+    : [];
+  if (recent.length > 0) {
+    return recent.slice(0, resolvedLimit);
+  }
+  const latest = state?.latestSkillCandidate && typeof state.latestSkillCandidate === 'object'
+    ? [state.latestSkillCandidate]
+    : [];
+  return latest.slice(0, resolvedLimit);
+}
+
+function mapSkillCandidateRecord(candidate = null) {
+  return {
+    skillId: normalizeText(candidate?.skillId) || null,
+    scope: normalizeText(candidate?.scope) || null,
+    failureClass: normalizeText(candidate?.failureClass) || null,
+    lessonKind: normalizeText(candidate?.lessonKind) || null,
+    lessonCount: normalizeCounter(candidate?.lessonCount),
+    reviewMode: normalizeText(candidate?.reviewMode) || null,
+    reviewStatus: normalizeText(candidate?.reviewStatus) || null,
+    sourceDraftTargetId: normalizeText(candidate?.sourceDraftTargetId) || null,
+    sourceArtifactPath: normalizeText(candidate?.sourceArtifactPath) || null,
+    artifactPath: normalizeText(candidate?.artifactPath) || null,
+    patchHint: normalizeText(candidate?.patchHint) || null,
+  };
+}
+
+export async function runTeamSkillCandidatesList(rawOptions = {}, { rootDir, io = console } = {}) {
+  const provider = normalizeProvider(rawOptions.provider);
+  const sessionId = normalizeText(rawOptions.sessionId || rawOptions.resumeSessionId);
+  const json = rawOptions.json === true;
+  const draftId = normalizeText(rawOptions.draftId);
+  const { skillCandidateLimit } = resolveStatusSkillCandidateOptions({
+    showSkillCandidates: true,
+    requestedSkillCandidateLimit: rawOptions.skillCandidateLimit,
+    skillCandidateView: 'detail',
+    exportSkillCandidatePatchTemplate: false,
+    draftId,
+    fastWatchMinimal: false,
+  });
+
+  const state = await readHudState({
+    rootDir,
+    sessionId,
+    provider,
+    fast: false,
+    skillCandidateLimit,
+  });
+  const filteredState = filterSkillCandidateState(state, { draftId });
+  const resolvedSessionId = normalizeText(filteredState?.selection?.sessionId) || normalizeText(filteredState?.session?.sessionId);
+  const candidates = collectSkillCandidateItems(filteredState, skillCandidateLimit).map((candidate) => mapSkillCandidateRecord(candidate));
+  const result = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    provider,
+    sessionId: resolvedSessionId || null,
+    draftId: draftId || null,
+    skillCandidateLimit,
+    candidateCount: candidates.length,
+    candidates,
+  };
+
+  if (json) {
+    io.log(JSON.stringify(result, null, 2));
+  } else {
+    io.log(`${formatSkillCandidateDetails(filteredState, {
+      limit: skillCandidateLimit,
+      standalone: true,
+      draftId,
+    })}\n`);
+  }
+
+  return { exitCode: resolvedSessionId ? 0 : 1, result };
+}
+
+export async function runTeamSkillCandidatesExport(rawOptions = {}, { rootDir, io = console } = {}) {
+  const provider = normalizeProvider(rawOptions.provider);
+  const sessionId = normalizeText(rawOptions.sessionId || rawOptions.resumeSessionId);
+  const json = rawOptions.json === true;
+  const draftId = normalizeText(rawOptions.draftId);
+  const outputPath = normalizeText(rawOptions.outputPath);
+  const { skillCandidateLimit } = resolveStatusSkillCandidateOptions({
+    showSkillCandidates: true,
+    requestedSkillCandidateLimit: rawOptions.skillCandidateLimit,
+    skillCandidateView: 'detail',
+    exportSkillCandidatePatchTemplate: true,
+    draftId,
+    fastWatchMinimal: false,
+  });
+
+  const state = await readHudState({
+    rootDir,
+    sessionId,
+    provider,
+    fast: false,
+    skillCandidateLimit,
+  });
+  const filteredState = filterSkillCandidateState(state, { draftId });
+  const artifact = await persistSkillCandidatePatchTemplateArtifact({
+    rootDir,
+    state: filteredState,
+    skillCandidateLimit,
+    draftId,
+    outputPath,
+  });
+
+  const candidates = collectSkillCandidateItems(filteredState, skillCandidateLimit);
+  const candidateCount = candidates.length;
+  const resolvedSessionId = normalizeText(filteredState?.selection?.sessionId) || normalizeText(filteredState?.session?.sessionId);
+  const exported = Boolean(artifact?.artifactPath);
+  const result = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    provider,
+    sessionId: resolvedSessionId || null,
+    draftId: draftId || null,
+    skillCandidateLimit,
+    candidateCount,
+    exported,
+    requestedOutputPath: outputPath || null,
+    artifactPath: artifact?.artifactPath || null,
+    message: exported
+      ? `Skill candidate patch template artifact: ${artifact.artifactPath}`
+      : 'Skill candidate patch template export skipped: no session selected.',
+  };
+
+  if (json) {
+    io.log(JSON.stringify(result, null, 2));
+  } else {
+    io.log(result.message);
+  }
+
+  return { exitCode: exported ? 0 : 1, result };
 }
