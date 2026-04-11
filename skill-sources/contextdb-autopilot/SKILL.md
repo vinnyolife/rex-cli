@@ -1,6 +1,6 @@
 ---
 name: contextdb-autopilot
-description: Use when running tasks in Codex CLI, Claude Code, or Gemini CLI and you need automatic context persistence (init/session/event/checkpoint/context-pack) without manual contextdb commands.
+description: Use when running tasks in Codex CLI, Claude Code, Gemini CLI, or opencode and you need automatic context persistence (init/session/event/checkpoint/context-pack) plus interactive auto-routing without manual contextdb commands.
 ---
 
 # ContextDB Autopilot
@@ -12,9 +12,10 @@ Script path: `scripts/ctx-agent.sh`
 Runtime core: `scripts/ctx-agent-core.mjs` (single source for sh/mjs wrappers)
 
 ## When to Use
-- You want cross-CLI memory continuity (`codex`, `claude`, `gemini`) in the same project.
+- You want cross-CLI memory continuity (`codex`, `claude`, `gemini`, `opencode`) in the same project.
 - You need zero-manual context DB operations per task run.
 - You want each run to auto-write user event, assistant event, checkpoint, and refreshed context packet.
+- You want interactive wrappers to auto-seed route-aware startup prompts so the agent can classify `single/subagent/team` and trigger AIOS route commands without user-entered trigger commands.
 
 ## Required Pattern
 Use one-shot mode (`--prompt`) for full automation.
@@ -23,6 +24,7 @@ Use one-shot mode (`--prompt`) for full automation.
 scripts/ctx-agent.sh --agent codex-cli --project rex-cli --prompt "继续上次任务，先做最小变更"
 scripts/ctx-agent.sh --agent claude-code --project rex-cli --prompt "延续当前会话并输出下一步"
 scripts/ctx-agent.sh --agent gemini-cli --project rex-cli --prompt "基于已有上下文继续执行"
+scripts/ctx-agent.sh --agent opencode-cli --project rex-cli --prompt "继续当前任务并执行下一步"
 ```
 
 ## Session Control
@@ -32,6 +34,12 @@ scripts/ctx-agent.sh --agent gemini-cli --project rex-cli --prompt "基于已有
 - Disable checkpoint (rare): `--no-checkpoint`
 - Disable auto bootstrap globally: `export AIOS_BOOTSTRAP_AUTO=0`
 - `CODEX_HOME` can be relative; wrappers normalize it against current working directory at runtime.
+
+Interactive wrapper route defaults:
+- Direct `codex`/`claude`/`gemini`/`opencode` startup now injects an auto-route prompt (`single/subagent/team`) by default.
+- Route execution defaults to live for team/subagent command templates.
+- `opencode` interactive flow falls back to a supported subagent runtime (`codex-cli` by default).
+- Override subagent runtime for routed commands with `CTXDB_ROUTE_SUBAGENT_CLIENT=<codex-cli|claude-code|gemini-cli>`.
 
 Bootstrap note:
 - On first run in a workspace, `ctx-agent` may auto-create `tasks/pending/task_<timestamp>_bootstrap_guidelines/*` and `tasks/.current-task` if both are empty.

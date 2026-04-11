@@ -597,6 +597,8 @@ After setup, the same behavior works in other git repositories too (they write t
 - Automatically performs: `init`, `session:latest/new`, `context:pack`
 - Scope: current git project root (`--workspace <git-root>`)
 - Best for normal interactive work with startup context resume
+- `codex` / `claude` / `gemini` / `opencode` wrappers now seed an auto-route startup prompt by default, so the agent can classify each request (`single/subagent/team`) and trigger `aios team` / `aios orchestrate` itself without manual user trigger
+- `opencode` uses a supported subagent runtime fallback (`codex-cli` by default, or `CTXDB_ROUTE_SUBAGENT_CLIENT=<codex-cli|claude-code|gemini-cli>`)
 - Note: in-CLI reset commands like `/new` (Codex) or `/clear` (Claude/Gemini) reset the conversation state. Exit and re-run the CLI to re-inject, or attach `memory/context-db/exports/latest-<agent>-context.md` as the first prompt.
 - Limitation: does not auto-write checkpoint after every turn
 

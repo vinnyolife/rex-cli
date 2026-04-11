@@ -9,6 +9,8 @@ import {
   buildWorkspaceMemoryOverlay,
   classifyOneShotFailure,
   isBetterSqlite3AbiMismatch,
+  resolveRoutedSubagentClient,
+  resolveTaskRouteDecision,
   shouldAutoRebuildNative,
 } from '../ctx-agent-core.mjs';
 import { runContextDbCli } from '../lib/contextdb-cli.mjs';
@@ -45,6 +47,10 @@ async function createFakeCodexCommand(marker = 'FAKE_CODEX_OK') {
 
 async function createFakeClaudeCommand(marker = 'FAKE_CLAUDE_OK') {
   return createFakeCliCommand('claude', marker);
+}
+
+async function createFakeGeminiCommand(marker = 'FAKE_GEMINI_OK') {
+  return createFakeCliCommand('gemini', marker);
 }
 
 async function createFakeOpenCodeCommand(marker = 'FAKE_OPENCODE_OK') {
@@ -94,6 +100,82 @@ test('classifyOneShotFailure recognizes timeout-like failures', () => {
 
 test('classifyOneShotFailure falls back to tool for generic failures', () => {
   assert.equal(classifyOneShotFailure('Unhandled exit=1'), 'tool');
+});
+
+test('resolveTaskRouteDecision honors explicit prompt route triggers', () => {
+  const team = resolveTaskRouteDecision({
+    prompt: '/team 同时改 CLI、测试和文档',
+    routeMode: 'auto',
+  });
+  assert.equal(team.routeMode, 'team');
+  assert.equal(team.taskPrompt, '同时改 CLI、测试和文档');
+  assert.equal(team.explicitTrigger, true);
+
+  const subagent = resolveTaskRouteDecision({
+    prompt: '/subagent 修复回归并走预检',
+    routeMode: 'single',
+  });
+  assert.equal(subagent.routeMode, 'subagent');
+  assert.equal(subagent.taskPrompt, '修复回归并走预检');
+  assert.equal(subagent.explicitTrigger, true);
+});
+
+test('resolveTaskRouteDecision auto-routes complex prompts to team', () => {
+  const decision = resolveTaskRouteDecision({
+    routeMode: 'auto',
+    prompt: [
+      '我们要并行推进一个多模块交付：',
+      '1. frontend 页面改版并补测试',
+      '2. backend API 改造和数据库迁移',
+      '3. 文档与发布清单同步',
+    ].join('\n'),
+  });
+  assert.equal(decision.routeMode, 'team');
+  assert.equal(decision.explicitTrigger, false);
+});
+
+test('resolveTaskRouteDecision auto-routes medium complexity prompts to subagent', () => {
+  const decision = resolveTaskRouteDecision({
+    routeMode: 'auto',
+    prompt: [
+      '请完成以下任务：',
+      '1. 修复登录重试逻辑',
+      '2. 增加测试并更新文档',
+    ].join('\n'),
+  });
+  assert.equal(decision.routeMode, 'subagent');
+  assert.equal(decision.explicitTrigger, false);
+});
+
+test('resolveRoutedSubagentClient falls back to provider-supported runtimes', () => {
+  assert.equal(
+    resolveRoutedSubagentClient({ agent: 'codex-cli', teamProvider: 'auto', env: {} }),
+    'codex-cli'
+  );
+  assert.equal(
+    resolveRoutedSubagentClient({ agent: 'claude-code', teamProvider: 'auto', env: {} }),
+    'claude-code'
+  );
+  assert.equal(
+    resolveRoutedSubagentClient({ agent: 'gemini-cli', teamProvider: 'auto', env: {} }),
+    'gemini-cli'
+  );
+  assert.equal(
+    resolveRoutedSubagentClient({ agent: 'opencode-cli', teamProvider: 'auto', env: {} }),
+    'codex-cli'
+  );
+  assert.equal(
+    resolveRoutedSubagentClient({ agent: 'opencode-cli', teamProvider: 'claude', env: {} }),
+    'claude-code'
+  );
+  assert.equal(
+    resolveRoutedSubagentClient({
+      agent: 'opencode-cli',
+      teamProvider: 'auto',
+      env: { CTXDB_ROUTE_SUBAGENT_CLIENT: 'gemini-cli' },
+    }),
+    'gemini-cli'
+  );
 });
 
 test('buildWorkspaceMemoryOverlay reads pinned and recent memos', async () => {
@@ -304,6 +386,60 @@ test('ctx-agent one-shot writes turn envelope metadata for prompt/response event
   }
 });
 
+test('ctx-agent one-shot dry-run route team prints trigger command', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-route-team-'));
+  const sessionId = 'ctx-route-team';
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'codex-cli',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify routed team dry-run trigger',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'codex-cli',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--route',
+        'team',
+        '--route-execute',
+        'dry-run',
+        '--prompt',
+        '并行改造 UI、API 和测试',
+        '--dry-run',
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[route\] mode=team/);
+    assert.match(result.stdout, /Command: node scripts\/aios\.mjs team --provider codex --workers 3 --task "并行改造 UI、API 和测试"/u);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('ctx-agent tolerates context:pack failures in interactive mode by still invoking the CLI', async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-pack-interactive-'));
   const sessionId = 'ctx-pack-failure-interactive';
@@ -360,6 +496,123 @@ test('ctx-agent tolerates context:pack failures in interactive mode by still inv
     assert.equal(result.status, 0);
     assert.match(result.stdout, /FAKE_CODEX_OK/);
     assert.match(result.stderr, /contextdb context:pack failed/i);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent interactive Codex mode appends env auto prompt to injected context', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-codex-auto-prompt-'));
+  const sessionId = 'ctx-codex-auto-prompt';
+  const fakeBin = await createFakeCodexCommand();
+  const autoPrompt = 'Auto-route request as single/subagent/team before planning.';
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'codex-cli',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify codex auto prompt injection',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'codex-cli',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CTXDB_AUTO_PROMPT: autoPrompt,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+        },
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Auto prompt: enabled \(env\)/u);
+    const payload = parseLastJsonPayload(result.stdout);
+    assert.equal(payload.marker, 'FAKE_CODEX_OK');
+    const promptArg = String(payload.argv.at(-1) || '');
+    assert.match(promptArg, /## Auto Prompt/u);
+    assert.match(promptArg, /Auto-route request as single\/subagent\/team before planning\./u);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ctx-agent interactive Gemini mode appends env auto prompt to injected context', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'aios-ctx-agent-gemini-auto-prompt-'));
+  const sessionId = 'ctx-gemini-auto-prompt';
+  const fakeBin = await createFakeGeminiCommand();
+  const autoPrompt = 'Auto-route request as single/subagent/team before planning.';
+
+  try {
+    runContextDbCli([
+      'session:new',
+      '--workspace',
+      workspaceRoot,
+      '--agent',
+      'gemini-cli',
+      '--project',
+      'tmp-project',
+      '--goal',
+      'Verify gemini auto prompt injection',
+      '--session-id',
+      sessionId,
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        'scripts/ctx-agent.mjs',
+        '--agent',
+        'gemini-cli',
+        '--workspace',
+        workspaceRoot,
+        '--project',
+        'tmp-project',
+        '--session',
+        sessionId,
+        '--no-bootstrap',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CTXDB_AUTO_PROMPT: autoPrompt,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`,
+        },
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Auto prompt: enabled \(env\)/u);
+    const payload = parseLastJsonPayload(result.stdout);
+    assert.equal(payload.marker, 'FAKE_GEMINI_OK');
+    assert.equal(payload.argv[0], '-i');
+    const promptArg = String(payload.argv[1] || '');
+    assert.match(promptArg, /## Auto Prompt/u);
+    assert.match(promptArg, /Auto-route request as single\/subagent\/team before planning\./u);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
@@ -533,7 +786,7 @@ test('ctx-agent one-shot OpenCode mode uses file-backed context handoff', async 
     assert.equal(payload.marker, 'FAKE_OPENCODE_OK');
     assert.equal(payload.argv[0], 'run');
     assert.match(payload.argv[1], /Read the context packet at/u);
-    assert.match(payload.argv[1], new RegExp(`${sessionId}-context\\.md`));
+    assert.match(payload.argv[1], new RegExp(`${sessionId}-context(?:-opencode)?\\.md`));
     assert.match(payload.argv[1], /Summarize the current status\./u);
     assert.doesNotMatch(payload.argv[1], /# Context Packet/u);
   } finally {
@@ -591,7 +844,7 @@ test('ctx-agent interactive OpenCode mode sends auto prompt via context packet f
     assert.equal(payload.marker, 'FAKE_OPENCODE_OK');
     assert.deepEqual(payload.argv.slice(0, 2), ['--prompt', payload.argv[1]]);
     assert.match(payload.argv[1], /Read the context packet at/u);
-    assert.match(payload.argv[1], new RegExp(`${sessionId}-context\\.md`));
+    assert.match(payload.argv[1], new RegExp(`${sessionId}-context(?:-opencode)?\\.md`));
     assert.match(
       payload.argv[1],
       /Continue from this state\. Preserve constraints, avoid repeating completed work, and update the next checkpoint when done\./u

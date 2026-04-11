@@ -59,6 +59,7 @@ async function createFakeRunner() {
     "const workspace = index >= 0 ? (args[index + 1] || '') : '';",
     "console.log(`RUNNER_WORKSPACE=${workspace}`);",
     "console.log(`RUNNER_ARGS=${JSON.stringify(args)}`);",
+    "console.log(`RUNNER_AUTO_PROMPT_JSON=${JSON.stringify(process.env.CTXDB_AUTO_PROMPT || '')}`);",
   ].join('\n'), 'utf8');
 
   if (process.platform === 'win32') {
@@ -119,6 +120,12 @@ function parseRunnerArgs(stdout) {
   const line = (stdout || '').trim().split(/\r?\n/).find((x) => x.startsWith('RUNNER_ARGS='));
   if (!line) return [];
   return JSON.parse(line.slice('RUNNER_ARGS='.length));
+}
+
+function parseRunnerAutoPrompt(stdout) {
+  const line = (stdout || '').trim().split(/\r?\n/).find((x) => x.startsWith('RUNNER_AUTO_PROMPT_JSON='));
+  if (!line) return '';
+  return JSON.parse(line.slice('RUNNER_AUTO_PROMPT_JSON='.length));
 }
 
 function parseLastJsonPayload(stdout) {
@@ -258,6 +265,101 @@ test('wrapped interactive runs do not get rewritten to one-shot continue prompts
   const runnerArgs = parseRunnerArgs(result.stdout);
   assert.equal(runnerArgs.includes('--prompt'), false);
   assert.equal(runnerArgs.at(-1), '--');
+});
+
+test('wrapped interactive codex runs inject route auto prompt by default', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-interactive-route-'));
+  const fakeBin = await createFakeCodexCommand();
+  const fakeRunner = await createFakeRunner();
+
+  const result = runBridge({
+    cwd,
+    pathPrefix: fakeBin,
+    args: [],
+    env: {
+      CTXDB_RUNNER: fakeRunner,
+      CTXDB_WRAP_MODE: 'all',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  const autoPrompt = parseRunnerAutoPrompt(result.stdout);
+  assert.match(autoPrompt, /Auto-route each new user request as single\/subagent\/team/u);
+  assert.match(autoPrompt, /node scripts\/aios\.mjs team --provider codex --workers 3 --task "<task>" --live/u);
+  assert.match(autoPrompt, /AIOS_EXECUTE_LIVE=1 AIOS_SUBAGENT_CLIENT=codex-cli node scripts\/aios\.mjs orchestrate feature --task "<task>" --dispatch local --execute live/u);
+});
+
+test('wrapped interactive codex runs preserve explicit CTXDB_AUTO_PROMPT overrides', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-interactive-auto-prompt-override-'));
+  const fakeBin = await createFakeCodexCommand();
+  const fakeRunner = await createFakeRunner();
+
+  const result = runBridge({
+    cwd,
+    pathPrefix: fakeBin,
+    args: [],
+    env: {
+      CTXDB_RUNNER: fakeRunner,
+      CTXDB_WRAP_MODE: 'all',
+      CTXDB_AUTO_PROMPT: 'custom-auto-prompt',
+    },
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(parseRunnerAutoPrompt(result.stdout), 'custom-auto-prompt');
+});
+
+test('wrapped interactive claude and gemini runs inject provider-specific route prompts', async () => {
+  const cases = [
+    { command: 'claude', agent: 'claude-code', expectedProvider: 'claude', expectedClient: 'claude-code' },
+    { command: 'gemini', agent: 'gemini-cli', expectedProvider: 'gemini', expectedClient: 'gemini-cli' },
+  ];
+
+  for (const item of cases) {
+    const cwd = await mkdtemp(path.join(os.tmpdir(), `aios-bridge-interactive-${item.command}-route-`));
+    const fakeBin = await createFakePassthroughCommand(item.command, `FAKE_${item.command.toUpperCase()}`);
+    const fakeRunner = await createFakeRunner();
+
+    const result = runBridge({
+      cwd,
+      pathPrefix: fakeBin,
+      command: item.command,
+      agent: item.agent,
+      args: [],
+      env: {
+        CTXDB_RUNNER: fakeRunner,
+        CTXDB_WRAP_MODE: 'all',
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const autoPrompt = parseRunnerAutoPrompt(result.stdout);
+    assert.match(autoPrompt, new RegExp(`node scripts/aios\\.mjs team --provider ${item.expectedProvider} --workers 3 --task "<task>" --live`));
+    assert.match(autoPrompt, new RegExp(`AIOS_EXECUTE_LIVE=1 AIOS_SUBAGENT_CLIENT=${item.expectedClient} node scripts/aios\\.mjs orchestrate feature --task "<task>" --dispatch local --execute live`));
+  }
+});
+
+test('wrapped interactive opencode runs fallback subagent client to codex-cli by default', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'aios-bridge-interactive-opencode-route-'));
+  const fakeBin = await createFakePassthroughCommand('opencode', 'FAKE_OPENCODE');
+  const fakeRunner = await createFakeRunner();
+
+  const result = runBridge({
+    cwd,
+    pathPrefix: fakeBin,
+    command: 'opencode',
+    agent: 'opencode-cli',
+    args: [],
+    env: {
+      CTXDB_RUNNER: fakeRunner,
+      CTXDB_WRAP_MODE: 'all',
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const autoPrompt = parseRunnerAutoPrompt(result.stdout);
+  assert.match(autoPrompt, /node scripts\/aios\.mjs team --provider codex --workers 3 --task "<task>" --live/u);
+  assert.match(autoPrompt, /AIOS_EXECUTE_LIVE=1 AIOS_SUBAGENT_CLIENT=codex-cli node scripts\/aios\.mjs orchestrate feature --task "<task>" --dispatch local --execute live/u);
 });
 
 test('opencode interactive runs are wrapped through ctx-agent without prompt rewriting', async () => {

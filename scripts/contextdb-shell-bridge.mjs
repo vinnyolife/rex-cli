@@ -206,6 +206,77 @@ function isInteractivePassthrough(command, passthroughArgs) {
   return false;
 }
 
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || '').trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function normalizeTeamProvider(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'claude' || normalized === 'gemini' || normalized === 'codex') {
+    return normalized;
+  }
+  return '';
+}
+
+function inferTeamProviderFromCommand(command) {
+  if (command === 'claude') return 'claude';
+  if (command === 'gemini') return 'gemini';
+  return 'codex';
+}
+
+function inferSubagentClientFromProvider(provider) {
+  if (provider === 'claude') return 'claude-code';
+  if (provider === 'gemini') return 'gemini-cli';
+  return 'codex-cli';
+}
+
+function inferSubagentClientFromCommand(command) {
+  if (command === 'claude') return 'claude-code';
+  if (command === 'gemini') return 'gemini-cli';
+  if (command === 'codex') return 'codex-cli';
+  return '';
+}
+
+function normalizeSubagentClient(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'codex-cli' || normalized === 'claude-code' || normalized === 'gemini-cli') {
+    return normalized;
+  }
+  return '';
+}
+
+function resolveSubagentClientForPrompt(command, provider, env) {
+  const explicitRouteClient = normalizeSubagentClient(env.CTXDB_ROUTE_SUBAGENT_CLIENT);
+  if (explicitRouteClient) return explicitRouteClient;
+  const explicitClient = normalizeSubagentClient(env.AIOS_SUBAGENT_CLIENT);
+  if (explicitClient) return explicitClient;
+  const commandClient = normalizeSubagentClient(inferSubagentClientFromCommand(command));
+  if (commandClient) return commandClient;
+  return inferSubagentClientFromProvider(provider);
+}
+
+function buildInteractiveAutoPrompt(command, env) {
+  const provider = normalizeTeamProvider(env.CTXDB_TEAM_PROVIDER)
+    || (normalizeTeamProvider(env.AIOS_TEAM_PROVIDER))
+    || inferTeamProviderFromCommand(command);
+  const workers = parsePositiveInteger(env.CTXDB_TEAM_WORKERS, 3);
+  const rawBlueprint = String(env.CTXDB_ORCHESTRATE_BLUEPRINT || '').trim().toLowerCase();
+  const blueprint = rawBlueprint === 'bugfix' || rawBlueprint === 'refactor' || rawBlueprint === 'security'
+    ? rawBlueprint
+    : 'feature';
+  const subagentClient = resolveSubagentClientForPrompt(command, provider, env);
+
+  return [
+    'Continue from this state and execute the next best step.',
+    'Auto-route each new user request as single/subagent/team before planning.',
+    `If route=team, run: node scripts/aios.mjs team --provider ${provider} --workers ${workers} --task "<task>" --live --preflight auto --format json`,
+    `If route=subagent, run: AIOS_EXECUTE_LIVE=1 AIOS_SUBAGENT_CLIENT=${subagentClient} node scripts/aios.mjs orchestrate ${blueprint} --task "<task>" --dispatch local --execute live --preflight auto --format json`,
+    'Do not ask the user to manually trigger these commands unless they requested preview/dry-run.',
+  ].join('\n');
+}
+
 function shouldDebug(env) {
   const value = (env.CTXDB_DEBUG || '').trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes' || value === 'on';
@@ -304,9 +375,10 @@ function main(argv = process.argv.slice(2)) {
   // automatic handoff prompt injection so the new session resumes from the last checkpoint.
   const interactive = isInteractivePassthrough(opts.command, opts.passthroughArgs);
   if (interactive && !env.CTXDB_AUTO_PROMPT) {
-    env.CTXDB_AUTO_PROMPT = 'continue';
+    env.CTXDB_AUTO_PROMPT = buildInteractiveAutoPrompt(opts.command, env);
     if (shouldDebug(env)) {
-      console.error(`[contextdb-shell-bridge] interactive detected; auto-prompt=continue`);
+      const preview = String(env.CTXDB_AUTO_PROMPT || '').split(/\r?\n/u)[0] || 'continue';
+      console.error(`[contextdb-shell-bridge] interactive detected; auto-prompt=${preview}`);
     }
   }
 
