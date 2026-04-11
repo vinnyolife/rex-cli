@@ -30,6 +30,10 @@ jobs:
         working-directory: mcp-server
         run: npm ci
 
+      - name: Install Playwright browsers
+        working-directory: mcp-server
+        run: npx playwright install --with-deps chromium
+
       - name: Typecheck + ContextDB tests
         working-directory: mcp-server
         run: |
