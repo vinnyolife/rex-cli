@@ -15,6 +15,12 @@ description: 版本历史、升级说明与文档变更入口。
 ## 最近版本
 
 - `main`（未发布）：
+  - **Browser MCP 迁移到 browser-use CDP**（2026-04-10）：默认浏览器运行时从 Playwright 切换到 browser-use MCP over CDP；新增启动器 `scripts/run-browser-use-mcp.sh`；迁移命令 `aios internal browser mcp-migrate`；截图超时保护可配置 `BROWSER_USE_SCREENSHOT_TIMEOUT_MS`
+  - **HUD/Team skill-candidate 增强**（2026-04-09 至 2026-04-10）：`--show-skill-candidates` 详细视图参数；`--skill-candidate-limit <N>` 可配置限制数；fast-watch 模式默认限制从 6 降到 3；artifact 读取缓存优化性能；HUD 建议 `skill-candidate apply` 命令；team status 显示 skill-candidate artifacts 和 drafts
+  - **Quality-gate 可见性**（2026-04-08 至 2026-04-09）：quality-gate category 在 HUD minimal status 和 team history summary 中显示；quality-failed-only 过滤器；quality prefix 过滤器支持多值
+  - **Learn-eval draft 推荐**（2026-04-07 至 2026-04-09）：hindsight lesson drafts；skill patch draft candidates；draft recommendation apply flow；持久化 skill-candidate draft artifacts
+  - **Turn-envelope v0**（2026-04-07）：基于 turn 的事件链路 telemetry；harness 中的 clarity entropy memo 覆盖
+  - **Browser doctor 自动修复**（2026-04-06 至 2026-04-08）：`doctor --fix` 自动修复 CDP 服务；setup/update 生命周期自动修复 browser doctor；文档中添加 CDP 快速命令
   - **多环境强化学习训练系统**：统一的 `rl-core` 控制平面，支持 shell、browser、orchestrator 三种环境适配器；三指针 checkpoint lineage；四车道 replay pool；PPO + teacher distillation 训练
   - **Mixed-environment campaigns**（`rl-mixed-v1`）：一次 live batch 可跨越 shell + browser + orchestrator episode，统一 rollback 决策
   - ContextDB `search` 默认走 SQLite FTS5 + `bm25(...)` 排序；当 FTS 不可用时自动回退 lexical 检索
@@ -31,6 +37,7 @@ description: 版本历史、升级说明与文档变更入口。
   - TUI skill picker 新增 `Core` / `Optional` 分组，并对长描述做终端友好截断
   - `doctor` 会提示同名 skill 的 `project` 安装覆盖 `global` 安装
   - Node 运行时口径统一到 22 LTS
+  - **Ink TUI 重构**（v1.1.0）：基于 TypeScript + Ink 的全屏 TUI，采用 React 组件；启动横幅显示 REXCLI ASCII art；自适应 watch 间隔；左右选项循环
 - `0.17.0`（2026-03-17）：
   - TUI 卸载选择器在小终端中可滚动，`-Select all` / `Clear all` / `Done` 按钮固定在底部
   - 卸载光标选择现在与渲染后的分组列表保持对齐

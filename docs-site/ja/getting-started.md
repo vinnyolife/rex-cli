@@ -288,6 +288,60 @@ Tip (codex-cli): Codex CLI v0.114+ は `codex exec` の構造化出力 (`--outpu
 - `AIOS_SUBAGENT_CONCURRENCY` (default: `2`)
 - `AIOS_SUBAGENT_TIMEOUT_MS` (default: `600000`)
 
+## 5.2) 任意：HUD と Team Ops の可視化
+
+HUD でセッション状態を表示:
+
+```bash
+aios hud --provider codex
+aios hud --watch --preset full
+aios hud --session <session-id> --json
+```
+
+Team Ops ステータスと履歴:
+
+```bash
+aios team status --provider codex --watch
+aios team history --provider codex --limit 20
+```
+
+Skill-candidate 詳細ビュー (2026-04-09 以降):
+
+```bash
+# デフォルトリミットで skill candidates を表示（通常モード 6 個、fast-watch minimal モード 3 個）
+aios team status --show-skill-candidates
+
+# candidate 制限を設定 (1-20)
+aios team status --show-skill-candidates --skill-candidate-limit 10
+
+# Fast-watch モードは自動的最小制限 (3 個 candidates)
+aios team status --watch --fast
+
+# HUD も skill-candidate ビューに対応
+aios hud --show-skill-candidates --skill-candidate-limit 5
+```
+
+Quality-gate カテゴリフィルター (2026-04-08 以降):
+
+```bash
+# quality-gate 失敗セッションのみ表示
+aios team history --quality-failed-only
+
+# quality category prefix でフィルター
+aios team history --quality-category clarity
+aios team history --quality-category sample.latency-watch
+```
+
+Dispatch hindsight と draft 推奨 (2026-04-07 以降):
+
+```bash
+# Learn-eval が draft skill-candidate patches を表示
+aios learn-eval --limit 10
+
+# HUD は利用可能な場合に skill-candidate apply コマンドを提案
+aios hud --session <session-id>
+```
+
 ## 6) 生成データを確認
 
 === "macOS / Linux"

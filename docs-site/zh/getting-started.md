@@ -292,6 +292,60 @@ aios orchestrate --session <session-id> --dispatch local --execute live --format
 - `AIOS_SUBAGENT_CONCURRENCY`（默认：`2`）
 - `AIOS_SUBAGENT_TIMEOUT_MS`（默认：`600000`）
 
+## 5.2) 可选：HUD 和 Team Ops 可见性
+
+使用 HUD 查看会话状态：
+
+```bash
+aios hud --provider codex
+aios hud --watch --preset full
+aios hud --session <session-id> --json
+```
+
+Team Ops 状态和历史：
+
+```bash
+aios team status --provider codex --watch
+aios team history --provider codex --limit 20
+```
+
+Skill-candidate 详细视图（2026-04-09+）：
+
+```bash
+# 显示 skill candidates，使用默认限制（普通模式 6 个，fast-watch minimal 模式 3 个）
+aios team status --show-skill-candidates
+
+# 配置 candidate 限制（1-20）
+aios team status --show-skill-candidates --skill-candidate-limit 10
+
+# Fast-watch 模式自动使用最小限制（3 个 candidates）
+aios team status --watch --fast
+
+# HUD 也支持 skill-candidate 视图
+aios hud --show-skill-candidates --skill-candidate-limit 5
+```
+
+Quality-gate 类别过滤器（2026-04-08+）：
+
+```bash
+# 只显示 quality-gate 失败的会话
+aios team history --quality-failed-only
+
+# 按 quality category prefix 过滤
+aios team history --quality-category clarity
+aios team history --quality-category sample.latency-watch
+```
+
+Dispatch hindsight 和 draft 推荐（2026-04-07+）：
+
+```bash
+# Learn-eval 显示 draft skill-candidate patches
+aios learn-eval --limit 10
+
+# HUD 在可用时会建议 skill-candidate apply 命令
+aios hud --session <session-id>
+```
+
 ## 6) 验证数据已生成
 
 === "macOS / Linux"

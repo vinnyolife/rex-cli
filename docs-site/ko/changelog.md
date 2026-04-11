@@ -15,42 +15,49 @@ description: 릴리스 이력, 업그레이드 안내, 관련 문서 링크.
 ## 최근 버전
 
 - `main` (미릴리스):
-  - **멀티 환경 RL 트레이닝 시스템**: shell, browser, orchestrator 어댑터를 가진 공유 `rl-core` 제어 플레인; 3포인터 checkpoint 계통; 4레인 replay pool; PPO + teacher distillation 트레이닝
-  - **혼합 환경 캠페인** (`rl-mixed-v1`): 하나의 라이브 배치가 shell + browser + orchestrator episode에 걸치고 통합 롤백 판단으로 실행
-  - ContextDB `search`가 기본으로 SQLite FTS5 + `bm25(...)` 랭킹, FTS 사용 불가 시 자동 레キシ컬 폴백
-  - ContextDB 시맨틱 리랭킹이 쿼리 스코프 레ksi칼 후보에서 동작하여 오래된 완전 일치 드롭 감소
-  - `aios orchestrate`의 `subagent-runtime` 라이브 실행（`AIOS_EXECUTE_LIVE=1`로 opt-in）
+  - **Browser MCP 를 browser-use CDP 로 마이그레이션** (2026-04-10): 기본 브라우저 런타임을 Playwright 에서 browser-use MCP over CDP 로 전환；새 런처 `scripts/run-browser-use-mcp.sh`；마이그레이션 명령 `aios internal browser mcp-migrate`；스크린샷 타임아웃 가드 `BROWSER_USE_SCREENSHOT_TIMEOUT_MS` 설정 가능
+  - **HUD/Team skill-candidate 기능 개선** (2026-04-09 ~ 2026-04-10): 상세 보기를 위한 `--show-skill-candidates` 플래그；설정 가능한 `--skill-candidate-limit <N>`；fast-watch 모드 기본 제한을 6 에서 3 으로 축소；performance 향상을 위한 artifact 읽기 캐싱；HUD 가 `skill-candidate apply` 명령 제안；team status 에서 skill-candidate artifacts 와 drafts 표시
+  - **Quality-gate 가시성** (2026-04-08 ~ 2026-04-09): HUD minimal status 와 team history summary 에 quality-gate category 표시；quality-failed-only 필터；multi-value 지원 quality prefix 필터
+  - **Learn-eval draft 권장** (2026-04-07 ~ 2026-04-09): hindsight lesson drafts；skill patch draft candidates；draft recommendation apply 플로우；skill-candidate draft artifacts 지속성
+  - **Turn-envelope v0** (2026-04-07): turn 기반 텔레메트리 이벤트 링크；harness 의 clarity entropy memo 커버리지
+  - **Browser doctor 자동 복구** (2026-04-06 ~ 2026-04-08): `doctor --fix` 로 CDP 서비스 자동 복구；setup/update 라이프사이클에서 browser doctor 자동 복구；문서에 CDP 퀵커맨드 추가
+  - **멀티 환경 RL 트레이닝 시스템**: shell, browser, orchestrator 어댑터를 가진 공유 `rl-core` 제어 플레인; 3 포인터 checkpoint 계통; 4 레인 replay pool; PPO + teacher distillation 트레이닝
+  - **혼합 환경 캠페인** (`rl-mixed-v1`): 하나의 라이브 배치가 shell + browser + orchestrator episode 에 걸치고 통합 롤백 판단으로 실행
+  - ContextDB `search` 가 기본으로 SQLite FTS5 + `bm25(...)` 랭킹, FTS 사용 불가 시 자동 레キシ컬 폴백
+  - ContextDB 시맨틱 리랭킹이 쿼리 스코프 레キシ컬 후보에서 동작하여 오래된 완전 일치 드롭 감소
+  - `aios orchestrate` 의 `subagent-runtime` 라이브 실행（`AIOS_EXECUTE_LIVE=1` 로 opt-in）
   - 소유권 힌트와 함께 바운드 work-item 큐 스케줄링
-  - no-op 패스트 패스: 상류 handoff가 파일을 터치하지 않았을 때 `reviewer` / `security-reviewer` 자동 완료
-  - `main`への各push時に Windows PowerShell shell-smoke 워크플로（`.github/workflows/windows-shell-smoke.yml`）
+  - no-op 패스트 패스: 상류 handoff 가 파일을 터치하지 않았을 때 `reviewer` / `security-reviewer` 자동 완료
+  - `main` push 시 Windows PowerShell shell-smoke 워크플로（`.github/workflows/windows-shell-smoke.yml`）
   - `global` / `project` 타겟 선택을 가진 스코프 인식 `skills` 설치 플로우
-  - canonical skill authoring이 이제 `skill-sources/`에 있으며, repo-local 클라이언트 루트는 `node scripts/sync-skills.mjs`로 생성
-  - 기본 skills 설치 모드가 이제 이식 가능한 `copy`; 명시적 `--install-mode link`는 로컬 개발을 위해 사용 가능
-  - 릴리스 packaging/preflight이 이제 `check-skills-sync`로 생성 skill roots 검증
+  - canonical skill authoring 이 이제 `skill-sources/` 에 있으며, repo-local 클라이언트 루트는 `node scripts/sync-skills.mjs` 로 생성
+  - 기본 skills 설치 모드가 이제 이식 가능한 `copy`; 명시적 `--install-mode link` 는 로컬 개발을 위해 사용 가능
+  - 릴리스 packaging/preflight 이 이제 `check-skills-sync` 로 생성 skill roots 검증
   - 코어 기본값, 선택적 business skills, 제거 시 설치된 항목만 표시하는 카탈로그 중심 skill 피커
-  - TUI skill 피커가 항목을 `Core`와 `Optional`으로 그룹화하고 터미널 가독성을 위해 설명을 잘라냄
-  - `doctor`가 이제同名 글로벌 설치의プロジェクト skill 오버라이드를 경고
-  - Node 런타임 안내가 이제 Node 22 LTS에 명시적으로 정렬
+  - TUI skill 피커가 항목을 `Core` 와 `Optional` 으로 그룹화하고 터미널 가독성을 위해 설명을 잘라냄
+  - `doctor` 가 이제 동일명 글로벌 설치의 프로젝트 skill 오버라이드를 경고
+  - Node 런타임 안내가 이제 Node 22 LTS 에 명시적으로 정렬
+  - **Ink TUI 리팩터** (v1.1.0): TypeScript + Ink 기반 React 컴포넌트 TUI; REXCLI ASCII 아트 시작 배너; 적응형 watch 간격; 좌우 옵션 사이클링
 - `0.17.0` (2026-03-17):
-  - TUI 제거 피커가 이제 작은 터미널에서 스크롤하고 `Select all` / `Clear all` / `Done`을 하단에 고정
+  - TUI 제거 피커가 이제 작은 터미널에서 스크롤하고 `Select all` / `Clear all` / `Done` 을 하단에 고정
   - 제거 커서 선택이 렌더링된 그룹 목록과 정렬 유지
-  - 설정/업데이트 skill 피커가 이미 설치된 스킬을 `(installed)`로 표시
+  - 설정/업데이트 skill 피커가 이미 설치된 스킬을 `(installed)` 로 표시
 - `0.16.0` (2026-03-10): orchestrator agent catalog 및 생성기 추가
-- `0.15.0` (2026-03-10): `orchestrate live`를 기본으로 gate（`AIOS_EXECUTE_LIVE`）
-- `0.14.0` (2026-03-10): `subagent-runtime` 런타임 어댑터(stub) 추가
+- `0.15.0` (2026-03-10): `orchestrate live` 를 기본으로 gate（`AIOS_EXECUTE_LIVE`）
+- `0.14.0` (2026-03-10): `subagent-runtime` 런타임 어댑터 (stub) 추가
 - `0.13.0` (2026-03-10): 런타임 manifest 외부화
 - `0.11.0` (2026-03-10): 로컬 orchestrate preflight 범위 확장
-- `0.10.4` (2026-03-08): 非git 워크스페이스 wrapper fallback 및 문서 동기화
+- `0.10.4` (2026-03-08): 비 git 워크스페이스 wrapper fallback 및 문서 동기화
 - `0.10.3` (2026-03-08): Windows cmd-backed CLI 실행 수정
-- `0.10.0` (2026-03-08): 설치/업데이트/제거 라이프사이클을 Node로 통합
+- `0.10.0` (2026-03-08): 설치/업데이트/제거 라이프사이클을 Node 로 통합
 - `0.8.0` (2026-03-05): 엄격 모드 Privacy Guard(Ollama 지원) 및 설치 흐름 통합
-- `0.5.0` (2026-03-03): ContextDB SQLite 사이드카 인덱스(`index:rebuild`), 선택적 `--semantic` 검색, `ctx-agent` 실행 코어 통합
+- `0.5.0` (2026-03-03): ContextDB SQLite 사이드카 인덱스 (`index:rebuild`), 선택적 `--semantic` 검색, `ctx-agent` 실행 코어 통합
 
 ## 2026-03-16 운영 상황
 
 - Continuous live 샘플이 성공 중（`dispatchRun.ok=true`）, 최신 아티팩트:
   - `memory/context-db/sessions/codex-cli-20260303T080437-065e16c0/artifacts/dispatch-run-20260316T111419Z.json`
-- `learn-eval`이 아직 권장:
+- `learn-eval` 이 아직 권장:
   - `[fix] runbook.failure-triage`（`clarity-needs-input=5`）
   - `[observe] sample.latency-watch`（`avgElapsedMs=160678`）
 - latency-watch 관찰이 계속되는 동안 Timeout 예산은 현상 유지.
@@ -64,4 +71,4 @@ description: 릴리스 이력, 업그레이드 안내, 관련 문서 링크.
 
 ## 업데이트 규칙
 
-설치, 런타임 동작, 호환성에 영향을 주는 릴리스는 같은 PR에서 문서를 함께 업데이트하고 이 페이지에 반영합니다.
+설치, 런타임 동작, 호환성에 영향을 주는 릴리스는 같은 PR 에서 문서를 함께 업데이트하고 이 페이지에 반영합니다.

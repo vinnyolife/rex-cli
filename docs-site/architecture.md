@@ -60,6 +60,18 @@ Live execution is opt-in and gated by:
 - `AIOS_EXECUTE_LIVE=1`
 - `AIOS_SUBAGENT_CLIENT=codex-cli`
 
+### Browser MCP (browser-use CDP)
+
+As of 2026-04-10, the default browser MCP runtime is **browser-use MCP over CDP**:
+
+- Launcher: `scripts/run-browser-use-mcp.sh`
+- Migration: `aios internal browser mcp-migrate`
+- Tools: `chrome.launch_cdp`, `browser.connect_cdp`, `page.*`, `diagnostics.sannysoft`
+- Profile config: `config/browser-profiles.json`
+- Screenshot timeout guard: `BROWSER_USE_SCREENSHOT_TIMEOUT_MS` (default: 15s)
+
+Legacy Playwright MCP (`mcp-server/`) is retained for compatibility but is no longer the default.
+
 ## RL Training Layer (AIOS)
 
 AIOS includes a multi-environment reinforcement learning system that continuously improves a shared student policy across shell, browser, and orchestrator tasks.

@@ -55,6 +55,18 @@ AIOS は ContextDB の上にオペレータ向け harness を提供します:
 - `AIOS_EXECUTE_LIVE=1`
 - `AIOS_SUBAGENT_CLIENT=codex-cli`
 
+### Browser MCP (browser-use CDP)
+
+2026-04-10 より、デフォルトのブラウザ MCP ランタイムは **browser-use MCP over CDP** です:
+
+- ランチャー：`scripts/run-browser-use-mcp.sh`
+- マイグレーション：`aios internal browser mcp-migrate`
+- ツール：`chrome.launch_cdp`、`browser.connect_cdp`、`page.*`、`diagnostics.sannysoft`
+- プロファイル設定：`config/browser-profiles.json`
+- スクリーンショットタイムアウトガード：`BROWSER_USE_SCREENSHOT_TIMEOUT_MS`（デフォルト：15 秒）
+
+レガシー Playwright MCP (`mcp-server/`) は互換性のために残されていますが、デフォルトではありません。
+
 ## RL Training Layer (AIOS)
 
 AIOS にはマルチ環境の強化学習システムが含まれており、シェル、ブラウザ、オーケストレータータスク間で共有生徒ポリシーを継続的に改善します。

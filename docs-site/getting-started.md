@@ -292,6 +292,60 @@ Optional controls:
 - `AIOS_SUBAGENT_CONCURRENCY` (default: `2`)
 - `AIOS_SUBAGENT_TIMEOUT_MS` (default: `600000`)
 
+## 5.2) Optional: HUD and Team Ops visibility
+
+View session status with HUD:
+
+```bash
+aios hud --provider codex
+aios hud --watch --preset full
+aios hud --session <session-id> --json
+```
+
+Team Ops status and history:
+
+```bash
+aios team status --provider codex --watch
+aios team history --provider codex --limit 20
+```
+
+Skill-candidate detail view (2026-04-09+):
+
+```bash
+# Show skill candidates with default limit (6 in normal mode, 3 in fast-watch minimal)
+aios team status --show-skill-candidates
+
+# Configure candidate limit (1-20)
+aios team status --show-skill-candidates --skill-candidate-limit 10
+
+# Fast-watch mode auto-uses minimal limit (3 candidates)
+aios team status --watch --fast
+
+# HUD also supports skill-candidate view
+aios hud --show-skill-candidates --skill-candidate-limit 5
+```
+
+Quality-gate category filters (2026-04-08+):
+
+```bash
+# Show only quality-gate failed sessions
+aios team history --quality-failed-only
+
+# Filter by quality category prefix
+aios team history --quality-category clarity
+aios team history --quality-category sample.latency-watch
+```
+
+Dispatch hindsight and draft recommendations (2026-04-07+):
+
+```bash
+# Learn-eval shows draft skill-candidate patches
+aios learn-eval --limit 10
+
+# HUD suggests skill-candidate apply commands when available
+aios hud --session <session-id>
+```
+
 ## 6) Verify data created
 
 === "macOS / Linux"

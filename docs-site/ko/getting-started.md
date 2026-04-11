@@ -288,6 +288,60 @@ Tip (codex-cli): Codex CLI v0.114+는 `codex exec` 구조화 출력(`--output-sc
 - `AIOS_SUBAGENT_CONCURRENCY` (default: `2`)
 - `AIOS_SUBAGENT_TIMEOUT_MS` (default: `600000`)
 
+## 5.2) 선택: HUD 와 Team Ops 가시성
+
+HUD 로 세션 상태 확인:
+
+```bash
+aios hud --provider codex
+aios hud --watch --preset full
+aios hud --session <session-id> --json
+```
+
+Team Ops 상태 및 이력:
+
+```bash
+aios team status --provider codex --watch
+aios team history --provider codex --limit 20
+```
+
+Skill-candidate 상세 뷰 (2026-04-09+):
+
+```bash
+# 기본 제한으로 skill candidates 표시 (일반 모드 6 개, fast-watch minimal 모드 3 개)
+aios team status --show-skill-candidates
+
+# candidate 제한 설정 (1-20)
+aios team status --show-skill-candidates --skill-candidate-limit 10
+
+# Fast-watch 모드는 자동 최소 제한 (3 개 candidates)
+aios team status --watch --fast
+
+# HUD 도 skill-candidate 뷰 지원
+aios hud --show-skill-candidates --skill-candidate-limit 5
+```
+
+Quality-gate 카테고리 필터 (2026-04-08+):
+
+```bash
+# quality-gate 실패 세션만 표시
+aios team history --quality-failed-only
+
+# quality category prefix 로 필터
+aios team history --quality-category clarity
+aios team history --quality-category sample.latency-watch
+```
+
+Dispatch hindsight 와 draft 권장 (2026-04-07+):
+
+```bash
+# Learn-eval 이 draft skill-candidate patches 표시
+aios learn-eval --limit 10
+
+# HUD 는 사용 가능할 때 skill-candidate apply 명령 제안
+aios hud --session <session-id>
+```
+
 ## 6) 생성 데이터 확인
 
 === "macOS / Linux"
