@@ -56,6 +56,9 @@ const ORCHESTRATOR_BANDIT_REWARD_WEIGHTS = Object.freeze({
 
 const POLICY_CHECKPOINT_SCHEMA_VERSION = 1;
 const POLICY_CHECKPOINT_FILE = 'orchestrator-bandit-policy.latest.json';
+const POLICY_CHECKPOINT_INDEX_FILE = 'orchestrator-bandit-policy.index.json';
+const POLICY_CHECKPOINT_VERSIONS_DIR = 'orchestrator-bandit-policy.versions';
+const POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS = 40;
 
 function buildControlSnapshot(initialCheckpointId) {
   return {
@@ -330,8 +333,13 @@ async function ensureNamespaceRoot(rootDir, namespace) {
   return baseDir;
 }
 
-function buildPolicyCheckpointPath(baseDir) {
-  return path.join(baseDir, 'checkpoints', POLICY_CHECKPOINT_FILE);
+function buildPolicyCheckpointPaths(baseDir) {
+  const checkpointsDir = path.join(baseDir, 'checkpoints');
+  return {
+    latestPath: path.join(checkpointsDir, POLICY_CHECKPOINT_FILE),
+    indexPath: path.join(checkpointsDir, POLICY_CHECKPOINT_INDEX_FILE),
+    versionsDir: path.join(checkpointsDir, POLICY_CHECKPOINT_VERSIONS_DIR),
+  };
 }
 
 function normalizeCheckpointPolicy(value) {
@@ -341,96 +349,398 @@ function normalizeCheckpointPolicy(value) {
   return clone(value);
 }
 
+function sanitizePolicyVersionId(value = '') {
+  return String(value || '').trim().replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function createPolicyVersionId({ savedAt, batchIndex = 0, updateCount = 0 }) {
+  const stamp = String(savedAt || new Date().toISOString())
+    .replace(/[-:]/g, '')
+    .replace(/\.(\d{3})Z$/, '$1Z');
+  return `b${String(Number(batchIndex || 0)).padStart(4, '0')}-u${String(Number(updateCount || 0)).padStart(6, '0')}-${stamp}`;
+}
+
+function buildPolicyVersionPath(paths, versionId) {
+  const safeVersionId = sanitizePolicyVersionId(versionId) || 'unknown';
+  return path.join(paths.versionsDir, `orchestrator-bandit-policy.${safeVersionId}.json`);
+}
+
+async function readJsonObject(filePath) {
+  try {
+    const value = JSON.parse(await readFile(filePath, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('json payload must be an object');
+    }
+    return { status: 'ok', value };
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { status: 'missing', value: null };
+    }
+    return { status: 'error', value: null, error };
+  }
+}
+
+function createEmptyPolicyCheckpointIndex() {
+  return {
+    schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
+    latest_version_id: null,
+    last_good_version_id: null,
+    versions: [],
+  };
+}
+
+function normalizePolicyCheckpointIndex(raw = {}) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw
+    : createEmptyPolicyCheckpointIndex();
+  const versions = Array.isArray(source.versions)
+    ? source.versions
+      .map((entry) => {
+        const versionId = sanitizePolicyVersionId(entry?.version_id || '');
+        const filePath = typeof entry?.file_path === 'string' ? entry.file_path : '';
+        if (!versionId || !filePath) return null;
+        return {
+          version_id: versionId,
+          file_path: filePath,
+          saved_at: typeof entry?.saved_at === 'string' ? entry.saved_at : null,
+          update_count: Number(entry?.update_count || 0),
+          batch_index: Number(entry?.batch_index || 0),
+          active_checkpoint_id: entry?.active_checkpoint_id ? String(entry.active_checkpoint_id) : null,
+          quality_status: entry?.quality_status === 'healthy' ? 'healthy' : 'degraded',
+          quality_score: Number(entry?.quality_score || 0),
+        };
+      })
+      .filter(Boolean)
+    : [];
+
+  const versionIds = new Set(versions.map((entry) => entry.version_id));
+  const latestVersionId = sanitizePolicyVersionId(source.latest_version_id || '');
+  const lastGoodVersionId = sanitizePolicyVersionId(source.last_good_version_id || '');
+  return {
+    schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
+    latest_version_id: versionIds.has(latestVersionId) ? latestVersionId : null,
+    last_good_version_id: versionIds.has(lastGoodVersionId) ? lastGoodVersionId : null,
+    versions,
+  };
+}
+
+function computePolicyQuality({
+  epochOutcome = '',
+  batchBetterCount = 0,
+  batchWorseCount = 0,
+  batchComparisonFailedCount = 0,
+  holdoutOrchestratorStatus = '',
+} = {}) {
+  const better = Number(batchBetterCount || 0);
+  const worse = Number(batchWorseCount || 0);
+  const comparisonFailed = Number(batchComparisonFailedCount || 0);
+  const normalizedEpochOutcome = String(epochOutcome || '').trim();
+  const normalizedHoldout = String(holdoutOrchestratorStatus || '').trim().toLowerCase();
+  const holdoutPenalty = normalizedHoldout === 'failed' ? 1 : 0;
+  const rollbackPenalty = normalizedEpochOutcome === 'rollback' ? 2 : 0;
+  const score = better - worse - comparisonFailed - holdoutPenalty - rollbackPenalty;
+  const healthy = normalizedEpochOutcome !== 'rollback'
+    && comparisonFailed === 0
+    && worse <= better
+    && normalizedHoldout !== 'failed';
+  return {
+    quality_status: healthy ? 'healthy' : 'degraded',
+    quality_score: score,
+  };
+}
+
+function sortPolicyVersions(versions = []) {
+  return [...versions].sort((left, right) => {
+    const leftStamp = String(left?.saved_at || '');
+    const rightStamp = String(right?.saved_at || '');
+    return leftStamp.localeCompare(rightStamp);
+  });
+}
+
+function findLastGoodVersionId(versions = []) {
+  for (let index = versions.length - 1; index >= 0; index -= 1) {
+    if (versions[index]?.quality_status === 'healthy') {
+      return versions[index].version_id;
+    }
+  }
+  return null;
+}
+
+function updatePolicyCheckpointIndex({
+  currentIndex,
+  nextEntry,
+  maxVersions = POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS,
+} = {}) {
+  const maxCount = Number.isInteger(maxVersions) && maxVersions > 0
+    ? maxVersions
+    : POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS;
+  const merged = [
+    ...(Array.isArray(currentIndex?.versions) ? currentIndex.versions : []).filter(
+      (entry) => entry?.version_id !== nextEntry.version_id
+    ),
+    nextEntry,
+  ];
+  const sorted = sortPolicyVersions(merged);
+  const retained = sorted.slice(Math.max(0, sorted.length - maxCount));
+  const latestVersionId = retained.length > 0 ? retained[retained.length - 1].version_id : null;
+  return {
+    schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
+    latest_version_id: latestVersionId,
+    last_good_version_id: findLastGoodVersionId(retained),
+    versions: retained,
+  };
+}
+
+function resolvePolicyResumeVersionId(index, target = 'latest') {
+  const normalized = String(target || 'latest').trim();
+  if (!normalized || normalized === 'latest') {
+    return index.latest_version_id;
+  }
+  if (normalized === 'last-good' || normalized === 'last_good') {
+    return index.last_good_version_id || index.latest_version_id;
+  }
+  const exact = index.versions.find((entry) => entry.version_id === normalized);
+  return exact ? exact.version_id : null;
+}
+
 function buildPolicyCheckpointMetadata({
-  checkpointPath,
+  checkpointPaths = {},
+  path = null,
+  index_path: indexPath = null,
+  versions_dir: versionsDir = null,
   loadStatus = 'cold_start',
   loadError = null,
+  loadTarget = 'latest',
+  loadedVersionId = null,
+  loadedPath = null,
   loadedUpdateCount = 0,
   loadedBatchIndex = 0,
   loadedSavedAt = null,
+  latestVersionId = null,
+  lastGoodVersionId = null,
+  availableVersions = 0,
+  rollbackApplied = false,
+  rollbackFromVersionId = null,
   saveStatus = 'not_written',
+  savedVersionId = null,
+  savedPath = null,
   savedUpdateCount = 0,
   savedBatchIndex = 0,
   savedAt = null,
 } = {}) {
   return {
-    path: checkpointPath,
+    path: checkpointPaths.latestPath || path || null,
+    index_path: checkpointPaths.indexPath || indexPath || null,
+    versions_dir: checkpointPaths.versionsDir || versionsDir || null,
     schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
     load_status: loadStatus,
     load_error: loadError,
+    load_target: loadTarget,
+    loaded_version_id: loadedVersionId,
+    loaded_path: loadedPath,
     loaded_update_count: Number(loadedUpdateCount || 0),
     loaded_batch_index: Number(loadedBatchIndex || 0),
     loaded_saved_at: loadedSavedAt,
+    latest_version_id: latestVersionId,
+    last_good_version_id: lastGoodVersionId,
+    available_versions: Number(availableVersions || 0),
+    rollback_applied: rollbackApplied === true,
+    rollback_from_version_id: rollbackFromVersionId,
     save_status: saveStatus,
+    saved_version_id: savedVersionId,
+    saved_path: savedPath,
     saved_update_count: Number(savedUpdateCount || 0),
     saved_batch_index: Number(savedBatchIndex || 0),
     saved_at: savedAt,
   };
 }
 
-async function loadPolicyCheckpoint(checkpointPath) {
-  try {
-    const payload = JSON.parse(await readFile(checkpointPath, 'utf8'));
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new Error('policy checkpoint payload must be an object');
-    }
-    return {
-      status: 'loaded',
-      metadata: buildPolicyCheckpointMetadata({
-        checkpointPath,
-        loadStatus: 'loaded',
-        loadedUpdateCount: Number(payload.update_count || payload.active_policy?.contextualBandit?.updateCount || 0),
-        loadedBatchIndex: Number(payload.batch_index || 0),
-        loadedSavedAt: typeof payload.saved_at === 'string' ? payload.saved_at : null,
-      }),
-      activePolicy: normalizeCheckpointPolicy(payload.active_policy),
-      referencePolicy: normalizeCheckpointPolicy(payload.reference_policy),
-    };
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
+async function loadPolicyCheckpoint({
+  checkpointPaths,
+  resumeTarget = 'latest',
+} = {}) {
+  const indexRaw = await readJsonObject(checkpointPaths.indexPath);
+  const index = indexRaw.status === 'ok'
+    ? normalizePolicyCheckpointIndex(indexRaw.value)
+    : createEmptyPolicyCheckpointIndex();
+  const selectedVersionId = resolvePolicyResumeVersionId(index, resumeTarget);
+  const selectedEntry = selectedVersionId
+    ? index.versions.find((entry) => entry.version_id === selectedVersionId) || null
+    : null;
+
+  if (selectedEntry) {
+    const versionRaw = await readJsonObject(selectedEntry.file_path);
+    if (versionRaw.status === 'ok') {
+      const payload = versionRaw.value;
       return {
-        status: 'missing',
+        status: 'loaded',
         metadata: buildPolicyCheckpointMetadata({
-          checkpointPath,
-          loadStatus: 'missing',
+          checkpointPaths,
+          loadStatus: 'loaded',
+          loadTarget: resumeTarget,
+          loadedVersionId: selectedEntry.version_id,
+          loadedPath: selectedEntry.file_path,
+          loadedUpdateCount: Number(payload.update_count || payload.active_policy?.contextualBandit?.updateCount || 0),
+          loadedBatchIndex: Number(payload.batch_index || 0),
+          loadedSavedAt: typeof payload.saved_at === 'string' ? payload.saved_at : null,
+          latestVersionId: index.latest_version_id,
+          lastGoodVersionId: index.last_good_version_id,
+          availableVersions: index.versions.length,
+          rollbackApplied: resumeTarget === 'last-good' && index.latest_version_id && index.latest_version_id !== selectedEntry.version_id,
+          rollbackFromVersionId: resumeTarget === 'last-good' ? index.latest_version_id : null,
         }),
-        activePolicy: null,
-        referencePolicy: null,
+        activePolicy: normalizeCheckpointPolicy(payload.active_policy),
+        referencePolicy: normalizeCheckpointPolicy(payload.reference_policy),
       };
     }
+    const versionError = versionRaw.error?.message || 'failed to read version checkpoint';
     return {
-      status: 'corrupt',
+      status: versionRaw.status === 'missing' ? 'missing' : 'corrupt',
       metadata: buildPolicyCheckpointMetadata({
-        checkpointPath,
-        loadStatus: 'corrupt',
-        loadError: error?.message || String(error),
+        checkpointPaths,
+        loadStatus: versionRaw.status === 'missing' ? 'missing' : 'corrupt',
+        loadTarget: resumeTarget,
+        loadError: versionRaw.status === 'missing' ? null : versionError,
+        loadedVersionId: selectedEntry.version_id,
+        loadedPath: selectedEntry.file_path,
+        latestVersionId: index.latest_version_id,
+        lastGoodVersionId: index.last_good_version_id,
+        availableVersions: index.versions.length,
       }),
       activePolicy: null,
       referencePolicy: null,
     };
   }
+
+  if (String(resumeTarget || 'latest').trim() !== 'latest' && String(resumeTarget || '').trim().length > 0) {
+    return {
+      status: 'missing',
+      metadata: buildPolicyCheckpointMetadata({
+        checkpointPaths,
+        loadStatus: 'missing',
+        loadTarget: resumeTarget,
+        loadError: `policy checkpoint target not found: ${resumeTarget}`,
+        latestVersionId: index.latest_version_id,
+        lastGoodVersionId: index.last_good_version_id,
+        availableVersions: index.versions.length,
+      }),
+      activePolicy: null,
+      referencePolicy: null,
+    };
+  }
+
+  const latestRaw = await readJsonObject(checkpointPaths.latestPath);
+  if (latestRaw.status === 'ok') {
+    const payload = latestRaw.value;
+    const payloadVersionId = sanitizePolicyVersionId(payload.version_id || '');
+    return {
+      status: 'loaded',
+      metadata: buildPolicyCheckpointMetadata({
+        checkpointPaths,
+        loadStatus: 'loaded',
+        loadTarget: resumeTarget,
+        loadedVersionId: payloadVersionId || null,
+        loadedPath: checkpointPaths.latestPath,
+        loadedUpdateCount: Number(payload.update_count || payload.active_policy?.contextualBandit?.updateCount || 0),
+        loadedBatchIndex: Number(payload.batch_index || 0),
+        loadedSavedAt: typeof payload.saved_at === 'string' ? payload.saved_at : null,
+        latestVersionId: index.latest_version_id || payloadVersionId || null,
+        lastGoodVersionId: index.last_good_version_id,
+        availableVersions: index.versions.length,
+      }),
+      activePolicy: normalizeCheckpointPolicy(payload.active_policy),
+      referencePolicy: normalizeCheckpointPolicy(payload.reference_policy),
+    };
+  }
+
+  return {
+    status: latestRaw.status === 'missing' ? 'missing' : 'corrupt',
+    metadata: buildPolicyCheckpointMetadata({
+      checkpointPaths,
+      loadStatus: latestRaw.status === 'missing' ? 'missing' : 'corrupt',
+      loadTarget: resumeTarget,
+      loadError: latestRaw.status === 'missing' ? null : (latestRaw.error?.message || 'failed to read latest policy checkpoint'),
+      latestVersionId: index.latest_version_id,
+      lastGoodVersionId: index.last_good_version_id,
+      availableVersions: index.versions.length,
+    }),
+    activePolicy: null,
+    referencePolicy: null,
+  };
 }
 
 async function persistPolicyCheckpoint({
-  checkpointPath,
+  checkpointPaths,
   activePolicy,
   referencePolicy,
   updateCount = 0,
   batchIndex = 0,
   activeCheckpointId = null,
+  qualityContext = {},
+  maxVersions = POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS,
 }) {
+  const savedAt = new Date().toISOString();
+  const versionId = createPolicyVersionId({
+    savedAt,
+    batchIndex,
+    updateCount,
+  });
+  const versionPath = buildPolicyVersionPath(checkpointPaths, versionId);
+  const quality = computePolicyQuality(qualityContext);
   const payload = {
     schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
-    saved_at: new Date().toISOString(),
+    version_id: versionId,
+    saved_at: savedAt,
     update_count: Number(updateCount || 0),
     batch_index: Number(batchIndex || 0),
     active_checkpoint_id: activeCheckpointId ? String(activeCheckpointId) : null,
+    quality_status: quality.quality_status,
+    quality_score: quality.quality_score,
     active_policy: normalizeCheckpointPolicy(activePolicy),
     reference_policy: normalizeCheckpointPolicy(referencePolicy),
   };
-  await mkdir(path.dirname(checkpointPath), { recursive: true });
-  await writeFile(checkpointPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  return payload;
+  await mkdir(path.dirname(checkpointPaths.latestPath), { recursive: true });
+  await mkdir(checkpointPaths.versionsDir, { recursive: true });
+  await writeFile(checkpointPaths.latestPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  await writeFile(versionPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+
+  const indexRaw = await readJsonObject(checkpointPaths.indexPath);
+  const currentIndex = indexRaw.status === 'ok'
+    ? normalizePolicyCheckpointIndex(indexRaw.value)
+    : createEmptyPolicyCheckpointIndex();
+  const nextEntry = {
+    version_id: versionId,
+    file_path: versionPath,
+    saved_at: savedAt,
+    update_count: Number(updateCount || 0),
+    batch_index: Number(batchIndex || 0),
+    active_checkpoint_id: activeCheckpointId ? String(activeCheckpointId) : null,
+    quality_status: quality.quality_status,
+    quality_score: quality.quality_score,
+  };
+  const nextIndex = updatePolicyCheckpointIndex({
+    currentIndex,
+    nextEntry,
+    maxVersions,
+  });
+  await writeFile(checkpointPaths.indexPath, `${JSON.stringify(nextIndex, null, 2)}\n`, 'utf8');
+
+  return {
+    payload,
+    index: nextIndex,
+    versionEntry: nextEntry,
+    metadata: {
+      save_status: 'written',
+      saved_version_id: nextEntry.version_id,
+      saved_path: nextEntry.file_path,
+      saved_update_count: nextEntry.update_count,
+      saved_batch_index: nextEntry.batch_index,
+      saved_at: nextEntry.saved_at,
+      latest_version_id: nextIndex.latest_version_id,
+      last_good_version_id: nextIndex.last_good_version_id,
+      available_versions: nextIndex.versions.length,
+    },
+  };
 }
 
 export async function runMixedCampaign({
@@ -447,6 +757,8 @@ export async function runMixedCampaign({
   namespace = 'rl-mixed-v1',
   mode = 'mixed',
   resume = false,
+  policyResumeTarget = 'latest',
+  policyCheckpointMaxVersions = POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS,
 } = {}) {
   const adapters = createDefaultAdapters({
     overrides: adapterOverrides,
@@ -456,7 +768,7 @@ export async function runMixedCampaign({
   });
   const resolvedEnvironments = [...activeEnvironments];
   const baseDir = await ensureNamespaceRoot(rootDir, namespace);
-  const policyCheckpointPath = buildPolicyCheckpointPath(baseDir);
+  const policyCheckpointPaths = buildPolicyCheckpointPaths(baseDir);
   const controlStore = await createControlStateStore({ rootDir, namespace });
   const attempts = Object.fromEntries(resolvedEnvironments.map((environment) => [environment, 0]));
   const environmentCounts = normalizeEnvironmentCounts(resolvedEnvironments);
@@ -468,8 +780,9 @@ export async function runMixedCampaign({
   let activePolicy = null;
   let referencePolicy = null;
   let policyCheckpoint = buildPolicyCheckpointMetadata({
-    checkpointPath: policyCheckpointPath,
+    checkpointPaths: policyCheckpointPaths,
     loadStatus: resume ? 'pending' : 'cold_start',
+    loadTarget: policyResumeTarget,
   });
 
   const applyTrackedEvent = async (event) => {
@@ -489,7 +802,10 @@ export async function runMixedCampaign({
   }
 
   if (resume) {
-    const restoredPolicy = await loadPolicyCheckpoint(policyCheckpointPath);
+    const restoredPolicy = await loadPolicyCheckpoint({
+      checkpointPaths: policyCheckpointPaths,
+      resumeTarget: policyResumeTarget,
+    });
     policyCheckpoint = restoredPolicy.metadata;
     if (restoredPolicy.status === 'loaded') {
       activePolicy = restoredPolicy.activePolicy;
@@ -702,13 +1018,16 @@ export async function runMixedCampaign({
     Object.assign(holdout_validation, holdouts);
     const coverage_sufficient = resolvedEnvironments.every((environment) => monitoringSeen.has(environment));
     const shell_safety_gate_passed = holdouts.shell ? holdouts.shell.status !== 'failed' : true;
+    const batchComparisonFailedCount = monitoringResults.filter((result) => result.comparison_status === 'comparison_failed').length;
+    const batchBetterCount = monitoringResults.filter((result) => result.relative_outcome === 'better').length;
+    const batchWorseCount = monitoringResults.filter((result) => result.relative_outcome === 'worse').length;
     const epochOutcome = computeMixedEpochOutcome({
       coverage_sufficient,
       shell_safety_gate_passed,
-      comparison_failed_count: monitoringResults.filter((result) => result.comparison_status === 'comparison_failed').length,
+      comparison_failed_count: batchComparisonFailedCount,
       degradation_streak: degradation.degradationStreak,
-      better_count: monitoringResults.filter((result) => result.relative_outcome === 'better').length,
-      worse_count: monitoringResults.filter((result) => result.relative_outcome === 'worse').length,
+      better_count: batchBetterCount,
+      worse_count: batchWorseCount,
     });
 
     batchSummaries[batchSummaries.length - 1].epoch_outcome = epochOutcome.epoch_outcome;
@@ -765,25 +1084,25 @@ export async function runMixedCampaign({
     }
 
     const persistedPolicy = await persistPolicyCheckpoint({
-      checkpointPath: policyCheckpointPath,
+      checkpointPaths: policyCheckpointPaths,
       activePolicy,
       referencePolicy,
       updateCount: Number(activePolicy?.contextualBandit?.updateCount || 0),
       batchIndex,
       activeCheckpointId: controlState.active_checkpoint_id,
+      qualityContext: {
+        epochOutcome: epochOutcome.epoch_outcome,
+        batchBetterCount,
+        batchWorseCount,
+        batchComparisonFailedCount,
+        holdoutOrchestratorStatus: holdouts.orchestrator?.status || '',
+      },
+      maxVersions: policyCheckpointMaxVersions,
     });
-    policyCheckpoint = buildPolicyCheckpointMetadata({
-      checkpointPath: policyCheckpointPath,
-      loadStatus: policyCheckpoint.load_status,
-      loadError: policyCheckpoint.load_error,
-      loadedUpdateCount: policyCheckpoint.loaded_update_count,
-      loadedBatchIndex: policyCheckpoint.loaded_batch_index,
-      loadedSavedAt: policyCheckpoint.loaded_saved_at,
-      saveStatus: 'written',
-      savedUpdateCount: persistedPolicy.update_count,
-      savedBatchIndex: persistedPolicy.batch_index,
-      savedAt: persistedPolicy.saved_at,
-    });
+    policyCheckpoint = {
+      ...policyCheckpoint,
+      ...persistedPolicy.metadata,
+    };
   }
 
   const summary = {

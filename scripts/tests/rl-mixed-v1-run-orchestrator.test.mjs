@@ -131,6 +131,8 @@ test('mixed campaign persists and reloads contextual bandit policy checkpoints',
   assert.equal(first.status, 'ok');
   assert.equal(first.summary.policy_checkpoint.save_status, 'written');
   assert.equal(first.summary.policy_checkpoint.path.endsWith('.json'), true);
+  assert.equal(first.summary.policy_checkpoint.index_path.endsWith('.json'), true);
+  assert.equal(first.summary.policy_checkpoint.available_versions > 0, true);
 
   const checkpointPath = first.summary.policy_checkpoint.path;
   const payload = JSON.parse(await readFile(checkpointPath, 'utf8'));
@@ -145,6 +147,7 @@ test('mixed campaign persists and reloads contextual bandit policy checkpoints',
     resume: true,
   });
   assert.equal(resumed.summary.policy_checkpoint.load_status, 'loaded');
+  assert.equal(resumed.summary.policy_checkpoint.load_target, 'latest');
   assert.equal(
     resumed.summary.bandit_policy_state.update_count > first.summary.bandit_policy_state.update_count,
     true
@@ -161,8 +164,13 @@ test('mixed campaign safely cold-starts when policy checkpoint is corrupted', as
     batchTargetCount: 2,
     onlineBatchSize: 2,
   });
-  const checkpointPath = first.summary.policy_checkpoint.path;
-  await writeFile(checkpointPath, '{broken-json', 'utf8');
+  const indexPath = first.summary.policy_checkpoint.index_path;
+  const indexPayload = JSON.parse(await readFile(indexPath, 'utf8'));
+  const latestVersionId = String(indexPayload.latest_version_id || '');
+  const latestVersionEntry = (Array.isArray(indexPayload.versions) ? indexPayload.versions : [])
+    .find((entry) => String(entry?.version_id || '') === latestVersionId);
+  assert.equal(Boolean(latestVersionEntry?.file_path), true);
+  await writeFile(latestVersionEntry.file_path, '{broken-json', 'utf8');
 
   const resumed = await mod.runMixedCampaign({
     rootDir,
@@ -174,6 +182,40 @@ test('mixed campaign safely cold-starts when policy checkpoint is corrupted', as
   assert.equal(resumed.status, 'ok');
   assert.equal(resumed.summary.policy_checkpoint.load_status, 'corrupt');
   assert.equal(resumed.summary.bandit_policy_state.update_count > 0, true);
+});
+
+test('mixed campaign can resume from last-good version target for policy rollback', async () => {
+  const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));
+
+  const first = await mod.runMixedCampaign({
+    rootDir,
+    activeEnvironments: ['orchestrator'],
+    batchTargetCount: 3,
+    onlineBatchSize: 2,
+  });
+  const indexPath = first.summary.policy_checkpoint.index_path;
+  const indexPayload = JSON.parse(await readFile(indexPath, 'utf8'));
+  const versions = Array.isArray(indexPayload.versions) ? indexPayload.versions : [];
+  assert.equal(versions.length >= 2, true);
+  const previousVersionId = String(versions[versions.length - 2].version_id || '');
+  assert.equal(previousVersionId.length > 0, true);
+  indexPayload.last_good_version_id = previousVersionId;
+  await writeFile(indexPath, `${JSON.stringify(indexPayload, null, 2)}\n`, 'utf8');
+
+  const resumed = await mod.runMixedCampaign({
+    rootDir,
+    activeEnvironments: ['orchestrator'],
+    batchTargetCount: 1,
+    onlineBatchSize: 1,
+    resume: true,
+    policyResumeTarget: 'last-good',
+  });
+  assert.equal(resumed.status, 'ok');
+  assert.equal(resumed.summary.policy_checkpoint.load_status, 'loaded');
+  assert.equal(resumed.summary.policy_checkpoint.load_target, 'last-good');
+  assert.equal(resumed.summary.policy_checkpoint.loaded_version_id, previousVersionId);
+  assert.equal(resumed.summary.policy_checkpoint.rollback_applied, true);
 });
 
 test('mixed campaign accepts real orchestrator harness mode for trajectory collection', async () => {
