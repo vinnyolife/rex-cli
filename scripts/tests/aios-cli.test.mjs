@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { parseArgs } from '../lib/cli/parse-args.mjs';
+import { runSnapshotRollback } from '../lib/lifecycle/snapshot-rollback.mjs';
 
 test('parseArgs returns interactive mode when no args are provided', () => {
   const result = parseArgs([]);
@@ -602,6 +603,29 @@ test('parseArgs accepts entropy-gc options', () => {
   assert.equal(result.options.format, 'json');
 });
 
+test('parseArgs accepts snapshot-rollback options', () => {
+  const result = parseArgs([
+    'snapshot-rollback',
+    '--session',
+    'session-123',
+    '--job',
+    'phase.implement',
+    '--dry-run',
+    '--format',
+    'json',
+  ]);
+  assert.equal(result.command, 'snapshot-rollback');
+  assert.equal(result.mode, 'command');
+  assert.equal(result.options.sessionId, 'session-123');
+  assert.equal(result.options.jobId, 'phase.implement');
+  assert.equal(result.options.dryRun, true);
+  assert.equal(result.options.format, 'json');
+
+  const alias = parseArgs(['rollback-snapshot', '--manifest', 'tmp/manifest.json']);
+  assert.equal(alias.command, 'snapshot-rollback');
+  assert.equal(alias.options.manifestPath, 'tmp/manifest.json');
+});
+
 test('parseArgs treats memo help as help mode', () => {
   const result = parseArgs(['memo', '--help']);
   assert.equal(result.command, 'memo');
@@ -621,6 +645,7 @@ test('aios CLI prints help', () => {
   assert.match(result.stdout, /doctor/);
   assert.match(result.stdout, /team/);
   assert.match(result.stdout, /native/);
+  assert.match(result.stdout, /snapshot-rollback/);
 });
 
 test('aios memo prints help', () => {
@@ -719,6 +744,99 @@ test('aios memo pin set blocks unsafe memory injection content', async () => {
 
     assert.equal(result.status, 1);
     assert.match(String(result.stderr || ''), /Blocked unsafe pinned workspace memory/i);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('runSnapshotRollback restores targets from explicit manifest path', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-snapshot-rollback-apply-'));
+  const snapshotDir = path.join(workspaceRoot, '.aios', 'subagent-snapshots', 'pre-mutation-20260412T120000Z-phase_implement');
+  const backupDir = path.join(snapshotDir, 'backup');
+  const manifestPath = path.join(snapshotDir, 'manifest.json');
+  const targetPath = path.join(workspaceRoot, 'scripts', 'sample.txt');
+  const backupTargetPath = path.join(backupDir, 'scripts', 'sample.txt');
+
+  try {
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.mkdir(path.dirname(backupTargetPath), { recursive: true });
+    await fs.writeFile(targetPath, 'after\n', 'utf8');
+    await fs.writeFile(backupTargetPath, 'before\n', 'utf8');
+    await fs.writeFile(manifestPath, `${JSON.stringify({
+      schemaVersion: 1,
+      kind: 'orchestration.pre-mutation-snapshot',
+      createdAt: '2026-04-12T12:00:00.000Z',
+      sessionId: '',
+      jobId: 'phase.implement',
+      phaseId: 'implement',
+      role: 'implementer',
+      targets: [
+        { path: 'scripts/sample.txt', existed: true, type: 'file' },
+      ],
+      backupPath: '.aios/subagent-snapshots/pre-mutation-20260412T120000Z-phase_implement/backup',
+    }, null, 2)}\n`, 'utf8');
+
+    const logs = [];
+    const result = await runSnapshotRollback(
+      { manifestPath: path.relative(workspaceRoot, manifestPath), format: 'json' },
+      { rootDir: workspaceRoot, io: { log: (line) => logs.push(String(line)) } }
+    );
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.summary.total, 1);
+    assert.equal(await fs.readFile(targetPath, 'utf8'), 'before\n');
+
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    assert.equal(Array.isArray(manifest.rollbackHistory), true);
+    assert.equal(manifest.rollbackHistory.length, 1);
+    assert.equal(manifest.rollbackHistory[0].summary.total, 1);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('runSnapshotRollback supports session+job discovery in dry-run mode', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-snapshot-rollback-dryrun-'));
+  const artifactsRoot = path.join(workspaceRoot, 'memory', 'context-db', 'sessions', 'session-x', 'artifacts');
+  const snapshotDir = path.join(artifactsRoot, 'pre-mutation-20260412T130000Z-phase_implement');
+  const backupDir = path.join(snapshotDir, 'backup');
+  const manifestPath = path.join(snapshotDir, 'manifest.json');
+  const targetPath = path.join(workspaceRoot, 'scripts', 'sample.txt');
+  const backupTargetPath = path.join(backupDir, 'scripts', 'sample.txt');
+
+  try {
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.mkdir(path.dirname(backupTargetPath), { recursive: true });
+    await fs.writeFile(targetPath, 'after\n', 'utf8');
+    await fs.writeFile(backupTargetPath, 'before\n', 'utf8');
+    await fs.writeFile(manifestPath, `${JSON.stringify({
+      schemaVersion: 1,
+      kind: 'orchestration.pre-mutation-snapshot',
+      createdAt: '2026-04-12T13:00:00.000Z',
+      sessionId: 'session-x',
+      jobId: 'phase.implement',
+      phaseId: 'implement',
+      role: 'implementer',
+      targets: [
+        { path: 'scripts/sample.txt', existed: true, type: 'file' },
+      ],
+      backupPath: 'memory/context-db/sessions/session-x/artifacts/pre-mutation-20260412T130000Z-phase_implement/backup',
+    }, null, 2)}\n`, 'utf8');
+
+    const logs = [];
+    const result = await runSnapshotRollback(
+      { sessionId: 'session-x', jobId: 'phase.implement', dryRun: true, format: 'json' },
+      { rootDir: workspaceRoot, io: { log: (line) => logs.push(String(line)) } }
+    );
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.ok, true);
+    assert.equal(result.dryRun, true);
+    assert.equal(await fs.readFile(targetPath, 'utf8'), 'after\n');
+    assert.equal(logs.length > 0, true);
+    const payload = JSON.parse(logs.at(-1));
+    assert.equal(payload.ok, true);
+    assert.equal(payload.dryRun, true);
+    assert.equal(payload.jobId, 'phase.implement');
   } finally {
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   }

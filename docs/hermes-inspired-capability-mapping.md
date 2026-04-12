@@ -14,7 +14,7 @@ This page tracks which Hermes-inspired capabilities are implemented in AIOS, wha
 | Memory injection safety scan | `tools/memory_tool.py` | Workspace memo safety checks before prompt injection | Done |
 | Subagent progress visibility | `tools/delegate_tool.py` | `team status --watch` / `hud --watch` job+tool progress + stalled signal | Done |
 | Executor capability declaration | `tools/registry.py`, `toolsets.py` | Dispatch-time `executorCapabilityManifest` in report/artifacts | Done |
-| Pre-mutation rollback checkpoint | `tools/checkpoint_manager.py` | Live subagent opt-in pre-mutation snapshot (`AIOS_SUBAGENT_PRE_MUTATION_SNAPSHOT=1`) | Done |
+| Pre-mutation rollback checkpoint | `tools/checkpoint_manager.py` | Live subagent opt-in pre-mutation snapshot (`AIOS_SUBAGENT_PRE_MUTATION_SNAPSHOT=1`) + `snapshot-rollback` manifest-driven restore command + CI manifest-shape assertions in live-runtime regression tests | Done |
 | Multi-platform gateway + cron | `gateway/platforms/*` | Plugin-style integration only (not core) | Deferred by design |
 
 ## Current AIOS Controls
@@ -22,9 +22,10 @@ This page tracks which Hermes-inspired capabilities are implemented in AIOS, wha
 - Live execution still requires explicit opt-in (`AIOS_EXECUTE_LIVE=1` + `AIOS_SUBAGENT_CLIENT`).
 - Capability-unknown guard blocks risky live runs unless explicitly overridden.
 - Pre-mutation snapshots are opt-in and currently scoped to editable phase owned paths in live subagent runtime.
+- Snapshot rollback is now available via `node scripts/aios.mjs snapshot-rollback --session <session_id>` (or `--manifest <path>`).
+- Live-runtime regression now includes explicit snapshot manifest shape assertions (schema/version/paths/target types/restore hint coherence).
+- Incident recovery workflow and command examples are documented in `docs/snapshot-incident-recovery.md`.
 
 ## Next Optional Improvements
 
-1. Add a dedicated rollback command for pre-mutation snapshots (manifest-driven restore).
-2. Add CI assertions for snapshot manifest shape in live-runtime regression tests.
-3. Add docs/examples showing incident recovery workflow from snapshot artifacts.
+No open Hermes-inspired baseline follow-ups in this cycle.

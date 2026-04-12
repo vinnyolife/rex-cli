@@ -181,6 +181,36 @@ aios orchestrate --session <session-id> --dispatch local --execute live --format
 
 Tip (codex-cli): Codex CLI v0.114+ supports structured exec outputs. AIOS will auto-use `codex exec` with `--output-schema` + `--output-last-message` + stdin when available, and fall back to stdout parsing for older versions.
 
+### Incident Recovery (pre-mutation snapshots)
+
+Use this workflow when a live subagent run changed files incorrectly and you need to restore owned paths captured before mutation.
+
+Prerequisite (set before live orchestrate runs):
+
+```bash
+export AIOS_SUBAGENT_PRE_MUTATION_SNAPSHOT=1
+```
+
+Recover from the latest snapshot in a session/job:
+
+```bash
+# preview only (recommended)
+aios snapshot-rollback --session <session-id> --job phase.implement --dry-run
+
+# apply restore
+aios snapshot-rollback --session <session-id> --job phase.implement
+```
+
+Recover from an explicit manifest path:
+
+```bash
+aios snapshot-rollback --manifest memory/context-db/sessions/<session-id>/artifacts/pre-mutation-<stamp>-phase_implement/manifest.json --dry-run
+aios snapshot-rollback --manifest memory/context-db/sessions/<session-id>/artifacts/pre-mutation-<stamp>-phase_implement/manifest.json
+```
+
+After restore, verify with your normal guardrails (`git status`, focused tests, and/or `aios orchestrate --session <session-id> --preflight auto --format json`).
+Detailed runbook: `docs/snapshot-incident-recovery.md`.
+
 ### HUD (session visibility)
 
 ```bash

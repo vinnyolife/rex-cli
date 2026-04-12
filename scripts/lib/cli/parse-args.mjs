@@ -4,6 +4,7 @@ import {
   createDefaultLearnEvalOptions,
   createDefaultOrchestrateOptions,
   createDefaultQualityGateOptions,
+  createDefaultSnapshotRollbackOptions,
   createDefaultSetupOptions,
   createDefaultUninstallOptions,
   createDefaultUpdateOptions,
@@ -17,6 +18,7 @@ import {
   normalizeOrchestrateExecutionMode,
   normalizeOrchestratePreflightMode,
   normalizeQualityGateMode,
+  normalizeSnapshotRollbackFormat,
   normalizeSkillInstallMode,
   normalizeSkillNames,
   normalizeSkillScope,
@@ -871,6 +873,7 @@ function getCommandDefaults(command) {
   if (command === 'quality-gate') return createDefaultQualityGateOptions();
   if (command === 'orchestrate') return createDefaultOrchestrateOptions();
   if (command === 'entropy-gc') return createDefaultEntropyGcOptions();
+  if (command === 'snapshot-rollback') return createDefaultSnapshotRollbackOptions();
   return createDefaultLearnEvalOptions();
 }
 
@@ -971,7 +974,7 @@ function parseTopLevelArgs(command, argv) {
         options.fix = true;
         break;
       case '--dry-run':
-        if (command !== 'doctor') {
+        if (command !== 'doctor' && command !== 'snapshot-rollback') {
           throw new Error(`Unknown option: ${arg}`);
         }
         options.dryRun = true;
@@ -989,10 +992,28 @@ function parseTopLevelArgs(command, argv) {
         index += 1;
         break;
       case '--session':
-        if (command !== 'learn-eval' && command !== 'orchestrate' && command !== 'quality-gate' && command !== 'entropy-gc') {
+        if (command !== 'learn-eval'
+          && command !== 'orchestrate'
+          && command !== 'quality-gate'
+          && command !== 'entropy-gc'
+          && command !== 'snapshot-rollback') {
           throw new Error(`Unknown option: ${arg}`);
         }
         options.sessionId = takeValue(rest, index, '--session');
+        index += 1;
+        break;
+      case '--manifest':
+        if (command !== 'snapshot-rollback') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.manifestPath = takeValue(rest, index, '--manifest');
+        index += 1;
+        break;
+      case '--job':
+        if (command !== 'snapshot-rollback') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.jobId = takeValue(rest, index, '--job');
         index += 1;
         break;
       case '--limit':
@@ -1057,6 +1078,8 @@ function parseTopLevelArgs(command, argv) {
           options.format = normalizeLearnEvalFormat(value);
         } else if (command === 'entropy-gc') {
           options.format = normalizeEntropyGcFormat(value);
+        } else if (command === 'snapshot-rollback') {
+          options.format = normalizeSnapshotRollbackFormat(value);
         } else {
           throw new Error(`Unknown option: ${arg}`);
         }
@@ -1132,9 +1155,11 @@ export function parseArgs(argv = []) {
       ? 'quality-gate'
       : first === 'entropy'
         ? 'entropy-gc'
+      : first === 'rollback-snapshot'
+        ? 'snapshot-rollback'
       : first;
 
-  if (!['setup', 'update', 'uninstall', 'doctor', 'quality-gate', 'orchestrate', 'team', 'hud', 'learn-eval', 'entropy-gc'].includes(command)) {
+  if (!['setup', 'update', 'uninstall', 'doctor', 'quality-gate', 'orchestrate', 'team', 'hud', 'learn-eval', 'entropy-gc', 'snapshot-rollback'].includes(command)) {
     throw new Error(`Unknown command: ${argv[0]}`);
   }
 

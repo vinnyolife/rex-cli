@@ -54,6 +54,68 @@ async function makeRootDir() {
   return await fs.mkdtemp(path.join(os.tmpdir(), 'aios-orchestrator-'));
 }
 
+function assertSnapshotManifestShape(manifest, {
+  expectedSessionId = null,
+  expectedJobId = '',
+  expectedPhaseId = '',
+  expectedRole = '',
+  expectedPathPrefix = '',
+  expectedManifestPath = '',
+  expectedBackupPath = '',
+} = {}) {
+  assert.equal(manifest?.schemaVersion, 1);
+  assert.equal(manifest?.kind, 'orchestration.pre-mutation-snapshot');
+  assert.equal(typeof manifest?.createdAt, 'string');
+  assert.equal(Number.isFinite(Date.parse(manifest.createdAt)), true);
+  assert.equal(typeof manifest?.sessionId, 'string');
+  assert.equal(typeof manifest?.jobId, 'string');
+  assert.equal(typeof manifest?.phaseId, 'string');
+  assert.equal(typeof manifest?.role, 'string');
+  assert.equal(Array.isArray(manifest?.targets), true);
+  assert.equal(manifest.targets.length > 0, true);
+  assert.equal(typeof manifest?.backupPath, 'string');
+  assert.equal(manifest.backupPath.length > 0, true);
+  assert.equal(manifest.backupPath.endsWith('/backup'), true);
+  assert.match(manifest.backupPath, /pre-mutation-/);
+  assert.equal(typeof manifest?.restoreHint, 'string');
+  assert.equal(manifest.restoreHint.length > 0, true);
+
+  if (expectedSessionId !== null) {
+    assert.equal(manifest.sessionId, expectedSessionId);
+  }
+  if (expectedJobId) {
+    assert.equal(manifest.jobId, expectedJobId);
+  }
+  if (expectedPhaseId) {
+    assert.equal(manifest.phaseId, expectedPhaseId);
+  }
+  if (expectedRole) {
+    assert.equal(manifest.role, expectedRole);
+  }
+  if (expectedPathPrefix) {
+    assert.equal(
+      manifest.targets.some((item) => String(item?.path || '').startsWith(expectedPathPrefix)),
+      true
+    );
+  }
+  if (expectedManifestPath) {
+    assert.equal(manifest.restoreHint.includes(expectedManifestPath), true);
+  }
+  if (expectedBackupPath) {
+    assert.equal(manifest.restoreHint.includes(expectedBackupPath), true);
+    assert.equal(manifest.backupPath, expectedBackupPath);
+  }
+
+  for (const target of manifest.targets) {
+    assert.equal(typeof target?.path, 'string');
+    assert.equal(target.path.length > 0, true);
+    assert.equal(target.path.startsWith('/'), false);
+    assert.equal(target.path.includes('..'), false);
+    assert.equal(typeof target?.existed, 'boolean');
+    assert.equal(['file', 'dir'].includes(target?.type), true);
+  }
+}
+
 async function createFakeCodexCommand(
   payload = null,
   { usageLog = '', failOnOutputSchema = false, upstreamFailAttempts = 0, captureInputPath = '', hangAfterOutput = false } = {}
@@ -718,7 +780,7 @@ test('dispatch runtime registry can execute the subagent runtime with a configur
   assert.equal((result.cost?.usd || 0) > 0, true);
 });
 
-test('subagent runtime captures pre-mutation snapshots for editable phases when opted in', async () => {
+test('subagent runtime captures pre-mutation snapshots with schema-checked manifest when opted in', async () => {
   const runtimes = await importDispatchRuntimes();
   assert.ok(runtimes, 'expected runtime registry module');
 
@@ -793,10 +855,27 @@ test('subagent runtime captures pre-mutation snapshots for editable phases when 
 
   const manifestPath = path.join(rootDir, snapshot.manifestPath);
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
-  assert.equal(manifest.kind, 'orchestration.pre-mutation-snapshot');
-  assert.equal(manifest.jobId, 'phase.implement');
-  assert.equal(Array.isArray(manifest.targets), true);
-  assert.equal(manifest.targets.some((item) => String(item.path || '').startsWith('scripts/')), true);
+  assert.equal(snapshot.targetCount, manifest.targets.length);
+  assertSnapshotManifestShape(manifest, {
+    expectedSessionId: '',
+    expectedJobId: 'phase.implement',
+    expectedPhaseId: 'implement',
+    expectedRole: 'implementer',
+    expectedPathPrefix: 'scripts/',
+    expectedManifestPath: snapshot.manifestPath,
+    expectedBackupPath: snapshot.backupPath,
+  });
+
+  for (const target of manifest.targets) {
+    if (target.existed !== true) continue;
+    const backupTargetPath = path.join(rootDir, snapshot.backupPath, target.path);
+    const details = await fs.lstat(backupTargetPath);
+    if (target.type === 'dir') {
+      assert.equal(details.isDirectory(), true);
+    } else {
+      assert.equal(details.isDirectory(), false);
+    }
+  }
 
   const backupFilePath = path.join(rootDir, snapshot.backupPath, 'scripts', 'pre-mutation.txt');
   assert.equal(await fs.readFile(backupFilePath, 'utf8'), 'before\n');

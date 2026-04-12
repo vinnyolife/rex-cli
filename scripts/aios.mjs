@@ -233,6 +233,15 @@ async function main() {
     return;
   }
 
+  if (parsed.command === 'snapshot-rollback') {
+    const { runSnapshotRollback } = await import('./lib/lifecycle/snapshot-rollback.mjs');
+    const result = await runSnapshotRollback(parsed.options, { rootDir });
+    if (result.exitCode !== 0) {
+      process.exitCode = result.exitCode;
+    }
+    return;
+  }
+
   if (parsed.command === 'team') {
     if (parsed.options.subcommand === 'status') {
       const { runTeamStatus } = await import('./lib/lifecycle/team-ops.mjs');

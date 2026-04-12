@@ -194,6 +194,27 @@ Week 2:
 - 文档：
   - `docs/hermes-inspired-capability-mapping.md`
 
+7. `snapshot-rollback` 专用回滚命令已实现（manifest 驱动恢复）
+- 代码：
+  - `scripts/lib/lifecycle/snapshot-rollback.mjs`（manifest 解析、workspace 安全校验、恢复计划、apply/dry-run、rollback history 记录）
+  - `scripts/aios.mjs`（新增顶层命令分发）
+  - `scripts/lib/cli/parse-args.mjs`（新增 `snapshot-rollback` 与别名 `rollback-snapshot` 参数解析）
+  - `scripts/lib/cli/help.mjs`（新增命令帮助）
+  - `scripts/lib/lifecycle/options.mjs`（新增命令默认选项与 format 规范化）
+- 测试：
+  - `scripts/tests/aios-cli.test.mjs` 新增 parseArgs 与 runSnapshotRollback（显式 manifest 恢复、session+job 发现 dry-run）覆盖
+
+8. snapshot manifest CI 结构断言已实现（live-runtime 回归测试）
+- 代码：
+  - `scripts/tests/aios-orchestrator.test.mjs`（新增 manifest shape 断言 helper，覆盖 schemaVersion / createdAt / targets / backupPath / restoreHint / backup 实体类型）
+- 测试：
+  - `node --test scripts/tests/aios-orchestrator.test.mjs` 通过（`83/83`）
+
+9. snapshot incident recovery 文档/示例已补齐（操作级 runbook）
+- 文档：
+  - `README.md`（新增 Incident Recovery 示例命令）
+  - `docs/snapshot-incident-recovery.md`（session/job 与 manifest 两条回滚路径 + 验证清单）
+
 验证结果：
 
 - `cd mcp-server && npm run typecheck` 通过

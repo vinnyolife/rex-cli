@@ -17,6 +17,7 @@ Commands:
   hud           Show ContextDB + dispatch HUD (CLI/TUI)
   learn-eval    Turn checkpoint telemetry into operator recommendations
   entropy-gc    Auto-archive stale ContextDB artifacts with rollback manifests
+  snapshot-rollback Restore pre-mutation snapshot artifacts (manifest-driven)
 
 Examples:
   node scripts/aios.mjs setup --components all --mode opt-in --client all
@@ -38,6 +39,7 @@ Examples:
   node scripts/aios.mjs orchestrate --session codex-cli-20260303T080437-065e16c0 --format json
   node scripts/aios.mjs learn-eval --limit 5
   node scripts/aios.mjs entropy-gc auto --session codex-cli-20260303T080437-065e16c0
+  node scripts/aios.mjs snapshot-rollback --session codex-cli-20260303T080437-065e16c0 --job phase.implement --dry-run
   node scripts/aios.mjs internal browser doctor --fix
   node scripts/aios.mjs internal browser mcp-migrate
   node scripts/aios.mjs internal browser cdp-start
@@ -248,6 +250,18 @@ Options:
   --session <id>                 Required session id to clean
   --retain <n>                   Keep latest n dispatch artifacts (default: 5)
   --min-age-hours <n>            Only archive files older than n hours (default: 24)
+  --format <text|json>
+  -h, --help
+`;
+    case 'snapshot-rollback':
+      return `Usage:
+  node scripts/aios.mjs snapshot-rollback [options]
+
+Options:
+  --manifest <path>              Explicit snapshot manifest path (relative to workspace or absolute)
+  --session <id>                 Auto-select latest snapshot manifest under session artifacts
+  --job <jobId>                  Optional job filter when auto-selecting snapshot manifest
+  --dry-run                      Preview restore actions without mutating files
   --format <text|json>
   -h, --help
 `;

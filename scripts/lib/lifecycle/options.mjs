@@ -14,6 +14,7 @@ export const ORCHESTRATOR_PREFLIGHT_MODE_NAMES = ['none', 'auto'];
 export const LEARN_EVAL_FORMAT_NAMES = ['text', 'json'];
 export const ENTROPY_GC_MODE_NAMES = ['dry-run', 'auto', 'off'];
 export const ENTROPY_GC_FORMAT_NAMES = ['text', 'json'];
+export const SNAPSHOT_ROLLBACK_FORMAT_NAMES = ['text', 'json'];
 
 export function normalizeWrapMode(raw = 'opt-in') {
   const value = String(raw || 'opt-in').trim().toLowerCase();
@@ -88,6 +89,14 @@ export function normalizeEntropyGcFormat(raw = 'text') {
   const value = String(raw || 'text').trim().toLowerCase();
   if (!ENTROPY_GC_FORMAT_NAMES.includes(value)) {
     throw new Error(`entropy-gc format must be one of: ${ENTROPY_GC_FORMAT_NAMES.join(', ')}`);
+  }
+  return value;
+}
+
+export function normalizeSnapshotRollbackFormat(raw = 'text') {
+  const value = String(raw || 'text').trim().toLowerCase();
+  if (!SNAPSHOT_ROLLBACK_FORMAT_NAMES.includes(value)) {
+    throw new Error(`snapshot-rollback format must be one of: ${SNAPSHOT_ROLLBACK_FORMAT_NAMES.join(', ')}`);
   }
   return value;
 }
@@ -245,6 +254,16 @@ export function createDefaultEntropyGcOptions() {
     mode: 'auto',
     retain: 5,
     minAgeHours: 24,
+    format: 'text',
+  };
+}
+
+export function createDefaultSnapshotRollbackOptions() {
+  return {
+    manifestPath: '',
+    sessionId: '',
+    jobId: '',
+    dryRun: false,
     format: 'text',
   };
 }
