@@ -196,4 +196,6 @@ test('mixed campaign accepts real orchestrator harness mode for trajectory colle
   assert.equal(result.status, 'ok');
   assert.equal(result.summary.environment_counts.orchestrator > 0, true);
   assert.equal(result.summary.bandit_policy_state.update_count > 0, true);
+  assert.equal(result.summary.orchestrator_holdout_harness_mode, 'real');
+  assert.equal(result.summary.holdout_validation.orchestrator.evaluation_harness_mode, 'real');
 });

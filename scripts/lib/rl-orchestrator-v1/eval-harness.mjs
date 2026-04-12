@@ -1,5 +1,5 @@
 import { validateHoldoutValidationResult } from '../rl-core/schema.mjs';
-import { compareOrchestratorAgainstReference, runOrchestratorEpisode } from './adapter.mjs';
+import { compareOrchestratorAgainstReference, createOrchestratorHarness, runOrchestratorEpisode } from './adapter.mjs';
 import { createCiFixtureOrchestratorHarness } from './decision-runner.mjs';
 import { validateOrchestratorHoldoutResult } from './schema.mjs';
 import { loadRealOrchestratorTasks } from './task-registry.mjs';
@@ -8,8 +8,14 @@ export async function runOrchestratorHoldout({
   tasks = loadRealOrchestratorTasks().slice(0, 20),
   checkpointId,
   baselineCheckpointId = 'orch-baseline',
-  harness = createCiFixtureOrchestratorHarness(),
+  harness = null,
+  harnessMode = 'fixture',
+  harnessOptions = {},
 }) {
+  const resolvedHarness = harness || createOrchestratorHarness({
+    mode: harnessMode,
+    options: harnessOptions,
+  }) || createCiFixtureOrchestratorHarness();
   const validTasks = loadRealOrchestratorTasks({ tasks });
   let successCount = 0;
   let comparisonFailedCount = 0;
@@ -21,7 +27,7 @@ export async function runOrchestratorHoldout({
       const episode = await runOrchestratorEpisode({
         task,
         checkpointId,
-        harness,
+        harness: resolvedHarness,
       });
       if (episode.terminal_outcome === 'success') {
         successCount += 1;
@@ -33,7 +39,7 @@ export async function runOrchestratorHoldout({
         task,
         activeCheckpointId: checkpointId,
         preUpdateRefCheckpointId: baselineCheckpointId,
-        harness,
+        harness: resolvedHarness,
       });
       if (comparison.comparison_status === 'comparison_failed') {
         comparisonFailedCount += 1;
@@ -66,6 +72,6 @@ export async function runOrchestratorHoldout({
   return {
     ...result,
     ...corePayload,
+    evaluation_harness_mode: String(harnessMode || 'fixture'),
   };
 }
-

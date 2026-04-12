@@ -202,7 +202,14 @@ function createDefaultAdapters({
   };
 }
 
-async function runHoldouts({ activeEnvironments, adapters, activeCheckpointId, baselineCheckpointId }) {
+async function runHoldouts({
+  activeEnvironments,
+  adapters,
+  activeCheckpointId,
+  baselineCheckpointId,
+  orchestratorHoldoutHarnessMode = 'fixture',
+  orchestratorHoldoutHarnessOptions = {},
+}) {
   const results = {};
   if (activeEnvironments.includes('shell')) {
     results.shell = await runShellHoldoutValidation({
@@ -225,6 +232,8 @@ async function runHoldouts({ activeEnvironments, adapters, activeCheckpointId, b
       tasks,
       checkpointId: activeCheckpointId,
       baselineCheckpointId,
+      harnessMode: orchestratorHoldoutHarnessMode,
+      harnessOptions: orchestratorHoldoutHarnessOptions,
     });
   }
   return results;
@@ -430,6 +439,8 @@ export async function runMixedCampaign({
   adapters: adapterOverrides = {},
   orchestratorHarnessMode = 'fixture',
   orchestratorHarnessOptions = {},
+  orchestratorHoldoutHarnessMode = orchestratorHarnessMode,
+  orchestratorHoldoutHarnessOptions = orchestratorHarnessOptions,
   initialCheckpointId = 'ckpt-mixed-a',
   onlineBatchSize = 4,
   batchTargetCount = 3,
@@ -682,6 +693,11 @@ export async function runMixedCampaign({
       adapters,
       activeCheckpointId: controlState.active_checkpoint_id,
       baselineCheckpointId: controlState.last_stable_checkpoint_id,
+      orchestratorHoldoutHarnessMode,
+      orchestratorHoldoutHarnessOptions: {
+        rootDir: orchestratorHoldoutHarnessOptions.rootDir || rootDir,
+        ...orchestratorHoldoutHarnessOptions,
+      },
     });
     Object.assign(holdout_validation, holdouts);
     const coverage_sufficient = resolvedEnvironments.every((environment) => monitoringSeen.has(environment));
@@ -804,6 +820,7 @@ export async function runMixedCampaign({
     },
     duplicateEventApplications,
     active_environments: resolvedEnvironments,
+    orchestrator_holdout_harness_mode: orchestratorHoldoutHarnessMode,
   };
 
   return {

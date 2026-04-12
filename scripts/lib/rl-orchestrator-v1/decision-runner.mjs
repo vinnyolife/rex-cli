@@ -69,6 +69,30 @@ function mapDecisionToBlueprint(decisionType) {
   return DECISION_BLUEPRINT_BY_TYPE[normalized] || 'feature';
 }
 
+function normalizeExecutionMode(mode = 'dry-run') {
+  const normalized = String(mode || 'dry-run').trim().toLowerCase();
+  if (normalized !== 'dry-run' && normalized !== 'live') {
+    return 'dry-run';
+  }
+  return normalized;
+}
+
+function resolveExecutionModePlan({
+  executionMode = 'dry-run',
+  fallbackExecutionMode = 'dry-run',
+  fallbackOnMissingDispatchRun = true,
+} = {}) {
+  const primary = normalizeExecutionMode(executionMode);
+  if (!fallbackOnMissingDispatchRun) {
+    return [primary];
+  }
+  const fallback = normalizeExecutionMode(fallbackExecutionMode);
+  if (fallback === primary) {
+    return [primary];
+  }
+  return [primary, fallback];
+}
+
 function buildRealOrchestrateOptions({
   task,
   checkpointId,
@@ -126,7 +150,16 @@ function buildRealEvidence({
   mode,
   selectedExecutor = null,
   report = {},
+  execution = {},
 }) {
+  const requestedExecutionMode = normalizeExecutionMode(execution.requestedExecutionMode || 'dry-run');
+  const effectiveExecutionMode = normalizeExecutionMode(execution.effectiveExecutionMode || requestedExecutionMode);
+  const attemptedExecutionModes = toUniqueStrings(
+    Array.isArray(execution.attemptedExecutionModes) ? execution.attemptedExecutionModes : [effectiveExecutionMode]
+  );
+  const fallbackReason = typeof execution.fallbackReason === 'string' && execution.fallbackReason.trim().length > 0
+    ? execution.fallbackReason.trim()
+    : null;
   const dispatchRun = report?.dispatchRun && typeof report.dispatchRun === 'object'
     ? report.dispatchRun
     : {};
@@ -165,6 +198,9 @@ function buildRealEvidence({
     context_state: {
       ...task.context_state,
       checkpoint_id: checkpointId,
+      execution_mode_requested: requestedExecutionMode,
+      execution_mode_effective: effectiveExecutionMode,
+      execution_modes_attempted: attemptedExecutionModes,
       dispatch_ok: dispatchRun.ok === true,
       blocked_jobs: summary.blockedCount,
       completed_jobs: summary.completedCount,
@@ -180,6 +216,10 @@ function buildRealEvidence({
       attempt,
       mode,
       harness_mode: 'real',
+      requested_execution_mode: requestedExecutionMode,
+      effective_execution_mode: effectiveExecutionMode,
+      attempted_execution_modes: attemptedExecutionModes,
+      fallback_reason: fallbackReason,
       dispatch_ok: dispatchRun.ok === true,
       dispatch_mode: String(dispatchRun.mode || ''),
       runtime_id: String(dispatchRun?.runtime?.id || ''),
@@ -258,6 +298,8 @@ export function createRealOrchestratorHarness({
   rootDir = process.cwd(),
   dispatchMode = 'local',
   executionMode = 'dry-run',
+  fallbackExecutionMode = 'dry-run',
+  fallbackOnMissingDispatchRun = true,
   sessionId = '',
   io = null,
   env = process.env,
@@ -281,33 +323,78 @@ export function createRealOrchestratorHarness({
         mode,
         requested_executor: requestedExecutor,
         harness_mode: 'real',
+        execution_mode_requested: normalizeExecutionMode(executionMode),
+        execution_modes_attempted: [],
+        execution_mode_effective: null,
+        fallback_reason: null,
         fallback_used: false,
       };
       harness.calls.push(callRecord);
-
-      const options = buildRealOrchestrateOptions({
-        task: normalizedTask,
-        checkpointId,
-        attempt,
-        mode,
-        dispatchMode,
+      const executionModePlan = resolveExecutionModePlan({
         executionMode,
-        sessionId,
+        fallbackExecutionMode,
+        fallbackOnMissingDispatchRun,
       });
-      try {
-        const result = await executeOrchestrate(options, {
-          rootDir,
-          io: resolvedIo,
-          env,
+      let selectedMode = executionModePlan[0];
+      let selectedResult = null;
+      let lastError = null;
+      let fallbackReason = null;
+
+      for (const currentExecutionMode of executionModePlan) {
+        callRecord.execution_modes_attempted.push(currentExecutionMode);
+        const options = buildRealOrchestrateOptions({
+          task: normalizedTask,
+          checkpointId,
+          attempt,
+          mode,
+          dispatchMode,
+          executionMode: currentExecutionMode,
+          sessionId,
         });
+
+        try {
+          const result = await executeOrchestrate(options, {
+            rootDir,
+            io: resolvedIo,
+            env,
+          });
+          const hasDispatchRun = result?.report?.dispatchRun && typeof result.report.dispatchRun === 'object';
+          selectedMode = currentExecutionMode;
+          if (hasDispatchRun || currentExecutionMode === executionModePlan[executionModePlan.length - 1]) {
+            selectedResult = result;
+            break;
+          }
+          selectedResult = null;
+          fallbackReason = `missing dispatchRun in ${currentExecutionMode}`;
+        } catch (error) {
+          lastError = error;
+          if (currentExecutionMode !== executionModePlan[executionModePlan.length - 1]) {
+            fallbackReason = `execute failed in ${currentExecutionMode}: ${error?.message || String(error)}`;
+            continue;
+          }
+        }
+      }
+
+      try {
+        if (!selectedResult && lastError) {
+          throw lastError;
+        }
         const evidence = buildRealEvidence({
           task: normalizedTask,
           checkpointId,
           attempt,
           mode,
           selectedExecutor: requestedExecutor,
-          report: result?.report || {},
+          report: selectedResult?.report || {},
+          execution: {
+            requestedExecutionMode: callRecord.execution_mode_requested,
+            effectiveExecutionMode: selectedMode,
+            attemptedExecutionModes: callRecord.execution_modes_attempted,
+            fallbackReason,
+          },
         });
+        callRecord.execution_mode_effective = selectedMode;
+        callRecord.fallback_reason = fallbackReason;
         callRecord.dispatch_ok = evidence.decision_payload?.dispatch_ok === true;
         callRecord.runtime_id = String(evidence.decision_payload?.runtime_id || '');
         return evidence;
@@ -335,6 +422,10 @@ export function createRealOrchestratorHarness({
           decision_payload: {
             ...normalizedFallback.decision_payload,
             harness_mode: 'real',
+            requested_execution_mode: callRecord.execution_mode_requested,
+            effective_execution_mode: 'fixture',
+            attempted_execution_modes: callRecord.execution_modes_attempted,
+            fallback_reason: fallbackReason || callRecord.error,
             fallback_used: true,
             fallback_error: callRecord.error,
           },

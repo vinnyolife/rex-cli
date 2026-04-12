@@ -137,6 +137,56 @@ test('orchestrator adapter supports real harness mode with dry-run trajectories'
   assert.equal(Array.isArray(episode.bandit_trace?.action_space), true);
 });
 
+test('real orchestrator harness retries live with dry-run fallback when live dispatch evidence is unavailable', async () => {
+  const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
+  const executionModes = [];
+  const adapter = mod.createOrchestratorAdapter({
+    tasks: [makeTask({ task_id: 'orch-real-live-fallback-001' })],
+    harnessMode: 'real',
+    harnessOptions: {
+      rootDir: process.cwd(),
+      executionMode: 'live',
+      executeOrchestrate: async (options) => {
+        executionModes.push(options.executionMode);
+        if (options.executionMode === 'live') {
+          return {
+            exitCode: 1,
+            report: { kind: 'guardrail.capability-unknown' },
+          };
+        }
+        return {
+          exitCode: 0,
+          report: {
+            dispatchRun: {
+              mode: 'dry-run',
+              ok: true,
+              runtime: { id: 'local-dry-run' },
+              executorRegistry: ['local-phase'],
+              jobRuns: [{ status: 'simulated' }],
+            },
+            dispatchPreflight: { results: [] },
+          },
+        };
+      },
+    },
+  });
+  const task = adapter.sampleTask({ seed: 0, attempt: 0 });
+
+  const episode = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-live-fallback',
+    policy: { seed: 19 },
+  });
+
+  assert.deepEqual(executionModes, ['live', 'dry-run']);
+  assert.equal(episode.decision_payload.harness_mode, 'real');
+  assert.equal(episode.decision_payload.requested_execution_mode, 'live');
+  assert.equal(episode.decision_payload.effective_execution_mode, 'dry-run');
+  assert.deepEqual(episode.decision_payload.attempted_execution_modes, ['live', 'dry-run']);
+  assert.equal(typeof episode.decision_payload.fallback_reason, 'string');
+  assert.equal(episode.terminal_outcome, 'success');
+});
+
 test('real orchestrator harness falls back to fixture evidence on orchestration faults', async () => {
   const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
   const runnerMod = await import('../lib/rl-orchestrator-v1/decision-runner.mjs');
