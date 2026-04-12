@@ -23,6 +23,19 @@ test('orchestrator schema validates task, evidence, and holdout payloads', async
     terminal_outcome: 'success',
   }));
 
+  assert.doesNotThrow(() => mod.validateOrchestratorBanditTrace({
+    algorithm: 'contextual_bandit',
+    context_key: 'orchestrator:dispatch:blockers=0:human=0',
+    action_space: ['local-phase', 'local-control'],
+    selected_action: 'local-phase',
+    action_probability: 0.6,
+    action_probabilities: {
+      'local-phase': 0.6,
+      'local-control': 0.4,
+    },
+    selection_mode: 'exploit',
+  }));
+
   assert.doesNotThrow(() => mod.validateOrchestratorHoldoutResult({
     episode_count: 20,
     decision_success_rate: 0.7,
@@ -31,4 +44,3 @@ test('orchestrator schema validates task, evidence, and holdout payloads', async
     schema_validation_failures: 0,
   }));
 });
-

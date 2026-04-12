@@ -4,7 +4,7 @@ import path from 'node:path';
 import { applyPointerTransition } from '../rl-core/checkpoint-registry.mjs';
 import { reduceDegradationStreak } from '../rl-core/comparison-engine.mjs';
 import { applyControlEvent, createControlStateStore, readControlSnapshot, writeControlSnapshot } from '../rl-core/control-state-store.mjs';
-import { runOnlineUpdateBatch } from '../rl-core/trainer.mjs';
+import { applyTrajectoryUpdate, runOnlineUpdateBatch } from '../rl-core/trainer.mjs';
 import { createBrowserAdapter } from '../rl-browser-v1/adapter.mjs';
 import { runBrowserHoldout } from '../rl-browser-v1/eval-harness.mjs';
 import { createOrchestratorAdapter } from '../rl-orchestrator-v1/adapter.mjs';
@@ -20,6 +20,32 @@ function computeHash(value) {
   }
   return hash >>> 0;
 }
+
+function clamp(value, min, max) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, normalized));
+}
+
+function safeRatio(numerator, denominator) {
+  const top = Number(numerator || 0);
+  const bottom = Number(denominator || 0);
+  if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= 0) {
+    return 0;
+  }
+  return top / bottom;
+}
+
+const ORCHESTRATOR_BANDIT_REWARD_WEIGHTS = Object.freeze({
+  terminal: 0.8,
+  successRate: 0.4,
+  rollbackRate: -0.6,
+  humanHandoffRate: -0.3,
+  missedHandoff: -0.4,
+  verificationBlocked: -0.2,
+});
 
 function buildControlSnapshot(initialCheckpointId) {
   return {
@@ -183,7 +209,66 @@ async function runHoldouts({ activeEnvironments, adapters, activeCheckpointId, b
   return results;
 }
 
-function buildTrajectoryFromEpisode(episode) {
+export function computeOrchestratorBanditReward({
+  episode,
+  batchOrchestratorEpisodes = [],
+  historical = {},
+} = {}) {
+  const orchestratorRows = Array.isArray(batchOrchestratorEpisodes) && batchOrchestratorEpisodes.length > 0
+    ? batchOrchestratorEpisodes
+    : [episode];
+  const successCount = orchestratorRows.filter((row) => row?.terminal_outcome === 'success').length;
+  const handoffCount = orchestratorRows.filter((row) => row?.handoff_triggered === true).length;
+  const successRate = safeRatio(successCount, orchestratorRows.length);
+  const humanHandoffRate = safeRatio(handoffCount, orchestratorRows.length);
+  const rollbackRate = safeRatio(historical.rollbacksCompleted, historical.updatesCompleted);
+  const terminalReward = Number(episode?.terminal_reward || 0);
+  const missedHandoff = episode?.decision_type === 'handoff' && episode?.handoff_triggered !== true;
+  const verificationBlocked = episode?.verification_result === 'blocked';
+
+  const components = {
+    terminal: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.terminal * terminalReward,
+    success_rate: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.successRate * ((2 * successRate) - 1),
+    rollback_rate: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.rollbackRate * rollbackRate,
+    human_handoff_rate: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.humanHandoffRate * humanHandoffRate,
+    missed_handoff: missedHandoff ? ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.missedHandoff : 0,
+    verification_blocked: verificationBlocked ? ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.verificationBlocked : 0,
+  };
+  const rawReward = Object.values(components).reduce((sum, value) => sum + Number(value || 0), 0);
+  const reward = clamp(rawReward, -1.5, 1.5);
+  return {
+    reward,
+    raw_reward: rawReward,
+    signals: {
+      terminal_reward: terminalReward,
+      success_rate: successRate,
+      rollback_rate: rollbackRate,
+      human_handoff_rate: humanHandoffRate,
+      missed_handoff: missedHandoff,
+      verification_blocked: verificationBlocked,
+    },
+    components,
+  };
+}
+
+function buildTrajectoryFromEpisode(episode, rewardContext = {}) {
+  if (episode.environment === 'orchestrator' && episode.bandit_trace) {
+    const rewardDetails = computeOrchestratorBanditReward({
+      episode,
+      batchOrchestratorEpisodes: rewardContext.batchOrchestratorEpisodes,
+      historical: rewardContext.historical,
+    });
+    return {
+      updateType: 'contextual_bandit',
+      contextKey: episode.bandit_trace.context_key,
+      actions: episode.bandit_trace.action_space,
+      selectedAction: episode.bandit_trace.selected_action,
+      reward: rewardDetails.reward,
+      selectionMode: episode.bandit_trace.selection_mode,
+      rewardSignals: rewardDetails.signals,
+      rewardComponents: rewardDetails.components,
+    };
+  }
   return {
     featureKey: `${episode.environment}:${episode.task_family}`,
     tokenIds: [computeHash(`${episode.task_id}:${episode.environment}`) % 7],
@@ -333,6 +418,7 @@ export async function runMixedCampaign({
       const episode = await adapter.runEpisode({
         task: sampled,
         checkpointId: controlState.active_checkpoint_id,
+        policy: selectedEnvironment === 'orchestrator' ? activePolicy || undefined : undefined,
       });
       collectionEpisodes.push({
         ...episode,
@@ -355,13 +441,22 @@ export async function runMixedCampaign({
       batch_id: `batch-${String(batchIndex).padStart(3, '0')}`,
       environments: [...batchEnvironments],
     });
+    const batchOrchestratorEpisodes = collectionEpisodes.filter((episode) => episode.environment === 'orchestrator');
+    const rewardContext = {
+      batchOrchestratorEpisodes,
+      historical: {
+        updatesCompleted,
+        rollbacksCompleted,
+      },
+    };
 
     const updateResult = runOnlineUpdateBatch({
       batchId: `batch-${String(batchIndex).padStart(3, '0')}`,
       checkpointId: controlState.active_checkpoint_id,
       policy: activePolicy || undefined,
       referencePolicy: referencePolicy || undefined,
-      trajectories: collectionEpisodes.map(buildTrajectoryFromEpisode),
+      applyUpdate: applyTrajectoryUpdate,
+      trajectories: collectionEpisodes.map((episode) => buildTrajectoryFromEpisode(episode, rewardContext)),
     });
     activePolicy = updateResult.policy || activePolicy;
     referencePolicy = updateResult.referencePolicy || referencePolicy;
@@ -521,6 +616,10 @@ export async function runMixedCampaign({
     pre_update_ref_checkpoint_id: controlState.pre_update_ref_checkpoint_id,
     last_stable_checkpoint_id: controlState.last_stable_checkpoint_id,
     holdout_validation,
+    bandit_policy_state: {
+      update_count: Number(activePolicy?.contextualBandit?.updateCount || 0),
+      context_count: Object.keys(activePolicy?.contextualBandit?.contexts || {}).length,
+    },
     drills: {
       rollback: mode === 'drill-rollback'
         ? {
@@ -574,4 +673,3 @@ export async function runMixedEvaluation({
 
   return validation;
 }
-

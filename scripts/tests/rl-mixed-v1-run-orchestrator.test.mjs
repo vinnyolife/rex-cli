@@ -20,6 +20,8 @@ test('mixed campaign reports multi-environment batches and deterministic epoch o
   assert.equal(result.summary.environment_counts.browser > 0, true);
   assert.equal(result.summary.environment_counts.orchestrator > 0, true);
   assert.equal(result.summary.mixed_batch_count >= 3, true);
+  assert.equal(result.summary.bandit_policy_state.update_count > 0, true);
+  assert.equal(result.summary.bandit_policy_state.context_count > 0, true);
   assert.equal(result.summary.batch_combinations.includes('browser+orchestrator'), true);
   assert.equal(
     result.summary.batch_combinations.some((combo) => combo === 'browser+shell' || combo === 'orchestrator+shell'),
@@ -64,6 +66,33 @@ test('mixed campaign reports multi-environment batches and deterministic epoch o
   );
 });
 
+test('mixed campaign computes orchestrator bandit reward from success, rollback, and human handoff rates', async () => {
+  const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
+  const reward = mod.computeOrchestratorBanditReward({
+    episode: {
+      environment: 'orchestrator',
+      decision_type: 'dispatch',
+      verification_result: 'passed',
+      handoff_triggered: false,
+      terminal_outcome: 'success',
+      terminal_reward: 1,
+    },
+    batchOrchestratorEpisodes: [
+      { terminal_outcome: 'success', handoff_triggered: false },
+      { terminal_outcome: 'failed', handoff_triggered: true },
+    ],
+    historical: {
+      updatesCompleted: 4,
+      rollbacksCompleted: 1,
+    },
+  });
+
+  assert.equal(Number(reward.signals.success_rate.toFixed(3)), 0.5);
+  assert.equal(Number(reward.signals.rollback_rate.toFixed(3)), 0.25);
+  assert.equal(Number(reward.signals.human_handoff_rate.toFixed(3)), 0.5);
+  assert.equal(Number(reward.reward.toFixed(3)), 0.5);
+});
+
 test('mixed campaign exposes rollback and resume drills', async () => {
   const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));
@@ -88,4 +117,3 @@ test('mixed campaign exposes rollback and resume drills', async () => {
   assert.equal(resume.summary.drills.resume.duplicateEventApplications, 0);
   assert.equal(typeof resume.summary.drills.resume.active_checkpoint_id, 'string');
 });
-

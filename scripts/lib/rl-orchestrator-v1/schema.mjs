@@ -31,6 +31,13 @@ function assertNumber(value, label) {
   }
 }
 
+function assertProbability(value, label) {
+  assertNumber(value, label);
+  if (value < 0 || value > 1) {
+    throw new Error(`${label} must be in [0, 1]`);
+  }
+}
+
 function assertInteger(value, label, { min = Number.MIN_SAFE_INTEGER } = {}) {
   if (!Number.isInteger(value) || value < min) {
     throw new Error(`${label} must be an integer >= ${min}`);
@@ -59,6 +66,8 @@ function assertEnum(value, allowed, label) {
 const DECISION_TYPES = new Set(['dispatch', 'retry', 'stop', 'handoff', 'preflight']);
 const VERIFICATION_RESULTS = new Set(['passed', 'failed', 'partial', 'blocked']);
 const TERMINAL_OUTCOMES = new Set(['success', 'partial', 'failed']);
+const BANDIT_ALGORITHMS = new Set(['contextual_bandit']);
+const BANDIT_SELECTION_MODES = new Set(['exploit', 'explore', 'evaluation']);
 
 export { DECISION_TYPES };
 
@@ -131,6 +140,40 @@ export function validateOrchestratorEvidence(raw) {
   return raw;
 }
 
+export function validateOrchestratorBanditTrace(raw) {
+  assertObject(raw, 'orchestrator bandit trace');
+  assertNoUnknownKeys(
+    raw,
+    [
+      'algorithm',
+      'context_key',
+      'action_space',
+      'selected_action',
+      'action_probability',
+      'action_probabilities',
+      'selection_mode',
+    ],
+    'orchestrator bandit trace'
+  );
+  assertEnum(raw.algorithm, BANDIT_ALGORITHMS, 'orchestrator bandit trace.algorithm');
+  assertString(raw.context_key, 'orchestrator bandit trace.context_key');
+  assertStringArray(raw.action_space, 'orchestrator bandit trace.action_space');
+  if (raw.action_space.length === 0) {
+    throw new Error('orchestrator bandit trace.action_space must not be empty');
+  }
+  assertString(raw.selected_action, 'orchestrator bandit trace.selected_action');
+  if (!raw.action_space.includes(raw.selected_action)) {
+    throw new Error('orchestrator bandit trace.selected_action must exist in action_space');
+  }
+  assertProbability(raw.action_probability, 'orchestrator bandit trace.action_probability');
+  assertObject(raw.action_probabilities, 'orchestrator bandit trace.action_probabilities');
+  for (const action of raw.action_space) {
+    assertProbability(raw.action_probabilities[action], `orchestrator bandit trace.action_probabilities.${action}`);
+  }
+  assertEnum(raw.selection_mode, BANDIT_SELECTION_MODES, 'orchestrator bandit trace.selection_mode');
+  return raw;
+}
+
 export function validateOrchestratorHoldoutResult(raw) {
   assertObject(raw, 'orchestrator holdout result');
   assertNoUnknownKeys(
@@ -145,4 +188,3 @@ export function validateOrchestratorHoldoutResult(raw) {
   assertInteger(raw.schema_validation_failures, 'orchestrator holdout result.schema_validation_failures', { min: 0 });
   return raw;
 }
-

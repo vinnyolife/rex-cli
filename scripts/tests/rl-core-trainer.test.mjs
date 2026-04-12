@@ -58,6 +58,46 @@ test('rl-core trainer updates policy from multi-step trajectories', async () => 
   assert.equal(policy.weights['step-3'][8] > 0, true);
 });
 
+test('rl-core trainer applies contextual bandit updates for orchestrator routing', async () => {
+  const mod = await import('../lib/rl-core/trainer.mjs');
+  const policy = { seed: 21 };
+  const referencePolicy = mod.createReferencePolicyFrom(policy);
+
+  const update = mod.applyContextualBanditUpdate({
+    policy,
+    referencePolicy,
+    trajectory: {
+      updateType: 'contextual_bandit',
+      contextKey: 'orchestrator:dispatch:blockers=0:human=0',
+      actions: ['local-phase', 'local-control'],
+      selectedAction: 'local-phase',
+      reward: 1,
+      selectionMode: 'exploit',
+    },
+    config: mod.createTrainerConfig({
+      learning_rate: 0.5,
+      contextual_bandit_exploration_rate: 0,
+    }),
+  });
+
+  assert.equal(update.metrics.bandit_reward, 1);
+  assert.equal(policy.contextualBandit.updateCount, 1);
+  assert.equal(
+    policy.contextualBandit.contexts['orchestrator:dispatch:blockers=0:human=0'].actions['local-phase'].preference
+      > policy.contextualBandit.contexts['orchestrator:dispatch:blockers=0:human=0'].actions['local-control'].preference,
+    true
+  );
+
+  const greedyPick = mod.selectContextualBanditAction({
+    policy,
+    contextKey: 'orchestrator:dispatch:blockers=0:human=0',
+    actions: ['local-phase', 'local-control'],
+    config: mod.createTrainerConfig({ contextual_bandit_exploration_rate: 0 }),
+    evaluationMode: true,
+  });
+  assert.equal(greedyPick.selectedAction, 'local-phase');
+});
+
 test('rl-core trainer refreshes the frozen reference policy every configured interval', async () => {
   const mod = await import('../lib/rl-core/trainer.mjs');
   const policy = { weights: { feature: [1, 2, 3] } };
@@ -160,6 +200,35 @@ test('rl-core trainer returns validated online update metadata', async () => {
   assert.equal(result.status, 'ok');
   assert.equal(result.batchId, 'batch-001');
   assert.equal(result.nextCheckpointId, 'ckpt-a-u1');
+});
+
+test('rl-core trainer routes mixed trajectories through applyTrajectoryUpdate', async () => {
+  const mod = await import('../lib/rl-core/trainer.mjs');
+  const policy = { seed: 5 };
+  const referencePolicy = mod.createReferencePolicyFrom(policy);
+
+  const result = mod.runOnlineUpdateBatch({
+    batchId: 'batch-bandit-001',
+    checkpointId: 'ckpt-bandit-a',
+    policy,
+    referencePolicy,
+    applyUpdate: mod.applyTrajectoryUpdate,
+    trajectories: [
+      {
+        updateType: 'contextual_bandit',
+        contextKey: 'orchestrator:dispatch:blockers=0:human=0',
+        actions: ['local-phase', 'local-control'],
+        selectedAction: 'local-phase',
+        reward: 1,
+        selectionMode: 'exploit',
+      },
+    ],
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.nextCheckpointId, 'ckpt-bandit-a-u1');
+  assert.equal(result.metrics.trajectory_count, 1);
+  assert.equal(result.policy.contextualBandit.updateCount, 1);
 });
 
 test('rl-core trainer surfaces update failures without mutating checkpoint ids', async () => {

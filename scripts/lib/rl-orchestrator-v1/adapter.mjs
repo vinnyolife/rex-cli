@@ -1,7 +1,13 @@
 import { validateMixedEpisode, validateReplayCandidate } from '../rl-core/schema.mjs';
 import { classifyReplayRoute } from '../rl-core/replay-pool.mjs';
+import { selectContextualBanditAction } from '../rl-core/trainer.mjs';
 import { createCiFixtureOrchestratorHarness } from './decision-runner.mjs';
-import { DECISION_TYPES, validateOrchestratorEvidence, validateOrchestratorTask } from './schema.mjs';
+import {
+  DECISION_TYPES,
+  validateOrchestratorBanditTrace,
+  validateOrchestratorEvidence,
+  validateOrchestratorTask,
+} from './schema.mjs';
 import { loadRealOrchestratorTasks, sampleOrchestratorTask } from './task-registry.mjs';
 
 function assertHarness(harness) {
@@ -47,9 +53,35 @@ function scoreEvidence(evidence) {
   return 0;
 }
 
-export async function runOrchestratorEpisode({ task, checkpointId, harness = createCiFixtureOrchestratorHarness() }) {
+function buildOrchestratorBanditContextKey(task) {
+  const state = task.context_state || {};
+  const blockerCount = Number(state.blocker_count ?? state.blockers ?? 0);
+  const hasHumanNeed = Boolean(state.requiresHuman || state.requires_human);
+  return `orchestrator:${task.decision_type}:blockers=${Number.isFinite(blockerCount) ? blockerCount : 0}:human=${hasHumanNeed ? 1 : 0}`;
+}
+
+export async function runOrchestratorEpisode({
+  task,
+  checkpointId,
+  harness = createCiFixtureOrchestratorHarness(),
+  policy = null,
+  trainerConfig = undefined,
+}) {
   const normalizedTask = validateOrchestratorTask(task);
   assertHarness(harness);
+  const actionSpace = normalizedTask.available_executors.length > 0
+    ? normalizedTask.available_executors
+    : [normalizedTask.expected_executor];
+  const banditSelection = policy && typeof policy === 'object'
+    ? selectContextualBanditAction({
+      policy,
+      contextKey: buildOrchestratorBanditContextKey(normalizedTask),
+      actions: actionSpace,
+      config: trainerConfig,
+      evaluationMode: false,
+    })
+    : null;
+
   let evidence;
   try {
     evidence = await harness.executeDecision({
@@ -57,6 +89,7 @@ export async function runOrchestratorEpisode({ task, checkpointId, harness = cre
       checkpointId,
       attempt: 0,
       mode: 'episode',
+      selectedExecutor: banditSelection?.selectedAction || null,
     });
   } catch (error) {
     throw new Error(`orchestrator infrastructure: ${error.message}`);
@@ -72,6 +105,17 @@ export async function runOrchestratorEpisode({ task, checkpointId, harness = cre
     relativeOutcome: 'same',
     replayRoute: 'neutral',
   });
+  const banditTrace = banditSelection
+    ? validateOrchestratorBanditTrace({
+      algorithm: 'contextual_bandit',
+      context_key: banditSelection.contextKey,
+      action_space: banditSelection.actionSpace,
+      selected_action: banditSelection.selectedAction,
+      action_probability: banditSelection.actionProbability,
+      action_probabilities: banditSelection.actionProbabilities,
+      selection_mode: banditSelection.selectionMode,
+    })
+    : null;
   return {
     ...normative,
     task_id: normalizedTask.task_id,
@@ -84,6 +128,7 @@ export async function runOrchestratorEpisode({ task, checkpointId, harness = cre
     verification_result: normalizedEvidence.verification_result,
     handoff_triggered: normalizedEvidence.handoff_triggered,
     terminal_outcome: normalizedEvidence.terminal_outcome,
+    bandit_trace: banditTrace,
   };
 }
 
@@ -180,6 +225,7 @@ export function summarizeOrchestratorEnvironmentEvidence({ episode, comparison }
     decision_type: episode.decision_type,
     verification_result: episode.verification_result,
     terminal_outcome: episode.terminal_outcome,
+    bandit_action: episode.bandit_trace?.selected_action || null,
     comparison_status: comparison?.comparison_status || episode.comparison_status,
     relative_outcome: comparison?.relative_outcome ?? episode.relative_outcome ?? null,
   };
@@ -192,8 +238,14 @@ export function createOrchestratorAdapter({ tasks = loadRealOrchestratorTasks(),
     sampleTask({ seed = 0, attempt = 0 } = {}) {
       return sampleOrchestratorTask({ seed, attempt, tasks });
     },
-    runEpisode({ task, checkpointId }) {
-      return runOrchestratorEpisode({ task, checkpointId, harness });
+    runEpisode({ task, checkpointId, policy = null, trainerConfig = undefined }) {
+      return runOrchestratorEpisode({
+        task,
+        checkpointId,
+        harness,
+        policy,
+        trainerConfig,
+      });
     },
     compareAgainstReference({ task, activeCheckpointId, preUpdateRefCheckpointId }) {
       return compareOrchestratorAgainstReference({
@@ -207,4 +259,3 @@ export function createOrchestratorAdapter({ tasks = loadRealOrchestratorTasks(),
     summarizeEnvironmentEvidence: summarizeOrchestratorEnvironmentEvidence,
   };
 }
-

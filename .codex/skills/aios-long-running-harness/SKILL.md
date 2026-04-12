@@ -27,18 +27,6 @@ Use this harness to keep long tasks stable under UI drift, model variability, an
 - `aios orchestrate --execute live` currently supports `AIOS_SUBAGENT_CLIENT=codex-cli` only.
 - Codex CLI v0.114+ structured exec outputs (`--output-schema`, `--output-last-message`, stdin) are required for handoff parsing; schema fallback to raw stdout is rejected.
 - Transient `upstream_error`/`server_error` failures are retried with exponential backoff via `AIOS_SUBAGENT_UPSTREAM_MAX_ATTEMPTS` and `AIOS_SUBAGENT_UPSTREAM_BACKOFF_MS`.
-- Local dispatch reports now include an `Executor Capability Manifest` summary (read/write/network/browser/sideEffect) for preflight visibility before live execution.
-- Live execution now blocks by default when capability manifest surfaces are `unknown` (`network` / `browser` / `sideEffect`) via `guardrail.capability-unknown`.
-- Override unknown-capability blocking only when intended: `--force` or `AIOS_ALLOW_UNKNOWN_CAPABILITIES=1` (or `AIOS_ALLOW_UNKNOWN_LIVE_CAPABILITIES=1`).
-- `team status --watch` / `hud --watch` now surface job-level and tool-level progress so blocked tools are visible without opening artifacts, and mark unchanged progress as `stalled` after `AIOS_WATCH_STALLED_MS` (default `30000`).
-- Optional rollback safety for live editable phases: set `AIOS_SUBAGENT_PRE_MUTATION_SNAPSHOT=1` to persist pre-mutation snapshot artifacts before each subagent phase run.
-- Restore pre-mutation snapshots with `node scripts/aios.mjs snapshot-rollback --session <session_id> [--job <job_id>]` or `--manifest <path>`; use `--dry-run` before apply.
-
-Watch examples:
-```bash
-node scripts/aios.mjs team status --session <session_id> --watch --preset minimal --interval-ms auto
-node scripts/aios.mjs hud --session <session_id> --watch --preset minimal --interval-ms auto
-```
 
 ## Required Controls
 - Time budget per step and per run.

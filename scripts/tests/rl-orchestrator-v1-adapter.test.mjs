@@ -20,11 +20,13 @@ test('orchestrator adapter returns normalized episode, comparison, replay, and e
   const runnerMod = await import('../lib/rl-orchestrator-v1/decision-runner.mjs');
   const task = makeTask();
   const harness = runnerMod.createCiFixtureOrchestratorHarness();
+  const policy = { seed: 13 };
 
   const episode = await mod.runOrchestratorEpisode({
     task,
     checkpointId: 'ckpt-orch-1',
     harness,
+    policy,
   });
   assert.equal(episode.environment, 'orchestrator');
   assert.equal(['dispatch', 'retry', 'stop', 'handoff', 'preflight'].includes(episode.task_family), true);
@@ -42,6 +44,12 @@ test('orchestrator adapter returns normalized episode, comparison, replay, and e
   assert.equal(typeof episode.verification_result, 'string');
   assert.equal(typeof episode.handoff_triggered, 'boolean');
   assert.equal(typeof episode.terminal_outcome, 'string');
+  assert.equal(episode.bandit_trace?.algorithm, 'contextual_bandit');
+  assert.equal(Array.isArray(episode.bandit_trace?.action_space), true);
+  assert.equal(
+    episode.bandit_trace?.action_space.includes(episode.bandit_trace?.selected_action),
+    true
+  );
 
   const comparison = await mod.compareOrchestratorAgainstReference({
     task,
@@ -102,4 +110,3 @@ test('orchestrator adapter throws only on harness infrastructure faults', async 
     /infrastructure/i
   );
 });
-
