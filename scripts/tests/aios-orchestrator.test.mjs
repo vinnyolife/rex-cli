@@ -1980,6 +1980,54 @@ test('runOrchestrate adds a local dispatch skeleton without invoking models', as
   assert.equal(report.executorCapabilityManifest.summary.sideEffect, 'no');
 });
 
+test('runOrchestrate binds phaseExecutor override into dispatch planning and execution', async () => {
+  const rootDir = await makeRootDir();
+  const logs = [];
+  await runOrchestrate(
+    {
+      blueprint: 'feature',
+      taskTitle: 'Route policy executor',
+      contextSummary: '- implement core behavior\n- add tests',
+      dispatchMode: 'local',
+      executionMode: 'dry-run',
+      phaseExecutor: 'local-control',
+      format: 'json',
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const report = JSON.parse(logs.at(-1));
+
+  assert.equal(report.dispatchPlan.phaseExecutor.requested_executor, 'local-control');
+  assert.equal(report.dispatchPlan.phaseExecutor.applied_executor, 'local-control');
+  assert.equal(report.dispatchPlan.jobs.filter((job) => job.jobType === 'phase').every((job) => job.launchSpec.executor === 'local-control'), true);
+  assert.equal(report.dispatchPlan.jobs.filter((job) => job.jobType === 'merge-gate').every((job) => job.launchSpec.executor === 'local-merge-gate'), true);
+  assert.equal(report.dispatchRun.executorRegistry.includes('local-control'), true);
+  assert.equal(report.dispatchRun.executorRegistry.includes('local-phase'), false);
+});
+
+test('runOrchestrate falls back to local-phase when phaseExecutor override is unsupported', async () => {
+  const rootDir = await makeRootDir();
+  const logs = [];
+  await runOrchestrate(
+    {
+      blueprint: 'feature',
+      taskTitle: 'Fallback executor override',
+      dispatchMode: 'local',
+      executionMode: 'dry-run',
+      phaseExecutor: 'unsupported-executor',
+      format: 'json',
+    },
+    { rootDir, io: { log: (line) => logs.push(line) } }
+  );
+  const report = JSON.parse(logs.at(-1));
+
+  assert.equal(report.dispatchPlan.phaseExecutor.requested_executor, 'unsupported-executor');
+  assert.equal(report.dispatchPlan.phaseExecutor.applied_executor, 'local-phase');
+  assert.equal(report.dispatchPlan.phaseExecutor.fallback_applied, true);
+  assert.equal(report.dispatchPlan.jobs.filter((job) => job.jobType === 'phase').every((job) => job.launchSpec.executor === 'local-phase'), true);
+  assert.equal(report.dispatchRun.executorRegistry.includes('local-phase'), true);
+});
+
 test('runOrchestrate throws when the selected dispatch runtime returns invalid output', async () => {
   const rootDir = await makeRootDir();
   const logs = [];

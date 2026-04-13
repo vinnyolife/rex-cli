@@ -35,11 +35,15 @@ const DECISION_BLUEPRINT_BY_TYPE = Object.freeze({
   preflight: 'bugfix',
 });
 
+function normalizeText(value) {
+  return String(value ?? '').trim();
+}
+
 function toUniqueStrings(values = []) {
   const seen = new Set();
   const unique = [];
   for (const value of values) {
-    const normalized = typeof value === 'string' ? value.trim() : '';
+    const normalized = normalizeText(value);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     unique.push(normalized);
@@ -107,6 +111,7 @@ function buildRealOrchestrateOptions({
   mode,
   dispatchMode = 'local',
   executionMode = 'dry-run',
+  phaseExecutor = '',
   sessionId = '',
 }) {
   const contextSummary = [
@@ -123,6 +128,7 @@ function buildRealOrchestrateOptions({
     contextSummary,
     dispatchMode,
     executionMode,
+    ...(normalizeText(phaseExecutor) ? { phaseExecutor: normalizeText(phaseExecutor) } : {}),
     preflightMode: task.decision_type === 'preflight' ? 'auto' : 'none',
     format: 'json',
     ...(sessionId ? { sessionId } : {}),
@@ -137,16 +143,46 @@ function createSilentIo() {
   };
 }
 
+function resolveDispatchPhaseExecutorSelection(report = {}) {
+  const phaseExecutor = report?.dispatchPlan?.phaseExecutor;
+  if (!phaseExecutor || typeof phaseExecutor !== 'object' || Array.isArray(phaseExecutor)) {
+    return {
+      requested_executor: null,
+      applied_executor: null,
+      reason: null,
+    };
+  }
+  return {
+    requested_executor: normalizeText(phaseExecutor.requested_executor) || null,
+    applied_executor: normalizeText(phaseExecutor.applied_executor) || null,
+    reason: normalizeText(phaseExecutor.reason) || null,
+  };
+}
+
 function resolveExecutorSelected({
   task,
   selectedExecutor = null,
+  report = {},
   dispatchRun = {},
 }) {
+  const dispatchPhaseSelection = resolveDispatchPhaseExecutorSelection(report);
+  if (dispatchPhaseSelection.applied_executor) {
+    return dispatchPhaseSelection.applied_executor;
+  }
+
   const requestedExecutor = resolveRequestedExecutor({ task, selectedExecutor });
-  if (requestedExecutor) {
+  const runtimeExecutors = toUniqueStrings(dispatchRun.executorRegistry || []);
+  if (requestedExecutor && runtimeExecutors.includes(requestedExecutor)) {
     return requestedExecutor;
   }
-  const runtimeExecutors = toUniqueStrings(dispatchRun.executorRegistry || []);
+  if (requestedExecutor && runtimeExecutors.length === 0) {
+    return requestedExecutor;
+  }
+
+  const runtimePhaseExecutor = runtimeExecutors.find((executor) => executor !== 'local-merge-gate');
+  if (runtimePhaseExecutor) {
+    return runtimePhaseExecutor;
+  }
   return runtimeExecutors[0] || task.expected_executor;
 }
 
@@ -196,9 +232,12 @@ function buildRealEvidence({
   const handoffTriggered = task.decision_type === 'handoff'
     ? (dispatchRun.ok !== true || blockedLike)
     : false;
+  const requestedExecutor = resolveRequestedExecutor({ task, selectedExecutor });
+  const dispatchPhaseSelection = resolveDispatchPhaseExecutorSelection(report);
   const executorSelected = resolveExecutorSelected({
     task,
     selectedExecutor,
+    report,
     dispatchRun,
   });
 
@@ -220,11 +259,14 @@ function buildRealEvidence({
       policy_applied_executor: policyRelease.applied_executor || null,
       policy_release_reason: policyRelease.reason || null,
       policy_release_rollout_rate: Number(policyRelease.rollout_rate || 0),
+      dispatch_phase_executor_requested: dispatchPhaseSelection.requested_executor,
+      dispatch_phase_executor_applied: dispatchPhaseSelection.applied_executor,
+      dispatch_phase_executor_reason: dispatchPhaseSelection.reason,
     },
     decision_type: task.decision_type,
     decision_payload: {
       expected_executor: task.expected_executor,
-      requested_executor: resolveRequestedExecutor({ task, selectedExecutor }),
+      requested_executor: requestedExecutor,
       selected_executor: executorSelected,
       checkpoint_id: checkpointId,
       attempt,
@@ -252,6 +294,9 @@ function buildRealEvidence({
       policy_release_downgraded: policyRelease.downgraded === true,
       policy_release_downgrade_reason: policyRelease.downgrade_reason || null,
       policy_release_state_path: policyRelease.state_path || null,
+      dispatch_phase_executor_requested: dispatchPhaseSelection.requested_executor,
+      dispatch_phase_executor_applied: dispatchPhaseSelection.applied_executor,
+      dispatch_phase_executor_reason: dispatchPhaseSelection.reason,
     },
     executor_selected: executorSelected,
     preflight_selected: preflightSelected,
@@ -400,6 +445,7 @@ export function createRealOrchestratorHarness({
           mode,
           dispatchMode,
           executionMode: currentExecutionMode,
+          phaseExecutor: appliedExecutor,
           sessionId,
         });
 
@@ -487,6 +533,7 @@ export function createRealOrchestratorHarness({
         callRecord.fallback_reason = fallbackReason;
         callRecord.dispatch_ok = normalizedEvidence.decision_payload?.dispatch_ok === true;
         callRecord.runtime_id = String(normalizedEvidence.decision_payload?.runtime_id || '');
+        callRecord.dispatch_phase_executor = normalizedEvidence.decision_payload?.dispatch_phase_executor_applied || null;
         return normalizedEvidence;
       } catch (error) {
         callRecord.error = error?.message || String(error);

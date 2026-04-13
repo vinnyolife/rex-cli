@@ -12,6 +12,17 @@
       "concurrencyMode": "parallel-safe",
       "ownershipMode": "handoff-only"
     },
+    "local-control": {
+      "label": "Local Control Executor",
+      "description": "Control-path dry-run executor for policy-routed orchestration phases; behavior matches local-phase with explicit executor routing evidence.",
+      "requiresModel": false,
+      "executionModes": ["dry-run"],
+      "jobTypes": ["phase"],
+      "supportedRoles": ["planner", "implementer", "reviewer", "security-reviewer"],
+      "outputTypes": ["handoff"],
+      "concurrencyMode": "parallel-safe",
+      "ownershipMode": "handoff-only"
+    },
     "local-merge-gate": {
       "label": "Local Merge Gate Executor",
       "description": "Local-only dry-run executor for merge-gate validation across parallel handoffs.",

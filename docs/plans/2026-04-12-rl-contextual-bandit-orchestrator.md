@@ -121,3 +121,38 @@
   - `node --test scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs scripts/tests/rl-mixed-v1-contextdb-summary.test.mjs`（`13/13` pass）
   - `npm run test:scripts`（`290/290` pass）
   - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）
+
+## 执行结果（2026-04-13，补齐“1：策略执行器强绑定实际调度”）
+
+- 已完成：
+  - `memory/specs/orchestrator-executors.json` 增加 `local-control` 执行器定义（phase job 可调度）。
+  - `scripts/lib/harness/orchestrator-executors.mjs`
+    - 导出 `LOCAL_CONTROL_EXECUTOR`；
+    - `LOCAL_DISPATCH_EXECUTORS` 纳入 `local-control`；
+    - 本地执行器 registry 增加 `local-control -> executePhaseJob` 路由。
+  - `scripts/lib/harness/orchestrator.mjs`
+    - `buildLocalDispatchPlan(input, options)` 新增 `options.phaseExecutor`；
+    - phase job 的 `launchSpec.executor` 可按策略覆写；
+    - merge-gate 仍固定 `local-merge-gate`；
+    - 对不支持的覆写做确定性 fallback（回退 `local-phase`）并记录 reason；
+    - dispatch plan 新增 `phaseExecutor` 元信息（requested/applied/reason/fallback_applied）。
+  - `scripts/lib/lifecycle/orchestrate.mjs`
+    - 内部选项增加 `phaseExecutor`；
+    - 本地 dispatch 构建时把该选项传入 `buildLocalDispatchPlan`。
+  - `scripts/lib/rl-orchestrator-v1/decision-runner.mjs`
+    - real harness 调用 `runOrchestrate` 时透传 `phaseExecutor`（来自 release gate 路由后的 `applied_executor`）；
+    - evidence 增加 `dispatch_phase_executor_*` 字段；
+    - `executor_selected` 优先使用 dispatch plan 实际 applied executor，避免只写策略候选不影响执行的“假绑定”。
+
+- 新增/扩展测试：
+  - `scripts/tests/aios-orchestrator-agents.test.mjs`
+    - 覆盖 `buildLocalDispatchPlan` phase executor override 与 unsupported fallback。
+  - `scripts/tests/aios-orchestrator.test.mjs`
+    - 覆盖 `runOrchestrate` 对 `phaseExecutor` 的全链路绑定与 fallback。
+  - `scripts/tests/rl-orchestrator-v1-adapter.test.mjs`
+    - 覆盖 real harness 在 release gate 路由后把 executor 绑定到 orchestrate options，并反映到 evidence。
+
+- 本轮验证证据（全部通过）：
+  - `node --test scripts/tests/aios-orchestrator-agents.test.mjs scripts/tests/rl-orchestrator-v1-adapter.test.mjs scripts/tests/aios-orchestrator.test.mjs`（`105/105` pass）
+  - `npm run test:scripts`（`294/294` pass）
+  - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）

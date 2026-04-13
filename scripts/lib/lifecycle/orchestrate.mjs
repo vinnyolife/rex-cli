@@ -618,6 +618,7 @@ export function normalizeOrchestrateOptions(rawOptions = {}) {
   const dispatchModeRaw = String(rawOptions.dispatchMode ?? '').trim();
   const executionModeRaw = String(rawOptions.executionMode ?? '').trim();
   const preflightModeRaw = String(rawOptions.preflightMode ?? '').trim();
+  const phaseExecutor = String(rawOptions.phaseExecutor || '').trim();
   const dispatchModeProvided = dispatchModeRaw.length > 0;
   const executionModeProvided = executionModeRaw.length > 0;
   const preflightModeProvided = preflightModeRaw.length > 0;
@@ -674,6 +675,7 @@ export function normalizeOrchestrateOptions(rawOptions = {}) {
     dispatchMode,
     executionMode,
     preflightMode,
+    phaseExecutor,
     format: normalizeOrchestratorFormat(rawOptions.format ?? 'text'),
   };
 }
@@ -858,7 +860,7 @@ export async function runOrchestrate(
   };
 
   let dispatchPlan = options.dispatchMode === 'local'
-    ? buildLocalDispatchPlan(dagPlan)
+    ? buildLocalDispatchPlan(dagPlan, { phaseExecutor: options.phaseExecutor })
     : null;
   let retryReplay = null;
   if (options.retryBlocked) {

@@ -174,3 +174,35 @@ test('buildLocalDispatchPlan injects agentRefId into phase job launchSpec', () =
   assert.equal(phaseJobs.length > 0, true);
   assert.equal(phaseJobs.every((job) => typeof job.launchSpec.agentRefId === 'string' && job.launchSpec.agentRefId.length > 0), true);
 });
+
+test('buildLocalDispatchPlan applies phase executor override to phase jobs only', () => {
+  const orchestration = buildOrchestrationPlan({
+    blueprint: 'feature',
+    taskTitle: 'Ship blueprints',
+    contextSummary: '- implement core behavior\n- add tests',
+  });
+  const dispatch = buildLocalDispatchPlan(orchestration, { phaseExecutor: 'local-control' });
+
+  const phaseJobs = dispatch.jobs.filter((job) => job.jobType === 'phase');
+  const mergeJobs = dispatch.jobs.filter((job) => job.jobType === 'merge-gate');
+  assert.equal(phaseJobs.length > 0, true);
+  assert.equal(mergeJobs.length > 0, true);
+  assert.equal(phaseJobs.every((job) => job.launchSpec.executor === 'local-control'), true);
+  assert.equal(mergeJobs.every((job) => job.launchSpec.executor === 'local-merge-gate'), true);
+  assert.equal(dispatch.phaseExecutor.requested_executor, 'local-control');
+  assert.equal(dispatch.phaseExecutor.applied_executor, 'local-control');
+  assert.equal(dispatch.phaseExecutor.fallback_applied, false);
+});
+
+test('buildLocalDispatchPlan falls back to local-phase when phase executor override is unsupported', () => {
+  const orchestration = buildOrchestrationPlan({ blueprint: 'feature', taskTitle: 'Ship blueprints' });
+  const dispatch = buildLocalDispatchPlan(orchestration, { phaseExecutor: 'unknown-executor' });
+
+  const phaseJobs = dispatch.jobs.filter((job) => job.jobType === 'phase');
+  assert.equal(phaseJobs.length > 0, true);
+  assert.equal(phaseJobs.every((job) => job.launchSpec.executor === 'local-phase'), true);
+  assert.equal(dispatch.phaseExecutor.requested_executor, 'unknown-executor');
+  assert.equal(dispatch.phaseExecutor.applied_executor, 'local-phase');
+  assert.equal(dispatch.phaseExecutor.fallback_applied, true);
+  assert.match(dispatch.phaseExecutor.reason, /unsupported_phase_executor/);
+});

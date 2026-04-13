@@ -1,6 +1,7 @@
 import { normalizeHandoffPayload, validateHandoffPayload } from './handoff.mjs';
 import { resolveAgentRefIdForRole } from './orchestrator-agents.mjs';
 import {
+  LOCAL_CONTROL_EXECUTOR,
   LOCAL_MERGE_GATE_EXECUTOR,
   LOCAL_PHASE_EXECUTOR,
   createLocalDispatchExecutorRegistry,
@@ -30,7 +31,7 @@ const WORK_ITEM_OWNERSHIP_HINT_PATTERNS = Object.freeze([
   { pattern: /\bmcp-server\b/i, hints: ['mcp-server/src/'] },
   { pattern: /\bspec|schema\b/i, hints: ['memory/specs/'] },
 ]);
-export { LOCAL_PHASE_EXECUTOR, LOCAL_MERGE_GATE_EXECUTOR } from './orchestrator-executors.mjs';
+export { LOCAL_PHASE_EXECUTOR, LOCAL_CONTROL_EXECUTOR, LOCAL_MERGE_GATE_EXECUTOR } from './orchestrator-executors.mjs';
 export const MERGE_GATE_BLOCK_STATUSES = normalizeMergeGateBlockStatuses(blueprintSpec?.mergeGate?.blockStatuses);
 export const MERGE_GATE_CONFLICT_RULE = normalizeText(blueprintSpec?.mergeGate?.conflictRule)
   || 'overlapping file ownership blocks parallel merge';
@@ -722,6 +723,44 @@ function collectExecutorDetails(jobs = []) {
   return listLocalDispatchExecutors().filter((executor) => usedExecutorIds.has(executor.id));
 }
 
+function listPhaseExecutorIds() {
+  return listLocalDispatchExecutors()
+    .filter((executor) => Array.isArray(executor.jobTypes) && executor.jobTypes.includes('phase'))
+    .map((executor) => executor.id);
+}
+
+function resolvePhaseExecutorSelection(rawPhaseExecutor = '') {
+  const requestedExecutor = normalizeText(rawPhaseExecutor) || null;
+  const phaseExecutorIds = new Set(listPhaseExecutorIds());
+
+  if (!requestedExecutor) {
+    return {
+      requested_executor: null,
+      applied_executor: LOCAL_PHASE_EXECUTOR,
+      reason: 'default_phase_executor',
+      fallback_applied: false,
+    };
+  }
+
+  if (phaseExecutorIds.has(requestedExecutor)) {
+    return {
+      requested_executor: requestedExecutor,
+      applied_executor: requestedExecutor,
+      reason: requestedExecutor === LOCAL_PHASE_EXECUTOR
+        ? 'requested_default_phase_executor'
+        : 'requested_phase_executor_override',
+      fallback_applied: false,
+    };
+  }
+
+  return {
+    requested_executor: requestedExecutor,
+    applied_executor: LOCAL_PHASE_EXECUTOR,
+    reason: `unsupported_phase_executor:${requestedExecutor}`,
+    fallback_applied: true,
+  };
+}
+
 function deriveExecutorCapabilities({
   executorId = '',
   executionMode = 'none',
@@ -752,7 +791,7 @@ function deriveExecutorCapabilities({
     });
   }
 
-  if (id === LOCAL_PHASE_EXECUTOR) {
+  if (id === LOCAL_PHASE_EXECUTOR || id === LOCAL_CONTROL_EXECUTOR) {
     if (mode === 'live') {
       const writeLevel = hasEditableJobs ? 'yes' : 'no';
       return normalizeExecutorCapabilities({
@@ -821,7 +860,7 @@ export function buildExecutorCapabilityManifest({
     });
     const notes = [];
     const declaredModes = Array.isArray(entry?.executionModes) ? entry.executionModes.map((item) => normalizeText(item)).filter(Boolean) : [];
-    if (executionMode === 'live' && id === LOCAL_PHASE_EXECUTOR) {
+    if (executionMode === 'live' && (id === LOCAL_PHASE_EXECUTOR || id === LOCAL_CONTROL_EXECUTOR)) {
       notes.push('Live mode delegates phase execution to subagent-runtime; network/browser access depends on client tooling and prompt constraints.');
     }
     if (declaredModes.length > 0 && executionMode !== 'none' && !declaredModes.includes(executionMode)) {
@@ -912,7 +951,14 @@ export function buildOrchestrationPlan({
   };
 }
 
-function createPhaseJob(plan, phase, dependsOn = [], handoffTarget = 'next-phase', modeOverride = null) {
+function createPhaseJob(
+  plan,
+  phase,
+  dependsOn = [],
+  handoffTarget = 'next-phase',
+  modeOverride = null,
+  phaseExecutor = LOCAL_PHASE_EXECUTOR
+) {
   const contextSources = ['orchestration-plan'];
   if (plan.learnEvalOverlay) {
     contextSources.push('learn-eval-overlay');
@@ -938,7 +984,7 @@ function createPhaseJob(plan, phase, dependsOn = [], handoffTarget = 'next-phase
     status: 'pending',
     outputs: ['handoff'],
     launchSpec: {
-      executor: LOCAL_PHASE_EXECUTOR,
+      executor: phaseExecutor,
       requiresModel: false,
       agentRefId,
       inputs: contextSources,
@@ -1000,12 +1046,13 @@ function createPhaseJobWithOverrides(
     dependsOn = [],
     handoffTarget = 'next-phase',
     modeOverride = null,
+    phaseExecutor = LOCAL_PHASE_EXECUTOR,
     jobIdOverride = '',
     workItemRefsOverride = null,
     workItemId = '',
   } = {}
 ) {
-  const base = createPhaseJob(plan, phase, dependsOn, handoffTarget, modeOverride);
+  const base = createPhaseJob(plan, phase, dependsOn, handoffTarget, modeOverride, phaseExecutor);
   const resolvedRefs = Array.isArray(workItemRefsOverride)
     ? workItemRefsOverride.map((item) => normalizeText(item)).filter(Boolean)
     : base.launchSpec.workItemRefs;
@@ -1132,16 +1179,28 @@ function buildBoundedWorkItemQueue({
   };
 }
 
-export function buildLocalDispatchPlan(input = {}) {
+export function buildLocalDispatchPlan(input = {}, options = {}) {
   const plan = Array.isArray(input.phases) ? input : buildOrchestrationPlan(input);
   assertEditableParallelOwnership(plan);
   const parallelism = getDispatchParallelism(plan);
+  const phaseExecutorSelection = resolvePhaseExecutorSelection(options.phaseExecutor);
+  const phaseExecutor = phaseExecutorSelection.applied_executor;
   const workItemQueueEntries = [];
   const maxParallelWorkItems = 2;
   const jobs = [];
   const notes = ['Skeleton only; no model runtime is invoked.'];
   let upstreamJobIds = [];
   let openParallelGroup = null;
+
+  if (phaseExecutorSelection.requested_executor) {
+    if (phaseExecutorSelection.fallback_applied) {
+      notes.push(
+        `Phase executor override "${phaseExecutorSelection.requested_executor}" is unsupported; fallback to "${phaseExecutorSelection.applied_executor}".`
+      );
+    } else if (phaseExecutorSelection.requested_executor !== LOCAL_PHASE_EXECUTOR) {
+      notes.push(`Phase executor override applied: "${phaseExecutorSelection.applied_executor}".`);
+    }
+  }
 
   if (parallelism === 'serial-only') {
     notes.push('Policy applied: serial-only; grouped parallel phases are emitted as sequential jobs.');
@@ -1184,7 +1243,7 @@ export function buildLocalDispatchPlan(input = {}) {
         };
       }
 
-      const job = createPhaseJob(plan, phase, openParallelGroup.upstreamJobIds, 'merge-gate');
+      const job = createPhaseJob(plan, phase, openParallelGroup.upstreamJobIds, 'merge-gate', null, phaseExecutor);
       jobs.push(job);
       openParallelGroup.jobIds.push(job.jobId);
       continue;
@@ -1203,6 +1262,7 @@ export function buildLocalDispatchPlan(input = {}) {
           dependsOn: itemJob.dependsOn,
           handoffTarget: 'next-phase',
           modeOverride: policySerializedParallel ? 'sequential' : null,
+          phaseExecutor,
           jobIdOverride: itemJob.jobId,
           workItemRefsOverride: [itemJob.itemId],
           workItemId: itemJob.itemId,
@@ -1219,6 +1279,7 @@ export function buildLocalDispatchPlan(input = {}) {
       dependsOn: phaseDependencies,
       handoffTarget: 'next-phase',
       modeOverride: policySerializedParallel ? 'sequential' : null,
+      phaseExecutor,
       ...(singleWorkItemRef ? { workItemRefsOverride: singleWorkItemRef, workItemId: singleWorkItemRef[0] } : {}),
     });
     jobs.push(job);
@@ -1250,6 +1311,7 @@ export function buildLocalDispatchPlan(input = {}) {
       entries: workItemQueueEntries,
     },
     notes,
+    phaseExecutor: phaseExecutorSelection,
     executorRegistry: executorDetails.map((executor) => executor.id),
     executorDetails,
     mergeGate: {

@@ -1,8 +1,13 @@
 import executorSpec from '../../../memory/specs/orchestrator-executors.json' with { type: 'json' };
 
 export const LOCAL_PHASE_EXECUTOR = 'local-phase';
+export const LOCAL_CONTROL_EXECUTOR = 'local-control';
 export const LOCAL_MERGE_GATE_EXECUTOR = 'local-merge-gate';
-export const LOCAL_DISPATCH_EXECUTORS = [LOCAL_PHASE_EXECUTOR, LOCAL_MERGE_GATE_EXECUTOR];
+export const LOCAL_DISPATCH_EXECUTORS = [
+  LOCAL_PHASE_EXECUTOR,
+  LOCAL_CONTROL_EXECUTOR,
+  LOCAL_MERGE_GATE_EXECUTOR,
+];
 
 const LOCAL_DISPATCH_EXECUTOR_CATALOG = Object.freeze(
   Object.fromEntries(
@@ -78,6 +83,12 @@ export function createLocalDispatchExecutorRegistry({ executePhaseJob, executeMe
   return {
     [LOCAL_PHASE_EXECUTOR]: {
       ...getLocalDispatchExecutor(LOCAL_PHASE_EXECUTOR),
+      execute({ plan, job, phase } = {}) {
+        return executePhaseJob(plan, job, phase);
+      },
+    },
+    [LOCAL_CONTROL_EXECUTOR]: {
+      ...getLocalDispatchExecutor(LOCAL_CONTROL_EXECUTOR),
       execute({ plan, job, phase } = {}) {
         return executePhaseJob(plan, job, phase);
       },

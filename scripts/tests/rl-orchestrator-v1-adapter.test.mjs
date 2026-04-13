@@ -229,6 +229,59 @@ test('real orchestrator harness policy release canary holdout routes non-sampled
   assert.equal(episode.decision_payload.policy_release_applied, false);
 });
 
+test('real orchestrator harness binds routed policy executor into orchestrate dispatch options', async () => {
+  const runnerMod = await import('../lib/rl-orchestrator-v1/decision-runner.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-routing-'));
+  const statePath = path.join(rootDir, 'orchestrator-policy-release.state.json');
+  const orchestrateCalls = [];
+  const harness = runnerMod.createRealOrchestratorHarness({
+    rootDir,
+    executionMode: 'dry-run',
+    dispatchMode: 'local',
+    fallbackOnMissingDispatchRun: false,
+    policyRelease: {
+      mode: 'full',
+      autoDowngrade: false,
+      statePath,
+    },
+    executeOrchestrate: async (options) => {
+      orchestrateCalls.push(options);
+      return {
+        exitCode: 0,
+        report: {
+          dispatchPlan: {
+            phaseExecutor: {
+              requested_executor: options.phaseExecutor || null,
+              applied_executor: options.phaseExecutor || 'local-phase',
+              reason: options.phaseExecutor ? 'requested_phase_executor_override' : 'default_phase_executor',
+            },
+          },
+          dispatchRun: {
+            mode: options.executionMode,
+            ok: true,
+            runtime: { id: `runtime-${options.executionMode}` },
+            executorRegistry: [options.phaseExecutor || 'local-phase'],
+            jobRuns: [{ status: 'simulated' }],
+          },
+          dispatchPreflight: { results: [] },
+        },
+      };
+    },
+  });
+
+  const evidence = await harness.executeDecision({
+    task: makeTask({ task_id: 'orch-release-routing-001' }),
+    checkpointId: 'ckpt-release-routing',
+    selectedExecutor: 'local-control',
+  });
+
+  assert.equal(orchestrateCalls.length, 1);
+  assert.equal(orchestrateCalls[0].phaseExecutor, 'local-control');
+  assert.equal(evidence.decision_payload.policy_release_applied, true);
+  assert.equal(evidence.decision_payload.dispatch_phase_executor_applied, 'local-control');
+  assert.equal(evidence.executor_selected, 'local-control');
+});
+
 test('real orchestrator harness policy release auto-downgrades after policy-routed failures', async () => {
   const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-gate-'));
