@@ -245,6 +245,45 @@ test('mixed campaign writes OPE metrics into checkpoint versions and summary', a
   assert.equal(Number(latestEntry.ope.sample_count) > 0, true);
 });
 
+test('mixed campaign can consume orchestrator live task collector for real traffic sampling', async () => {
+  const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));
+  const liveTasks = [
+    {
+      task_id: 'orch-live-stream-001',
+      decision_type: 'dispatch',
+      context_snapshot_id: 'ctx-live-stream-1',
+      expected_executor: 'local-phase',
+      hard_verification_evidence: ['evidence:dispatch:live'],
+      available_executors: ['local-phase', 'local-control'],
+      available_preflight_actions: ['auth-check', 'doctor'],
+      context_state: { blocker_count: 0, requiresHuman: false },
+    },
+    {
+      task_id: 'orch-live-stream-002',
+      decision_type: 'retry',
+      context_snapshot_id: 'ctx-live-stream-2',
+      expected_executor: 'local-phase',
+      hard_verification_evidence: ['evidence:retry:live'],
+      available_executors: ['local-phase', 'local-control'],
+      available_preflight_actions: ['auth-check', 'doctor'],
+      context_state: { blocker_count: 1, requiresHuman: false },
+    },
+  ];
+
+  const result = await mod.runMixedCampaign({
+    rootDir,
+    activeEnvironments: ['orchestrator'],
+    batchTargetCount: 1,
+    onlineBatchSize: 2,
+    orchestratorLiveTaskCollector: async ({ attempt }) => liveTasks[attempt] || null,
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.orchestrator_task_source, 'live_collector');
+  assert.equal(result.summary.environment_counts.orchestrator > 0, true);
+});
+
 test('mixed campaign supports reward weight override and auto tuning persistence', async () => {
   const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));

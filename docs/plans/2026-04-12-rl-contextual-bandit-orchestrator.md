@@ -98,3 +98,26 @@
   - `node --test scripts/tests/rl-core-trainer.test.mjs scripts/tests/rl-core-ope-eval.test.mjs scripts/tests/rl-mixed-v1-contextdb-summary.test.mjs scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs`（`25/25` pass）
   - `npm run test:scripts`（`290/290` pass）
   - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）
+
+## 执行结果（2026-04-13，补齐“真实流量接入 + 发布侧门控”）
+
+- 真实流量接入（灰度采样）：
+  - `rl-orchestrator-v1/adapter.mjs` 增加 `liveTaskCollector`，支持实时任务流采样（异步）。
+  - `rl-mixed-v1/run-orchestrator.mjs` 支持异步 `sampleTask`，并新增 `orchestratorLiveTaskCollector` 参数；summary 新增 `orchestrator_task_source`。
+- 发布侧策略门控（自动降级）：
+  - 新增 `rl-orchestrator-v1/policy-release-gate.mjs`：
+    - `off/observe/canary/full` 发布模式；
+    - `rolloutRate` 灰度；
+    - kill switch（env/file）；
+    - 失败率/连续失败触发自动降级；
+    - 状态持久化（release state file）。
+  - `rl-orchestrator-v1/decision-runner.mjs` real harness 接入门控：
+    - 每次执行前做 release route 决策；
+    - evidence 回写 `policy_release_*` 字段；
+    - 触发降级时写入 `policy_release_downgraded` 与 next mode/rate。
+
+- 本轮验证证据（全部通过）：
+  - `node --test scripts/tests/rl-orchestrator-v1-adapter.test.mjs`（`9/9` pass）
+  - `node --test scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs scripts/tests/rl-mixed-v1-contextdb-summary.test.mjs`（`13/13` pass）
+  - `npm run test:scripts`（`290/290` pass）
+  - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）

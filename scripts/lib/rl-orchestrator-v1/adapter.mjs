@@ -252,15 +252,31 @@ export function createOrchestratorAdapter({
   harness = null,
   harnessMode = 'fixture',
   harnessOptions = {},
+  liveTaskCollector = null,
 } = {}) {
   const resolvedHarness = harness || createOrchestratorHarness({
     mode: harnessMode,
     options: harnessOptions,
   });
+
+  const hasLiveCollector = typeof liveTaskCollector === 'function';
+
   return {
     environment: 'orchestrator',
     loadTasks: () => loadRealOrchestratorTasks({ tasks }),
-    sampleTask({ seed = 0, attempt = 0 } = {}) {
+    async sampleTask({ seed = 0, attempt = 0 } = {}) {
+      if (hasLiveCollector) {
+        const liveTask = await liveTaskCollector({
+          seed,
+          attempt,
+          harnessMode,
+          environment: 'orchestrator',
+        });
+        if (!liveTask) {
+          return null;
+        }
+        return validateOrchestratorTask(liveTask);
+      }
       return sampleOrchestratorTask({ seed, attempt, tasks });
     },
     runEpisode({ task, checkpointId, policy = null, trainerConfig = undefined }) {

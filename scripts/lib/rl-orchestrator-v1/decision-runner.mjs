@@ -1,5 +1,12 @@
 import { compactRlDecisionEvidence } from '../harness/orchestrator-evidence.mjs';
 import { runOrchestrate } from '../lifecycle/orchestrate.mjs';
+import {
+  decidePolicyReleaseRoute,
+  loadPolicyReleaseState,
+  normalizePolicyReleaseConfig,
+  updatePolicyReleaseState,
+  writePolicyReleaseState,
+} from './policy-release-gate.mjs';
 import { validateOrchestratorEvidence, validateOrchestratorTask } from './schema.mjs';
 
 function computeHash(value) {
@@ -151,6 +158,7 @@ function buildRealEvidence({
   selectedExecutor = null,
   report = {},
   execution = {},
+  policyRelease = {},
 }) {
   const requestedExecutionMode = normalizeExecutionMode(execution.requestedExecutionMode || 'dry-run');
   const effectiveExecutionMode = normalizeExecutionMode(execution.effectiveExecutionMode || requestedExecutionMode);
@@ -206,6 +214,12 @@ function buildRealEvidence({
       completed_jobs: summary.completedCount,
       job_count: summary.jobCount,
       clarity_needs_human: clarityNeedsHuman,
+      policy_release_mode: String(policyRelease.effective_mode || policyRelease.mode || 'legacy'),
+      policy_release_applied: policyRelease.apply_policy_executor === true,
+      policy_candidate_executor: policyRelease.candidate_executor || null,
+      policy_applied_executor: policyRelease.applied_executor || null,
+      policy_release_reason: policyRelease.reason || null,
+      policy_release_rollout_rate: Number(policyRelease.rollout_rate || 0),
     },
     decision_type: task.decision_type,
     decision_payload: {
@@ -228,6 +242,16 @@ function buildRealEvidence({
       job_count: summary.jobCount,
       job_statuses: summary.jobStatuses,
       preflight_statuses: preflightStatuses,
+      policy_release_mode: String(policyRelease.effective_mode || policyRelease.mode || 'legacy'),
+      policy_release_applied: policyRelease.apply_policy_executor === true,
+      policy_candidate_executor: policyRelease.candidate_executor || null,
+      policy_applied_executor: policyRelease.applied_executor || null,
+      policy_release_reason: policyRelease.reason || null,
+      policy_release_rollout_rate: Number(policyRelease.rollout_rate || 0),
+      policy_release_canary_bucket: Number(policyRelease.canary_bucket || 0),
+      policy_release_downgraded: policyRelease.downgraded === true,
+      policy_release_downgrade_reason: policyRelease.downgrade_reason || null,
+      policy_release_state_path: policyRelease.state_path || null,
     },
     executor_selected: executorSelected,
     preflight_selected: preflightSelected,
@@ -300,6 +324,7 @@ export function createRealOrchestratorHarness({
   executionMode = 'dry-run',
   fallbackExecutionMode = 'dry-run',
   fallbackOnMissingDispatchRun = true,
+  policyRelease = null,
   sessionId = '',
   io = null,
   env = process.env,
@@ -308,6 +333,13 @@ export function createRealOrchestratorHarness({
   fallbackOnError = true,
 } = {}) {
   const resolvedIo = io || createSilentIo();
+  const requestedExecutionMode = normalizeExecutionMode(executionMode);
+  const releaseConfig = normalizePolicyReleaseConfig({
+    policyRelease,
+    rootDir,
+    requestedExecutionMode,
+    env,
+  });
   const harness = {
     calls: [],
     async executeDecision({ task, checkpointId, attempt = 0, mode = 'episode', selectedExecutor = null }) {
@@ -316,14 +348,33 @@ export function createRealOrchestratorHarness({
         task: normalizedTask,
         selectedExecutor,
       });
+      let releaseState = releaseConfig.enabled
+        ? await loadPolicyReleaseState(releaseConfig)
+        : null;
+      const releaseDecision = await decidePolicyReleaseRoute({
+        config: releaseConfig,
+        state: releaseState,
+        taskId: normalizedTask.task_id,
+        checkpointId,
+        attempt,
+        selectedExecutor: requestedExecutor,
+      });
+      const routedExecutionMode = normalizeExecutionMode(releaseDecision.execution_mode || requestedExecutionMode);
+      const appliedExecutor = releaseDecision.applied_executor || null;
       const callRecord = {
         task_id: normalizedTask.task_id,
         checkpointId,
         attempt,
         mode,
         requested_executor: requestedExecutor,
+        routed_executor: appliedExecutor,
+        policy_release_mode: releaseDecision.effective_mode,
+        policy_release_applied: releaseDecision.apply_policy_executor === true,
+        policy_release_reason: releaseDecision.reason || null,
+        policy_release_rollout_rate: Number(releaseDecision.rollout_rate || 0),
         harness_mode: 'real',
-        execution_mode_requested: normalizeExecutionMode(executionMode),
+        execution_mode_requested: requestedExecutionMode,
+        execution_mode_routed: routedExecutionMode,
         execution_modes_attempted: [],
         execution_mode_effective: null,
         fallback_reason: null,
@@ -331,7 +382,7 @@ export function createRealOrchestratorHarness({
       };
       harness.calls.push(callRecord);
       const executionModePlan = resolveExecutionModePlan({
-        executionMode,
+        executionMode: routedExecutionMode,
         fallbackExecutionMode,
         fallbackOnMissingDispatchRun,
       });
@@ -384,7 +435,7 @@ export function createRealOrchestratorHarness({
           checkpointId,
           attempt,
           mode,
-          selectedExecutor: requestedExecutor,
+          selectedExecutor: appliedExecutor,
           report: selectedResult?.report || {},
           execution: {
             requestedExecutionMode: callRecord.execution_mode_requested,
@@ -392,12 +443,51 @@ export function createRealOrchestratorHarness({
             attemptedExecutionModes: callRecord.execution_modes_attempted,
             fallbackReason,
           },
+          policyRelease: {
+            ...releaseDecision,
+            state_path: releaseConfig.enabled ? releaseConfig.state_path : null,
+          },
         });
+        let normalizedEvidence = evidence;
+        if (releaseConfig.enabled) {
+          const releaseUpdate = updatePolicyReleaseState({
+            config: releaseConfig,
+            state: releaseState,
+            decision: releaseDecision,
+            evidence,
+          });
+          releaseState = releaseUpdate.state;
+          await writePolicyReleaseState(releaseConfig, releaseState);
+          callRecord.policy_release_state_path = releaseConfig.state_path;
+          callRecord.policy_release_next_mode = releaseState.effective_mode;
+          callRecord.policy_release_next_rollout_rate = Number(releaseState.effective_rollout_rate || 0);
+          callRecord.policy_release_downgraded = releaseUpdate.downgraded === true;
+          callRecord.policy_release_downgrade_reason = releaseUpdate.downgrade_reason || null;
+          if (releaseUpdate.downgraded) {
+            normalizedEvidence = validateOrchestratorEvidence(compactRlDecisionEvidence({
+              ...evidence,
+              context_state: {
+                ...evidence.context_state,
+                policy_release_downgraded: true,
+                policy_release_downgrade_reason: releaseUpdate.downgrade_reason,
+                policy_release_next_mode: releaseState.effective_mode,
+                policy_release_next_rollout_rate: releaseState.effective_rollout_rate,
+              },
+              decision_payload: {
+                ...evidence.decision_payload,
+                policy_release_downgraded: true,
+                policy_release_downgrade_reason: releaseUpdate.downgrade_reason,
+                policy_release_next_mode: releaseState.effective_mode,
+                policy_release_next_rollout_rate: releaseState.effective_rollout_rate,
+              },
+            }));
+          }
+        }
         callRecord.execution_mode_effective = selectedMode;
         callRecord.fallback_reason = fallbackReason;
-        callRecord.dispatch_ok = evidence.decision_payload?.dispatch_ok === true;
-        callRecord.runtime_id = String(evidence.decision_payload?.runtime_id || '');
-        return evidence;
+        callRecord.dispatch_ok = normalizedEvidence.decision_payload?.dispatch_ok === true;
+        callRecord.runtime_id = String(normalizedEvidence.decision_payload?.runtime_id || '');
+        return normalizedEvidence;
       } catch (error) {
         callRecord.error = error?.message || String(error);
         if (!fallbackOnError || !fallbackHarness || typeof fallbackHarness.executeDecision !== 'function') {
@@ -409,7 +499,7 @@ export function createRealOrchestratorHarness({
           checkpointId,
           attempt,
           mode,
-          selectedExecutor: requestedExecutor,
+          selectedExecutor: appliedExecutor,
         });
         const normalizedFallback = validateOrchestratorEvidence(fallbackEvidence);
         return validateOrchestratorEvidence(compactRlDecisionEvidence({
@@ -418,6 +508,12 @@ export function createRealOrchestratorHarness({
             ...normalizedFallback.context_state,
             fallback_used: true,
             real_harness_error: callRecord.error,
+            policy_release_mode: releaseDecision.effective_mode,
+            policy_release_applied: releaseDecision.apply_policy_executor === true,
+            policy_candidate_executor: releaseDecision.candidate_executor || null,
+            policy_applied_executor: releaseDecision.applied_executor || null,
+            policy_release_reason: releaseDecision.reason || null,
+            policy_release_rollout_rate: Number(releaseDecision.rollout_rate || 0),
           },
           decision_payload: {
             ...normalizedFallback.decision_payload,
@@ -428,6 +524,13 @@ export function createRealOrchestratorHarness({
             fallback_reason: fallbackReason || callRecord.error,
             fallback_used: true,
             fallback_error: callRecord.error,
+            policy_release_mode: releaseDecision.effective_mode,
+            policy_release_applied: releaseDecision.apply_policy_executor === true,
+            policy_candidate_executor: releaseDecision.candidate_executor || null,
+            policy_applied_executor: releaseDecision.applied_executor || null,
+            policy_release_reason: releaseDecision.reason || null,
+            policy_release_rollout_rate: Number(releaseDecision.rollout_rate || 0),
+            policy_release_state_path: releaseConfig.enabled ? releaseConfig.state_path : null,
           },
         }));
       }

@@ -20,6 +20,7 @@ test('mixed context summary writer persists per-environment counts and drill evi
       active_checkpoint_id: 'ckpt-a',
       pre_update_ref_checkpoint_id: null,
       last_stable_checkpoint_id: 'ckpt-stable',
+      orchestrator_task_source: 'live_collector',
       holdout_validation: { shell: { status: 'passed' } },
       reward_config: {
         weights: { terminal: 0.8 },
@@ -50,6 +51,7 @@ test('mixed context summary writer persists per-environment counts and drill evi
   assert.equal(saved.mixed_batch_count, 3);
   assert.equal(saved.environment_counts.browser, 4);
   assert.equal(saved.drills.rollback.degradation_streak, 3);
+  assert.equal(saved.orchestrator_task_source, 'live_collector');
   assert.equal(saved.reward_config.weights.terminal, 0.8);
   assert.equal(saved.ope.window_size, 12);
   assert.equal(saved.stability_guardrails.auto_policy_rollbacks, 1);

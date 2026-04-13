@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 function makeTask(overrides = {}) {
@@ -123,7 +126,7 @@ test('orchestrator adapter supports real harness mode with dry-run trajectories'
     },
   });
   const policy = { seed: 7 };
-  const task = adapter.sampleTask({ seed: 0, attempt: 0 });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
 
   const episode = await adapter.runEpisode({
     task,
@@ -135,6 +138,160 @@ test('orchestrator adapter supports real harness mode with dry-run trajectories'
   assert.equal(['success', 'partial', 'failed'].includes(episode.terminal_outcome), true);
   assert.equal(episode.decision_payload.harness_mode, 'real');
   assert.equal(Array.isArray(episode.bandit_trace?.action_space), true);
+});
+
+test('orchestrator adapter can sample tasks from live collector for real traffic integration', async () => {
+  const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
+  const samples = [];
+  const adapter = mod.createOrchestratorAdapter({
+    harnessMode: 'fixture',
+    liveTaskCollector: async ({ attempt, harnessMode, environment }) => {
+      samples.push({ attempt, harnessMode, environment });
+      if (attempt > 0) {
+        return null;
+      }
+      return makeTask({
+        task_id: 'orch-live-collector-001',
+        context_snapshot_id: 'ctx-live-1',
+      });
+    },
+  });
+
+  const first = await adapter.sampleTask({ seed: 0, attempt: 0 });
+  const second = await adapter.sampleTask({ seed: 0, attempt: 1 });
+  assert.equal(first.task_id, 'orch-live-collector-001');
+  assert.equal(second, null);
+  assert.deepEqual(samples[0], {
+    attempt: 0,
+    harnessMode: 'fixture',
+    environment: 'orchestrator',
+  });
+
+  const episode = await adapter.runEpisode({
+    task: first,
+    checkpointId: 'ckpt-live-collector',
+    policy: { seed: 3 },
+  });
+  assert.equal(episode.environment, 'orchestrator');
+  assert.equal(typeof episode.executor_selected, 'string');
+});
+
+test('real orchestrator harness policy release canary holdout routes non-sampled traffic to baseline mode', async () => {
+  const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-canary-'));
+  const statePath = path.join(rootDir, 'orchestrator-policy-release.state.json');
+  const executionModes = [];
+  const adapter = mod.createOrchestratorAdapter({
+    tasks: [makeTask({ task_id: 'orch-release-canary-001' })],
+    harnessMode: 'real',
+    harnessOptions: {
+      rootDir,
+      executionMode: 'live',
+      fallbackExecutionMode: 'dry-run',
+      fallbackOnMissingDispatchRun: false,
+      policyRelease: {
+        mode: 'canary',
+        rolloutRate: 0,
+        baselineExecutionMode: 'dry-run',
+        autoDowngrade: false,
+        statePath,
+      },
+      executeOrchestrate: async (options) => {
+        executionModes.push(options.executionMode);
+        return {
+          exitCode: 0,
+          report: {
+            dispatchRun: {
+              mode: options.executionMode,
+              ok: true,
+              runtime: { id: `runtime-${options.executionMode}` },
+              executorRegistry: ['local-phase'],
+              jobRuns: [{ status: 'simulated' }],
+            },
+            dispatchPreflight: { results: [] },
+          },
+        };
+      },
+    },
+  });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
+
+  const episode = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-canary',
+    policy: { seed: 29 },
+  });
+
+  assert.deepEqual(executionModes, ['dry-run']);
+  assert.equal(episode.decision_payload.requested_execution_mode, 'live');
+  assert.equal(episode.decision_payload.effective_execution_mode, 'dry-run');
+  assert.equal(episode.decision_payload.policy_release_mode, 'canary');
+  assert.equal(episode.decision_payload.policy_release_applied, false);
+});
+
+test('real orchestrator harness policy release auto-downgrades after policy-routed failures', async () => {
+  const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-gate-'));
+  const statePath = path.join(rootDir, 'orchestrator-policy-release.state.json');
+  const executionModes = [];
+  const adapter = mod.createOrchestratorAdapter({
+    tasks: [makeTask({ task_id: 'orch-release-downgrade-001' })],
+    harnessMode: 'real',
+    harnessOptions: {
+      rootDir,
+      executionMode: 'live',
+      fallbackExecutionMode: 'dry-run',
+      fallbackOnMissingDispatchRun: false,
+      policyRelease: {
+        mode: 'full',
+        rolloutRate: 0,
+        baselineExecutionMode: 'dry-run',
+        autoDowngrade: true,
+        downgradeConsecutiveFailures: 1,
+        downgradeMinSamples: 1,
+        downgradeMinRolloutRate: 0,
+        statePath,
+      },
+      executeOrchestrate: async (options) => {
+        executionModes.push(options.executionMode);
+        return {
+          exitCode: 0,
+          report: {
+            dispatchRun: {
+              mode: options.executionMode,
+              ok: false,
+              runtime: { id: `runtime-${options.executionMode}` },
+              executorRegistry: ['local-phase'],
+              jobRuns: [{ status: 'blocked' }],
+            },
+            dispatchPreflight: { results: [] },
+          },
+        };
+      },
+    },
+  });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
+
+  const first = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-downgrade-1',
+    policy: { seed: 31 },
+  });
+  const second = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-downgrade-2',
+    policy: { seed: 31 },
+  });
+
+  assert.equal(first.decision_payload.policy_release_applied, true);
+  assert.equal(first.decision_payload.policy_release_downgraded, true);
+  assert.equal(second.decision_payload.policy_release_applied, false);
+  assert.equal(second.decision_payload.effective_execution_mode, 'dry-run');
+  assert.deepEqual(executionModes, ['live', 'dry-run']);
+
+  const persistedState = JSON.parse(await readFile(statePath, 'utf8'));
+  assert.equal(persistedState.effective_mode, 'canary');
+  assert.equal(Number(persistedState.effective_rollout_rate), 0);
 });
 
 test('real orchestrator harness retries live with dry-run fallback when live dispatch evidence is unavailable', async () => {
@@ -170,7 +327,7 @@ test('real orchestrator harness retries live with dry-run fallback when live dis
       },
     },
   });
-  const task = adapter.sampleTask({ seed: 0, attempt: 0 });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
 
   const episode = await adapter.runEpisode({
     task,
@@ -204,7 +361,7 @@ test('real orchestrator harness falls back to fixture evidence on orchestration 
       fallbackOnError: true,
     },
   });
-  const task = adapter.sampleTask({ seed: 0, attempt: 0 });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
 
   const episode = await adapter.runEpisode({
     task,

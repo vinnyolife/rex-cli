@@ -516,6 +516,7 @@ function createDefaultAdapters({
   rootDir = process.cwd(),
   orchestratorHarnessMode = 'fixture',
   orchestratorHarnessOptions = {},
+  orchestratorLiveTaskCollector = null,
 } = {}) {
   return {
     shell: overrides.shell || createShellMixedAdapter(),
@@ -526,6 +527,7 @@ function createDefaultAdapters({
         rootDir: orchestratorHarnessOptions.rootDir || rootDir,
         ...orchestratorHarnessOptions,
       },
+      liveTaskCollector: orchestratorLiveTaskCollector,
     }),
   };
 }
@@ -1299,6 +1301,7 @@ export async function runMixedCampaign({
   adapters: adapterOverrides = {},
   orchestratorHarnessMode = 'fixture',
   orchestratorHarnessOptions = {},
+  orchestratorLiveTaskCollector = null,
   orchestratorHoldoutHarnessMode = orchestratorHarnessMode,
   orchestratorHoldoutHarnessOptions = orchestratorHarnessOptions,
   initialCheckpointId = 'ckpt-mixed-a',
@@ -1320,6 +1323,7 @@ export async function runMixedCampaign({
     rootDir,
     orchestratorHarnessMode,
     orchestratorHarnessOptions,
+    orchestratorLiveTaskCollector,
   });
   const resolvedEnvironments = [...activeEnvironments];
   const baseDir = await ensureNamespaceRoot(rootDir, namespace);
@@ -1451,6 +1455,7 @@ export async function runMixedCampaign({
           auto_policy_rollbacks: 0,
         },
         active_environments: resolvedEnvironments,
+        orchestrator_task_source: typeof orchestratorLiveTaskCollector === 'function' ? 'live_collector' : 'registry',
       },
       controlState,
     };
@@ -1477,7 +1482,7 @@ export async function runMixedCampaign({
       for (let offset = 0; offset < resolvedEnvironments.length; offset += 1) {
         const environment = resolvedEnvironments[(envCursor + offset) % resolvedEnvironments.length];
         const adapter = adapters[environment];
-        const task = adapter.sampleTask({
+        const task = await adapter.sampleTask({
           seed: batchIndex,
           attempt: attempts[environment],
         });
@@ -1514,6 +1519,7 @@ export async function runMixedCampaign({
                 auto_policy_rollbacks: autoPolicyRollbacks,
               },
               active_environments: resolvedEnvironments,
+              orchestrator_task_source: typeof orchestratorLiveTaskCollector === 'function' ? 'live_collector' : 'registry',
             },
             controlState,
           };
@@ -1630,7 +1636,7 @@ export async function runMixedCampaign({
     for (let compareIndex = 0; compareIndex < resolvedEnvironments.length; compareIndex += 1) {
       const environment = resolvedEnvironments[compareIndex % resolvedEnvironments.length];
       const adapter = adapters[environment];
-      const task = adapter.sampleTask({
+      const task = await adapter.sampleTask({
         seed: batchIndex + 100,
         attempt: attempts[environment],
       });
@@ -1910,6 +1916,7 @@ export async function runMixedCampaign({
     duplicateEventApplications,
     active_environments: resolvedEnvironments,
     orchestrator_holdout_harness_mode: orchestratorHoldoutHarnessMode,
+    orchestrator_task_source: typeof orchestratorLiveTaskCollector === 'function' ? 'live_collector' : 'registry',
   };
 
   return {

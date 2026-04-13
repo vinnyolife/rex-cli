@@ -16,6 +16,7 @@ export function buildMixedSummaryPayload({ runId, mode, result }) {
     active_checkpoint_id: result.summary.active_checkpoint_id,
     pre_update_ref_checkpoint_id: result.summary.pre_update_ref_checkpoint_id,
     last_stable_checkpoint_id: result.summary.last_stable_checkpoint_id,
+    orchestrator_task_source: result.summary.orchestrator_task_source,
     holdout_validation: result.summary.holdout_validation,
     reward_config: result.summary.reward_config,
     ope: result.summary.ope,
