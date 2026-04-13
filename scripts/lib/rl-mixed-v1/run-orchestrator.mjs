@@ -4,7 +4,8 @@ import path from 'node:path';
 import { applyPointerTransition } from '../rl-core/checkpoint-registry.mjs';
 import { reduceDegradationStreak } from '../rl-core/comparison-engine.mjs';
 import { applyControlEvent, createControlStateStore, readControlSnapshot, writeControlSnapshot } from '../rl-core/control-state-store.mjs';
-import { applyTrajectoryUpdate, runOnlineUpdateBatch } from '../rl-core/trainer.mjs';
+import { computeContextualBanditPolicyDistribution, evaluateContextualBanditOpe } from '../rl-core/ope-eval.mjs';
+import { applyTrajectoryUpdate, createTrainerConfig, runOnlineUpdateBatch } from '../rl-core/trainer.mjs';
 import { createBrowserAdapter } from '../rl-browser-v1/adapter.mjs';
 import { runBrowserHoldout } from '../rl-browser-v1/eval-harness.mjs';
 import { createOrchestratorAdapter } from '../rl-orchestrator-v1/adapter.mjs';
@@ -45,7 +46,7 @@ function safeRatio(numerator, denominator) {
   return top / bottom;
 }
 
-const ORCHESTRATOR_BANDIT_REWARD_WEIGHTS = Object.freeze({
+const ORCHESTRATOR_BANDIT_REWARD_DEFAULT_WEIGHTS = Object.freeze({
   terminal: 0.8,
   successRate: 0.4,
   rollbackRate: -0.6,
@@ -54,11 +55,335 @@ const ORCHESTRATOR_BANDIT_REWARD_WEIGHTS = Object.freeze({
   verificationBlocked: -0.2,
 });
 
+const ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS = Object.freeze({
+  terminal: { min: 0.2, max: 1.4 },
+  successRate: { min: 0.1, max: 1.2 },
+  rollbackRate: { min: -1.8, max: -0.1 },
+  humanHandoffRate: { min: -1.2, max: -0.05 },
+  missedHandoff: { min: -1.4, max: -0.05 },
+  verificationBlocked: { min: -1.0, max: -0.05 },
+});
+
+const ORCHESTRATOR_REWARD_AUTOTUNE_DEFAULT = Object.freeze({
+  enabled: true,
+  step: 0.03,
+  min_samples: 2,
+});
+
+const ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT = Object.freeze({
+  enable_annealing: true,
+  anneal_factor: 0.92,
+  anti_anneal_factor: 1.08,
+  min_exploration_rate: 0.03,
+  max_exploration_rate: 0.35,
+  drift_gap_threshold: 1,
+  reward_collapse_threshold: -0.35,
+  rollback_rate_alert_threshold: 0.35,
+  auto_policy_rollback_on_critical: true,
+});
+
+const ORCHESTRATOR_OPE_DEFAULT = Object.freeze({
+  window_size: 240,
+  max_log_rows: 2000,
+  clip_weight: 20,
+  min_logging_probability: 1e-4,
+});
+
 const POLICY_CHECKPOINT_SCHEMA_VERSION = 1;
 const POLICY_CHECKPOINT_FILE = 'orchestrator-bandit-policy.latest.json';
 const POLICY_CHECKPOINT_INDEX_FILE = 'orchestrator-bandit-policy.index.json';
 const POLICY_CHECKPOINT_VERSIONS_DIR = 'orchestrator-bandit-policy.versions';
 const POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS = 40;
+const POLICY_CHECKPOINT_OPE_LOG_FILE = 'orchestrator-bandit-ope-log.ndjson';
+
+function toFiniteNumber(value, fallback = 0) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : fallback;
+}
+
+function normalizeRewardWeights(baseWeights = ORCHESTRATOR_BANDIT_REWARD_DEFAULT_WEIGHTS, overrides = {}) {
+  const merged = {
+    ...baseWeights,
+    ...(overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : {}),
+  };
+  return {
+    terminal: clamp(merged.terminal, ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.terminal.min, ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.terminal.max),
+    successRate: clamp(merged.successRate, ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.successRate.min, ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.successRate.max),
+    rollbackRate: clamp(merged.rollbackRate, ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.rollbackRate.min, ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.rollbackRate.max),
+    humanHandoffRate: clamp(
+      merged.humanHandoffRate,
+      ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.humanHandoffRate.min,
+      ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.humanHandoffRate.max
+    ),
+    missedHandoff: clamp(
+      merged.missedHandoff,
+      ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.missedHandoff.min,
+      ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.missedHandoff.max
+    ),
+    verificationBlocked: clamp(
+      merged.verificationBlocked,
+      ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.verificationBlocked.min,
+      ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS.verificationBlocked.max
+    ),
+  };
+}
+
+function normalizeRewardAutoTuneConfig(raw = {}) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    enabled: source.enabled !== false,
+    step: clamp(toFiniteNumber(source.step, ORCHESTRATOR_REWARD_AUTOTUNE_DEFAULT.step), 0.005, 0.15),
+    min_samples: Math.max(1, Math.floor(toFiniteNumber(source.min_samples, ORCHESTRATOR_REWARD_AUTOTUNE_DEFAULT.min_samples))),
+  };
+}
+
+function normalizeStabilityGuardrails(raw = {}) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    enable_annealing: source.enable_annealing !== false,
+    anneal_factor: clamp(toFiniteNumber(source.anneal_factor, ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.anneal_factor), 0.7, 0.99),
+    anti_anneal_factor: clamp(toFiniteNumber(source.anti_anneal_factor, ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.anti_anneal_factor), 1.01, 1.6),
+    min_exploration_rate: clamp(
+      toFiniteNumber(source.min_exploration_rate, ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.min_exploration_rate),
+      0,
+      0.5
+    ),
+    max_exploration_rate: clamp(
+      toFiniteNumber(source.max_exploration_rate, ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.max_exploration_rate),
+      0.05,
+      0.9
+    ),
+    drift_gap_threshold: Math.max(0, Math.floor(toFiniteNumber(
+      source.drift_gap_threshold,
+      ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.drift_gap_threshold
+    ))),
+    reward_collapse_threshold: clamp(
+      toFiniteNumber(source.reward_collapse_threshold, ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.reward_collapse_threshold),
+      -1.5,
+      1.5
+    ),
+    rollback_rate_alert_threshold: clamp(
+      toFiniteNumber(
+        source.rollback_rate_alert_threshold,
+        ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT.rollback_rate_alert_threshold
+      ),
+      0.05,
+      1
+    ),
+    auto_policy_rollback_on_critical: source.auto_policy_rollback_on_critical !== false,
+  };
+}
+
+function normalizeOpeConfig(raw = {}) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    window_size: Math.max(20, Math.floor(toFiniteNumber(source.window_size, ORCHESTRATOR_OPE_DEFAULT.window_size))),
+    max_log_rows: Math.max(100, Math.floor(toFiniteNumber(source.max_log_rows, ORCHESTRATOR_OPE_DEFAULT.max_log_rows))),
+    clip_weight: clamp(toFiniteNumber(source.clip_weight, ORCHESTRATOR_OPE_DEFAULT.clip_weight), 1, 100),
+    min_logging_probability: clamp(
+      toFiniteNumber(source.min_logging_probability, ORCHESTRATOR_OPE_DEFAULT.min_logging_probability),
+      1e-9,
+      1
+    ),
+  };
+}
+
+function summarizeBanditRewardRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return {
+      sample_count: 0,
+      average_reward: 0,
+      min_reward: 0,
+      max_reward: 0,
+    };
+  }
+  const values = rows.map((row) => Number(row?.reward || 0));
+  return {
+    sample_count: values.length,
+    average_reward: values.reduce((sum, value) => sum + value, 0) / values.length,
+    min_reward: Math.min(...values),
+    max_reward: Math.max(...values),
+  };
+}
+
+function tuneRewardWeights({
+  weights,
+  autoTuneConfig,
+  banditRewardSummary,
+  epochOutcome,
+  batchBetterCount = 0,
+  batchWorseCount = 0,
+  holdouts = {},
+} = {}) {
+  const normalizedWeights = normalizeRewardWeights(ORCHESTRATOR_BANDIT_REWARD_DEFAULT_WEIGHTS, weights);
+  const disabled = !autoTuneConfig?.enabled;
+  const insufficientSamples = Number(banditRewardSummary?.sample_count || 0) < Number(autoTuneConfig?.min_samples || 1);
+  if (disabled || insufficientSamples) {
+    return {
+      tuned: false,
+      reason: disabled ? 'disabled' : 'insufficient_samples',
+      weights: normalizedWeights,
+      adjustments: {},
+    };
+  }
+
+  const step = Number(autoTuneConfig?.step || 0.03);
+  const orchestratorStatus = String(holdouts?.orchestrator?.status || '').trim().toLowerCase();
+  const degraded = epochOutcome === 'rollback'
+    || orchestratorStatus === 'failed'
+    || Number(batchWorseCount || 0) > Number(batchBetterCount || 0)
+    || Number(banditRewardSummary?.average_reward || 0) < -0.2;
+  const improved = epochOutcome === 'promotion_eligible'
+    && Number(batchBetterCount || 0) >= Number(batchWorseCount || 0)
+    && orchestratorStatus !== 'failed'
+    && Number(banditRewardSummary?.average_reward || 0) > 0;
+
+  if (!degraded && !improved) {
+    return {
+      tuned: false,
+      reason: 'hold',
+      weights: normalizedWeights,
+      adjustments: {},
+    };
+  }
+
+  const nextWeights = { ...normalizedWeights };
+  const adjustments = {};
+  const plan = degraded
+    ? {
+      terminal: -0.35,
+      successRate: -0.2,
+      rollbackRate: -1,
+      humanHandoffRate: -0.6,
+      missedHandoff: -0.8,
+      verificationBlocked: -0.5,
+    }
+    : {
+      terminal: 0.5,
+      successRate: 0.4,
+      rollbackRate: 0.35,
+      humanHandoffRate: 0.25,
+      missedHandoff: 0.2,
+      verificationBlocked: 0.2,
+    };
+
+  for (const key of Object.keys(plan)) {
+    const delta = step * Number(plan[key] || 0);
+    const bounds = ORCHESTRATOR_BANDIT_REWARD_WEIGHT_BOUNDS[key];
+    const previous = Number(nextWeights[key] || 0);
+    const next = clamp(previous + delta, bounds.min, bounds.max);
+    nextWeights[key] = next;
+    adjustments[key] = next - previous;
+  }
+
+  return {
+    tuned: true,
+    reason: degraded ? 'degraded' : 'improved',
+    weights: nextWeights,
+    adjustments,
+  };
+}
+
+function detectStabilityAlerts({
+  batchId = '',
+  epochOutcome = '',
+  degradationStreak = 0,
+  batchBetterCount = 0,
+  batchWorseCount = 0,
+  holdouts = {},
+  banditRewardSummary = {},
+  rollbackRate = 0,
+  guardrails = ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT,
+} = {}) {
+  const alerts = [];
+  const normalizedBatchId = String(batchId || '');
+  const addAlert = (severity, code, detail = {}) => {
+    alerts.push({
+      batch_id: normalizedBatchId,
+      severity,
+      code,
+      ...detail,
+    });
+  };
+
+  if (epochOutcome === 'rollback') {
+    addAlert('critical', 'epoch_rollback', { degradation_streak: Number(degradationStreak || 0) });
+  } else if (Number(degradationStreak || 0) >= 2) {
+    addAlert('warning', 'degradation_streak', { degradation_streak: Number(degradationStreak || 0) });
+  }
+
+  if (holdouts?.orchestrator?.status === 'failed' || holdouts?.shell?.status === 'failed') {
+    addAlert('critical', 'holdout_failed', {
+      orchestrator_status: holdouts?.orchestrator?.status || null,
+      shell_status: holdouts?.shell?.status || null,
+    });
+  }
+
+  if (Number(batchWorseCount || 0) - Number(batchBetterCount || 0) > Number(guardrails?.drift_gap_threshold || 0)) {
+    addAlert('warning', 'comparison_drift', {
+      better: Number(batchBetterCount || 0),
+      worse: Number(batchWorseCount || 0),
+    });
+  }
+
+  if (Number(banditRewardSummary?.sample_count || 0) > 0
+    && Number(banditRewardSummary?.average_reward || 0) <= Number(guardrails?.reward_collapse_threshold || -0.35)) {
+    addAlert('critical', 'reward_collapse', {
+      average_reward: Number(banditRewardSummary?.average_reward || 0),
+    });
+  }
+
+  if (Number(rollbackRate || 0) >= Number(guardrails?.rollback_rate_alert_threshold || 1)) {
+    addAlert('warning', 'rollback_rate_high', {
+      rollback_rate: Number(rollbackRate || 0),
+    });
+  }
+
+  return {
+    alerts,
+    has_critical: alerts.some((alert) => alert.severity === 'critical'),
+  };
+}
+
+function adjustExplorationRate({
+  currentRate = 0.15,
+  guardrails = ORCHESTRATOR_STABILITY_GUARDRAILS_DEFAULT,
+  epochOutcome = '',
+  hasCriticalDrift = false,
+} = {}) {
+  const minRate = Math.min(
+    Number(guardrails.min_exploration_rate || 0),
+    Number(guardrails.max_exploration_rate || 1)
+  );
+  const maxRate = Math.max(
+    Number(guardrails.min_exploration_rate || 0),
+    Number(guardrails.max_exploration_rate || 1)
+  );
+  const current = clamp(currentRate, minRate, maxRate);
+  if (guardrails.enable_annealing === false) {
+    return {
+      previous_rate: current,
+      next_rate: current,
+      anneal_action: 'disabled',
+    };
+  }
+
+  let next = current;
+  let action = 'hold';
+  if (hasCriticalDrift || epochOutcome === 'rollback') {
+    next = clamp(current * Number(guardrails.anti_anneal_factor || 1.08), minRate, maxRate);
+    action = 'increase_exploration';
+  } else if (epochOutcome === 'promotion_eligible') {
+    next = clamp(current * Number(guardrails.anneal_factor || 0.92), minRate, maxRate);
+    action = 'decrease_exploration';
+  }
+
+  return {
+    previous_rate: current,
+    next_rate: next,
+    anneal_action: action,
+  };
+}
 
 function buildControlSnapshot(initialCheckpointId) {
   return {
@@ -246,7 +571,9 @@ export function computeOrchestratorBanditReward({
   episode,
   batchOrchestratorEpisodes = [],
   historical = {},
+  rewardWeights = ORCHESTRATOR_BANDIT_REWARD_DEFAULT_WEIGHTS,
 } = {}) {
+  const weights = normalizeRewardWeights(ORCHESTRATOR_BANDIT_REWARD_DEFAULT_WEIGHTS, rewardWeights);
   const orchestratorRows = Array.isArray(batchOrchestratorEpisodes) && batchOrchestratorEpisodes.length > 0
     ? batchOrchestratorEpisodes
     : [episode];
@@ -260,12 +587,12 @@ export function computeOrchestratorBanditReward({
   const verificationBlocked = episode?.verification_result === 'blocked';
 
   const components = {
-    terminal: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.terminal * terminalReward,
-    success_rate: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.successRate * ((2 * successRate) - 1),
-    rollback_rate: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.rollbackRate * rollbackRate,
-    human_handoff_rate: ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.humanHandoffRate * humanHandoffRate,
-    missed_handoff: missedHandoff ? ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.missedHandoff : 0,
-    verification_blocked: verificationBlocked ? ORCHESTRATOR_BANDIT_REWARD_WEIGHTS.verificationBlocked : 0,
+    terminal: weights.terminal * terminalReward,
+    success_rate: weights.successRate * ((2 * successRate) - 1),
+    rollback_rate: weights.rollbackRate * rollbackRate,
+    human_handoff_rate: weights.humanHandoffRate * humanHandoffRate,
+    missed_handoff: missedHandoff ? weights.missedHandoff : 0,
+    verification_blocked: verificationBlocked ? weights.verificationBlocked : 0,
   };
   const rawReward = Object.values(components).reduce((sum, value) => sum + Number(value || 0), 0);
   const reward = clamp(rawReward, -1.5, 1.5);
@@ -290,6 +617,7 @@ function buildTrajectoryFromEpisode(episode, rewardContext = {}) {
       episode,
       batchOrchestratorEpisodes: rewardContext.batchOrchestratorEpisodes,
       historical: rewardContext.historical,
+      rewardWeights: rewardContext.rewardWeights,
     });
     return {
       updateType: 'contextual_bandit',
@@ -297,6 +625,8 @@ function buildTrajectoryFromEpisode(episode, rewardContext = {}) {
       actions: episode.bandit_trace.action_space,
       selectedAction: episode.bandit_trace.selected_action,
       reward: rewardDetails.reward,
+      loggingActionProbability: Number(episode.bandit_trace.action_probability || 0),
+      loggingActionProbabilities: clone(episode.bandit_trace.action_probabilities || {}),
       selectionMode: episode.bandit_trace.selection_mode,
       rewardSignals: rewardDetails.signals,
       rewardComponents: rewardDetails.components,
@@ -339,6 +669,7 @@ function buildPolicyCheckpointPaths(baseDir) {
     latestPath: path.join(checkpointsDir, POLICY_CHECKPOINT_FILE),
     indexPath: path.join(checkpointsDir, POLICY_CHECKPOINT_INDEX_FILE),
     versionsDir: path.join(checkpointsDir, POLICY_CHECKPOINT_VERSIONS_DIR),
+    opeLogPath: path.join(checkpointsDir, POLICY_CHECKPOINT_OPE_LOG_FILE),
   };
 }
 
@@ -380,6 +711,149 @@ async function readJsonObject(filePath) {
   }
 }
 
+function normalizeOpeLogRow(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+  const actionSpace = Array.isArray(raw.action_space)
+    ? raw.action_space
+      .map((action) => (typeof action === 'string' ? action.trim() : ''))
+      .filter((action, index, source) => action.length > 0 && source.indexOf(action) === index)
+    : [];
+  const selectedAction = typeof raw.selected_action === 'string' ? raw.selected_action.trim() : '';
+  if (actionSpace.length === 0 || !selectedAction || !actionSpace.includes(selectedAction)) {
+    return null;
+  }
+  const actionProbabilities = raw.logging_action_probabilities
+    && typeof raw.logging_action_probabilities === 'object'
+    && !Array.isArray(raw.logging_action_probabilities)
+    ? raw.logging_action_probabilities
+    : {};
+  return {
+    timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : new Date().toISOString(),
+    batch_id: typeof raw.batch_id === 'string' ? raw.batch_id : '',
+    behavior_version_id: typeof raw.behavior_version_id === 'string' ? raw.behavior_version_id : null,
+    context_key: typeof raw.context_key === 'string' ? raw.context_key : 'default',
+    action_space: actionSpace,
+    selected_action: selectedAction,
+    reward: Number(raw.reward || 0),
+    logging_probability: clamp(Number(raw.logging_probability || 0), 0, 1),
+    logging_action_probabilities: Object.fromEntries(
+      actionSpace.map((action) => [action, clamp(Number(actionProbabilities[action] || 0), 0, 1)])
+    ),
+  };
+}
+
+async function readNdjsonRows(filePath) {
+  try {
+    const content = await readFile(filePath, 'utf8');
+    return content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        try {
+          return normalizeOpeLogRow(JSON.parse(line));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writeNdjsonRows(filePath, rows = []) {
+  const serialized = rows
+    .map((row) => normalizeOpeLogRow(row))
+    .filter(Boolean)
+    .map((row) => JSON.stringify(row))
+    .join('\n');
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${serialized}${serialized ? '\n' : ''}`, 'utf8');
+}
+
+function normalizePolicyOpeMetrics(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const normalizeInterval = (value) => {
+    if (!Array.isArray(value) || value.length !== 2) {
+      return [0, 0];
+    }
+    return [Number(value[0] || 0), Number(value[1] || 0)];
+  };
+  return {
+    sample_count: Number(source.sample_count || 0),
+    ips: Number(source.ips || 0),
+    self_normalized_ips: Number(source.self_normalized_ips || 0),
+    dr: Number(source.dr || 0),
+    avg_logged_reward: Number(source.avg_logged_reward || 0),
+    effective_sample_size: Number(source.effective_sample_size || 0),
+    max_importance_weight: Number(source.max_importance_weight || 0),
+    clip_weight: Number(source.clip_weight || 0),
+    min_logging_probability: Number(source.min_logging_probability || 0),
+    ips_ci95: normalizeInterval(source.ips_ci95),
+    dr_ci95: normalizeInterval(source.dr_ci95),
+  };
+}
+
+function buildBatchOpeRows({
+  trajectories = [],
+  batchId = '',
+  behaviorVersionId = null,
+} = {}) {
+  return trajectories
+    .filter((row) => row?.updateType === 'contextual_bandit')
+    .map((row) => normalizeOpeLogRow({
+      timestamp: new Date().toISOString(),
+      batch_id: batchId,
+      behavior_version_id: behaviorVersionId,
+      context_key: row.contextKey,
+      action_space: row.actions,
+      selected_action: row.selectedAction,
+      reward: row.reward,
+      logging_probability: row.loggingActionProbability,
+      logging_action_probabilities: row.loggingActionProbabilities,
+    }))
+    .filter(Boolean);
+}
+
+function composeOpeEvaluation({
+  rows = [],
+  activePolicy = null,
+  referencePolicy = null,
+  trainerConfig = {},
+  opeConfig = ORCHESTRATOR_OPE_DEFAULT,
+} = {}) {
+  const policyDistributionResolver = (policy) => (event) => computeContextualBanditPolicyDistribution({
+    policy,
+    contextKey: event.context_key,
+    actionSpace: event.action_space,
+    temperature: trainerConfig.contextual_bandit_temperature,
+  });
+  const active = normalizePolicyOpeMetrics(evaluateContextualBanditOpe({
+    events: rows,
+    policyDistributionResolver: policyDistributionResolver(activePolicy || {}),
+    clipWeight: opeConfig.clip_weight,
+    minLoggingProbability: opeConfig.min_logging_probability,
+  }));
+  const reference = normalizePolicyOpeMetrics(evaluateContextualBanditOpe({
+    events: rows,
+    policyDistributionResolver: policyDistributionResolver(referencePolicy || {}),
+    clipWeight: opeConfig.clip_weight,
+    minLoggingProbability: opeConfig.min_logging_probability,
+  }));
+  return {
+    window_size: rows.length,
+    active_policy: active,
+    reference_policy: reference,
+    dr_lift_vs_reference: Number(active.dr || 0) - Number(reference.dr || 0),
+  };
+}
+
 function createEmptyPolicyCheckpointIndex() {
   return {
     schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
@@ -408,6 +882,12 @@ function normalizePolicyCheckpointIndex(raw = {}) {
           active_checkpoint_id: entry?.active_checkpoint_id ? String(entry.active_checkpoint_id) : null,
           quality_status: entry?.quality_status === 'healthy' ? 'healthy' : 'degraded',
           quality_score: Number(entry?.quality_score || 0),
+          ope: normalizePolicyOpeMetrics(entry?.ope || {}),
+          stability_status: entry?.stability_status === 'critical'
+            ? 'critical'
+            : entry?.stability_status === 'warning'
+              ? 'warning'
+              : 'ok',
         };
       })
       .filter(Boolean)
@@ -508,6 +988,7 @@ function buildPolicyCheckpointMetadata({
   path = null,
   index_path: indexPath = null,
   versions_dir: versionsDir = null,
+  ope_log_path: opeLogPath = null,
   loadStatus = 'cold_start',
   loadError = null,
   loadTarget = 'latest',
@@ -527,11 +1008,16 @@ function buildPolicyCheckpointMetadata({
   savedUpdateCount = 0,
   savedBatchIndex = 0,
   savedAt = null,
+  loadedOpe = null,
+  savedOpe = null,
+  rewardConfig = null,
+  stability = null,
 } = {}) {
   return {
     path: checkpointPaths.latestPath || path || null,
     index_path: checkpointPaths.indexPath || indexPath || null,
     versions_dir: checkpointPaths.versionsDir || versionsDir || null,
+    ope_log_path: checkpointPaths.opeLogPath || opeLogPath || null,
     schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
     load_status: loadStatus,
     load_error: loadError,
@@ -552,6 +1038,10 @@ function buildPolicyCheckpointMetadata({
     saved_update_count: Number(savedUpdateCount || 0),
     saved_batch_index: Number(savedBatchIndex || 0),
     saved_at: savedAt,
+    loaded_ope: loadedOpe ? clone(loadedOpe) : null,
+    saved_ope: savedOpe ? clone(savedOpe) : null,
+    reward_config: rewardConfig ? clone(rewardConfig) : null,
+    stability: stability ? clone(stability) : null,
   };
 }
 
@@ -572,6 +1062,15 @@ async function loadPolicyCheckpoint({
     const versionRaw = await readJsonObject(selectedEntry.file_path);
     if (versionRaw.status === 'ok') {
       const payload = versionRaw.value;
+      const loadedOpe = payload?.ope && typeof payload.ope === 'object' && !Array.isArray(payload.ope)
+        ? payload.ope
+        : null;
+      const rewardConfig = payload?.reward_config && typeof payload.reward_config === 'object' && !Array.isArray(payload.reward_config)
+        ? payload.reward_config
+        : null;
+      const stability = payload?.stability && typeof payload.stability === 'object' && !Array.isArray(payload.stability)
+        ? payload.stability
+        : null;
       return {
         status: 'loaded',
         metadata: buildPolicyCheckpointMetadata({
@@ -588,9 +1087,15 @@ async function loadPolicyCheckpoint({
           availableVersions: index.versions.length,
           rollbackApplied: resumeTarget === 'last-good' && index.latest_version_id && index.latest_version_id !== selectedEntry.version_id,
           rollbackFromVersionId: resumeTarget === 'last-good' ? index.latest_version_id : null,
+          loadedOpe,
+          rewardConfig,
+          stability,
         }),
         activePolicy: normalizeCheckpointPolicy(payload.active_policy),
         referencePolicy: normalizeCheckpointPolicy(payload.reference_policy),
+        ope: loadedOpe ? normalizePolicyOpeMetrics(loadedOpe.active_policy || loadedOpe) : null,
+        rewardConfig: rewardConfig ? clone(rewardConfig) : null,
+        stability: stability ? clone(stability) : null,
       };
     }
     const versionError = versionRaw.error?.message || 'failed to read version checkpoint';
@@ -633,6 +1138,15 @@ async function loadPolicyCheckpoint({
   if (latestRaw.status === 'ok') {
     const payload = latestRaw.value;
     const payloadVersionId = sanitizePolicyVersionId(payload.version_id || '');
+    const loadedOpe = payload?.ope && typeof payload.ope === 'object' && !Array.isArray(payload.ope)
+      ? payload.ope
+      : null;
+    const rewardConfig = payload?.reward_config && typeof payload.reward_config === 'object' && !Array.isArray(payload.reward_config)
+      ? payload.reward_config
+      : null;
+    const stability = payload?.stability && typeof payload.stability === 'object' && !Array.isArray(payload.stability)
+      ? payload.stability
+      : null;
     return {
       status: 'loaded',
       metadata: buildPolicyCheckpointMetadata({
@@ -647,9 +1161,15 @@ async function loadPolicyCheckpoint({
         latestVersionId: index.latest_version_id || payloadVersionId || null,
         lastGoodVersionId: index.last_good_version_id,
         availableVersions: index.versions.length,
+        loadedOpe,
+        rewardConfig,
+        stability,
       }),
       activePolicy: normalizeCheckpointPolicy(payload.active_policy),
       referencePolicy: normalizeCheckpointPolicy(payload.reference_policy),
+      ope: loadedOpe ? normalizePolicyOpeMetrics(loadedOpe.active_policy || loadedOpe) : null,
+      rewardConfig: rewardConfig ? clone(rewardConfig) : null,
+      stability: stability ? clone(stability) : null,
     };
   }
 
@@ -673,6 +1193,9 @@ async function persistPolicyCheckpoint({
   checkpointPaths,
   activePolicy,
   referencePolicy,
+  rewardConfig = null,
+  ope = null,
+  stability = null,
   updateCount = 0,
   batchIndex = 0,
   activeCheckpointId = null,
@@ -687,6 +1210,25 @@ async function persistPolicyCheckpoint({
   });
   const versionPath = buildPolicyVersionPath(checkpointPaths, versionId);
   const quality = computePolicyQuality(qualityContext);
+  const normalizedOpe = ope && typeof ope === 'object' && !Array.isArray(ope)
+    ? {
+      window_size: Number(ope.window_size || 0),
+      active_policy: normalizePolicyOpeMetrics(ope.active_policy || {}),
+      reference_policy: normalizePolicyOpeMetrics(ope.reference_policy || {}),
+      dr_lift_vs_reference: Number(ope.dr_lift_vs_reference || 0),
+    }
+    : null;
+  const normalizedRewardConfig = rewardConfig && typeof rewardConfig === 'object' && !Array.isArray(rewardConfig)
+    ? clone(rewardConfig)
+    : null;
+  const normalizedStability = stability && typeof stability === 'object' && !Array.isArray(stability)
+    ? clone(stability)
+    : null;
+  const stabilityStatus = normalizedStability?.has_critical === true
+    ? 'critical'
+    : Array.isArray(normalizedStability?.alerts) && normalizedStability.alerts.length > 0
+      ? 'warning'
+      : 'ok';
   const payload = {
     schema_version: POLICY_CHECKPOINT_SCHEMA_VERSION,
     version_id: versionId,
@@ -696,6 +1238,9 @@ async function persistPolicyCheckpoint({
     active_checkpoint_id: activeCheckpointId ? String(activeCheckpointId) : null,
     quality_status: quality.quality_status,
     quality_score: quality.quality_score,
+    ope: normalizedOpe,
+    reward_config: normalizedRewardConfig,
+    stability: normalizedStability,
     active_policy: normalizeCheckpointPolicy(activePolicy),
     reference_policy: normalizeCheckpointPolicy(referencePolicy),
   };
@@ -717,6 +1262,8 @@ async function persistPolicyCheckpoint({
     active_checkpoint_id: activeCheckpointId ? String(activeCheckpointId) : null,
     quality_status: quality.quality_status,
     quality_score: quality.quality_score,
+    ope: normalizedOpe ? normalizePolicyOpeMetrics(normalizedOpe.active_policy || {}) : normalizePolicyOpeMetrics({}),
+    stability_status: stabilityStatus,
   };
   const nextIndex = updatePolicyCheckpointIndex({
     currentIndex,
@@ -739,6 +1286,9 @@ async function persistPolicyCheckpoint({
       latest_version_id: nextIndex.latest_version_id,
       last_good_version_id: nextIndex.last_good_version_id,
       available_versions: nextIndex.versions.length,
+      saved_ope: normalizedOpe,
+      reward_config: normalizedRewardConfig,
+      stability: normalizedStability,
     },
   };
 }
@@ -759,6 +1309,11 @@ export async function runMixedCampaign({
   resume = false,
   policyResumeTarget = 'latest',
   policyCheckpointMaxVersions = POLICY_CHECKPOINT_DEFAULT_MAX_VERSIONS,
+  rewardWeights = {},
+  rewardAutoTune = {},
+  stabilityGuardrails = {},
+  banditTrainerConfig = {},
+  ope = {},
 } = {}) {
   const adapters = createDefaultAdapters({
     overrides: adapterOverrides,
@@ -769,6 +1324,20 @@ export async function runMixedCampaign({
   const resolvedEnvironments = [...activeEnvironments];
   const baseDir = await ensureNamespaceRoot(rootDir, namespace);
   const policyCheckpointPaths = buildPolicyCheckpointPaths(baseDir);
+  const opeConfig = normalizeOpeConfig(ope);
+  const autoTuneConfig = normalizeRewardAutoTuneConfig(rewardAutoTune);
+  const guardrailConfig = normalizeStabilityGuardrails(stabilityGuardrails);
+  const baseTrainerConfig = createTrainerConfig({
+    ...banditTrainerConfig,
+    contextual_bandit_exploration_rate: clamp(
+      toFiniteNumber(
+        banditTrainerConfig?.contextual_bandit_exploration_rate,
+        createTrainerConfig().contextual_bandit_exploration_rate
+      ),
+      guardrailConfig.min_exploration_rate,
+      guardrailConfig.max_exploration_rate
+    ),
+  });
   const controlStore = await createControlStateStore({ rootDir, namespace });
   const attempts = Object.fromEntries(resolvedEnvironments.map((environment) => [environment, 0]));
   const environmentCounts = normalizeEnvironmentCounts(resolvedEnvironments);
@@ -779,10 +1348,33 @@ export async function runMixedCampaign({
   let duplicateEventApplications = 0;
   let activePolicy = null;
   let referencePolicy = null;
+  let resolvedRewardWeights = normalizeRewardWeights(ORCHESTRATOR_BANDIT_REWARD_DEFAULT_WEIGHTS, rewardWeights);
+  let currentTrainerConfig = {
+    ...baseTrainerConfig,
+  };
+  let opeLogRows = await readNdjsonRows(policyCheckpointPaths.opeLogPath);
+  const stabilityAlerts = [];
+  const annealingHistory = [];
+  let autoPolicyRollbacks = 0;
+  let latestOpe = null;
+  let latestStability = {
+    has_critical: false,
+    alerts: [],
+  };
+  let latestRewardTuning = {
+    tuned: false,
+    reason: 'init',
+    adjustments: {},
+    weights: resolvedRewardWeights,
+  };
   let policyCheckpoint = buildPolicyCheckpointMetadata({
     checkpointPaths: policyCheckpointPaths,
     loadStatus: resume ? 'pending' : 'cold_start',
     loadTarget: policyResumeTarget,
+    rewardConfig: {
+      weights: resolvedRewardWeights,
+      auto_tune: autoTuneConfig,
+    },
   });
 
   const applyTrackedEvent = async (event) => {
@@ -810,6 +1402,22 @@ export async function runMixedCampaign({
     if (restoredPolicy.status === 'loaded') {
       activePolicy = restoredPolicy.activePolicy;
       referencePolicy = restoredPolicy.referencePolicy;
+      if (restoredPolicy.rewardConfig?.weights) {
+        resolvedRewardWeights = normalizeRewardWeights(
+          restoredPolicy.rewardConfig.weights,
+          rewardWeights
+        );
+      }
+      if (restoredPolicy.ope) {
+        latestOpe = normalizePolicyOpeMetrics(restoredPolicy.ope);
+      }
+      if (restoredPolicy.stability?.last_anneal?.next_rate != null) {
+        currentTrainerConfig.contextual_bandit_exploration_rate = clamp(
+          Number(restoredPolicy.stability.last_anneal.next_rate || currentTrainerConfig.contextual_bandit_exploration_rate),
+          guardrailConfig.min_exploration_rate,
+          guardrailConfig.max_exploration_rate
+        );
+      }
     }
   }
 
@@ -831,6 +1439,17 @@ export async function runMixedCampaign({
         },
         holdout_validation,
         policy_checkpoint: policyCheckpoint,
+        reward_config: {
+          weights: resolvedRewardWeights,
+          auto_tune: autoTuneConfig,
+        },
+        ope: latestOpe,
+        stability_guardrails: {
+          config: guardrailConfig,
+          alerts: [],
+          annealing: [],
+          auto_policy_rollbacks: 0,
+        },
         active_environments: resolvedEnvironments,
       },
       controlState,
@@ -882,6 +1501,18 @@ export async function runMixedCampaign({
               drills: { rollback: null, resume: null },
               holdout_validation,
               policy_checkpoint: policyCheckpoint,
+              reward_config: {
+                weights: resolvedRewardWeights,
+                auto_tune: autoTuneConfig,
+                latest_tuning: latestRewardTuning,
+              },
+              ope: latestOpe,
+              stability_guardrails: {
+                config: guardrailConfig,
+                alerts: stabilityAlerts,
+                annealing: annealingHistory,
+                auto_policy_rollbacks: autoPolicyRollbacks,
+              },
               active_environments: resolvedEnvironments,
             },
             controlState,
@@ -895,6 +1526,7 @@ export async function runMixedCampaign({
         task: sampled,
         checkpointId: controlState.active_checkpoint_id,
         policy: selectedEnvironment === 'orchestrator' ? activePolicy || undefined : undefined,
+        trainerConfig: selectedEnvironment === 'orchestrator' ? currentTrainerConfig : undefined,
       });
       collectionEpisodes.push({
         ...episode,
@@ -917,6 +1549,8 @@ export async function runMixedCampaign({
       batch_id: `batch-${String(batchIndex).padStart(3, '0')}`,
       environments: [...batchEnvironments],
     });
+    const batchId = `batch-${String(batchIndex).padStart(3, '0')}`;
+    const behaviorVersionId = policyCheckpoint.latest_version_id || policyCheckpoint.loaded_version_id || null;
     const batchOrchestratorEpisodes = collectionEpisodes.filter((episode) => episode.environment === 'orchestrator');
     const rewardContext = {
       batchOrchestratorEpisodes,
@@ -924,19 +1558,52 @@ export async function runMixedCampaign({
         updatesCompleted,
         rollbacksCompleted,
       },
+      rewardWeights: resolvedRewardWeights,
     };
+    const trajectories = collectionEpisodes.map((episode) => buildTrajectoryFromEpisode(episode, rewardContext));
+    const batchBanditRows = trajectories.filter((row) => row?.updateType === 'contextual_bandit');
+    const batchRewardSummary = summarizeBanditRewardRows(batchBanditRows);
+    if (batchBanditRows.length > 0) {
+      const opeRows = buildBatchOpeRows({
+        trajectories: batchBanditRows,
+        batchId,
+        behaviorVersionId,
+      });
+      if (opeRows.length > 0) {
+        opeLogRows = [...opeLogRows, ...opeRows].slice(-opeConfig.max_log_rows);
+        await writeNdjsonRows(policyCheckpointPaths.opeLogPath, opeLogRows);
+      }
+    }
 
     const updateResult = runOnlineUpdateBatch({
-      batchId: `batch-${String(batchIndex).padStart(3, '0')}`,
+      batchId,
       checkpointId: controlState.active_checkpoint_id,
       policy: activePolicy || undefined,
       referencePolicy: referencePolicy || undefined,
       applyUpdate: applyTrajectoryUpdate,
-      trajectories: collectionEpisodes.map((episode) => buildTrajectoryFromEpisode(episode, rewardContext)),
+      trajectories,
+      config: currentTrainerConfig,
     });
     activePolicy = updateResult.policy || activePolicy;
     referencePolicy = updateResult.referencePolicy || referencePolicy;
     updatesCompleted += 1;
+
+    const opeRowsForEval = opeLogRows.slice(Math.max(0, opeLogRows.length - opeConfig.window_size));
+    latestOpe = composeOpeEvaluation({
+      rows: opeRowsForEval,
+      activePolicy,
+      referencePolicy,
+      trainerConfig: currentTrainerConfig,
+      opeConfig,
+    });
+    batchSummaries[batchSummaries.length - 1].ope = latestOpe;
+    batchSummaries[batchSummaries.length - 1].bandit_reward_summary = batchRewardSummary;
+    batchSummaries[batchSummaries.length - 1].reward_weights = clone(resolvedRewardWeights);
+    batchSummaries[batchSummaries.length - 1].trainer_config = {
+      contextual_bandit_exploration_rate: Number(currentTrainerConfig.contextual_bandit_exploration_rate || 0),
+      contextual_bandit_temperature: Number(currentTrainerConfig.contextual_bandit_temperature || 1),
+      learning_rate: Number(currentTrainerConfig.learning_rate || 0),
+    };
 
     controlState = await applyTrackedEvent({
       event_id: `update-completed-${batchIndex}`,
@@ -1032,6 +1699,49 @@ export async function runMixedCampaign({
 
     batchSummaries[batchSummaries.length - 1].epoch_outcome = epochOutcome.epoch_outcome;
     batchSummaries[batchSummaries.length - 1].coverage_sufficient = coverage_sufficient;
+    const projectedRollbackCount = rollbacksCompleted + (epochOutcome.epoch_outcome === 'rollback' ? 1 : 0);
+    const rollbackRate = safeRatio(projectedRollbackCount, updatesCompleted);
+    latestStability = detectStabilityAlerts({
+      batchId,
+      epochOutcome: epochOutcome.epoch_outcome,
+      degradationStreak: degradation.degradationStreak,
+      batchBetterCount,
+      batchWorseCount,
+      holdouts,
+      banditRewardSummary: batchRewardSummary,
+      rollbackRate,
+      guardrails: guardrailConfig,
+    });
+    stabilityAlerts.push(...latestStability.alerts);
+    batchSummaries[batchSummaries.length - 1].stability_alerts = clone(latestStability.alerts);
+
+    latestRewardTuning = tuneRewardWeights({
+      weights: resolvedRewardWeights,
+      autoTuneConfig,
+      banditRewardSummary: batchRewardSummary,
+      epochOutcome: epochOutcome.epoch_outcome,
+      batchBetterCount,
+      batchWorseCount,
+      holdouts,
+    });
+    resolvedRewardWeights = normalizeRewardWeights(resolvedRewardWeights, latestRewardTuning.weights);
+    batchSummaries[batchSummaries.length - 1].reward_tuning = clone(latestRewardTuning);
+
+    const annealStep = adjustExplorationRate({
+      currentRate: currentTrainerConfig.contextual_bandit_exploration_rate,
+      guardrails: guardrailConfig,
+      epochOutcome: epochOutcome.epoch_outcome,
+      hasCriticalDrift: latestStability.has_critical,
+    });
+    currentTrainerConfig = {
+      ...currentTrainerConfig,
+      contextual_bandit_exploration_rate: annealStep.next_rate,
+    };
+    annealingHistory.push({
+      batch_id: batchId,
+      ...annealStep,
+    });
+    batchSummaries[batchSummaries.length - 1].annealing = clone(annealStep);
 
     if (epochOutcome.epoch_outcome === 'rollback') {
       const restoredCheckpointId = controlState.pre_update_ref_checkpoint_id || controlState.last_stable_checkpoint_id;
@@ -1087,6 +1797,17 @@ export async function runMixedCampaign({
       checkpointPaths: policyCheckpointPaths,
       activePolicy,
       referencePolicy,
+      rewardConfig: {
+        weights: resolvedRewardWeights,
+        auto_tune: autoTuneConfig,
+        latest_tuning: latestRewardTuning,
+      },
+      ope: latestOpe,
+      stability: {
+        has_critical: latestStability.has_critical,
+        alerts: latestStability.alerts,
+        last_anneal: annealStep,
+      },
       updateCount: Number(activePolicy?.contextualBandit?.updateCount || 0),
       batchIndex,
       activeCheckpointId: controlState.active_checkpoint_id,
@@ -1103,6 +1824,41 @@ export async function runMixedCampaign({
       ...policyCheckpoint,
       ...persistedPolicy.metadata,
     };
+
+    if (guardrailConfig.auto_policy_rollback_on_critical && latestStability.has_critical) {
+      const rollbackVersionId = persistedPolicy.index.last_good_version_id;
+      const currentVersionId = persistedPolicy.versionEntry.version_id;
+      if (rollbackVersionId && rollbackVersionId !== currentVersionId) {
+        const rollbackPolicy = await loadPolicyCheckpoint({
+          checkpointPaths: policyCheckpointPaths,
+          resumeTarget: 'last-good',
+        });
+        if (rollbackPolicy.status === 'loaded') {
+          activePolicy = rollbackPolicy.activePolicy || activePolicy;
+          referencePolicy = rollbackPolicy.referencePolicy || referencePolicy;
+          autoPolicyRollbacks += 1;
+          const rollbackAlert = {
+            batch_id: batchId,
+            severity: 'critical',
+            code: 'auto_policy_rollback_applied',
+            from_version_id: currentVersionId,
+            to_version_id: rollbackPolicy.metadata.loaded_version_id,
+          };
+          stabilityAlerts.push(rollbackAlert);
+          batchSummaries[batchSummaries.length - 1].auto_policy_rollback = clone(rollbackAlert);
+          policyCheckpoint = {
+            ...policyCheckpoint,
+            rollback_applied: true,
+            rollback_from_version_id: currentVersionId,
+            load_status: 'loaded',
+            load_target: 'last-good',
+            loaded_version_id: rollbackPolicy.metadata.loaded_version_id,
+            loaded_path: rollbackPolicy.metadata.loaded_path,
+            loaded_saved_at: rollbackPolicy.metadata.loaded_saved_at,
+          };
+        }
+      }
+    }
   }
 
   const summary = {
@@ -1126,6 +1882,20 @@ export async function runMixedCampaign({
       context_count: Object.keys(activePolicy?.contextualBandit?.contexts || {}).length,
     },
     policy_checkpoint: policyCheckpoint,
+    reward_config: {
+      weights: resolvedRewardWeights,
+      auto_tune: autoTuneConfig,
+      latest_tuning: latestRewardTuning,
+    },
+    ope: latestOpe,
+    stability_guardrails: {
+      config: guardrailConfig,
+      alerts: stabilityAlerts,
+      latest: latestStability,
+      annealing: annealingHistory,
+      auto_policy_rollbacks: autoPolicyRollbacks,
+      current_exploration_rate: Number(currentTrainerConfig.contextual_bandit_exploration_rate || 0),
+    },
     drills: {
       rollback: mode === 'drill-rollback'
         ? {

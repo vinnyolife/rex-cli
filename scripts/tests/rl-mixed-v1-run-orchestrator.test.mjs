@@ -218,6 +218,120 @@ test('mixed campaign can resume from last-good version target for policy rollbac
   assert.equal(resumed.summary.policy_checkpoint.rollback_applied, true);
 });
 
+test('mixed campaign writes OPE metrics into checkpoint versions and summary', async () => {
+  const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));
+
+  const result = await mod.runMixedCampaign({
+    rootDir,
+    activeEnvironments: ['orchestrator'],
+    batchTargetCount: 2,
+    onlineBatchSize: 2,
+    ope: {
+      window_size: 64,
+    },
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.ope.window_size > 0, true);
+  assert.equal(result.summary.ope.active_policy.sample_count > 0, true);
+
+  const indexPath = result.summary.policy_checkpoint.index_path;
+  const indexPayload = JSON.parse(await readFile(indexPath, 'utf8'));
+  const latestVersionId = String(indexPayload.latest_version_id || '');
+  const latestEntry = (Array.isArray(indexPayload.versions) ? indexPayload.versions : [])
+    .find((entry) => String(entry?.version_id || '') === latestVersionId);
+  assert.equal(Boolean(latestEntry), true);
+  assert.equal(Number(latestEntry.ope.sample_count) > 0, true);
+});
+
+test('mixed campaign supports reward weight override and auto tuning persistence', async () => {
+  const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));
+
+  const result = await mod.runMixedCampaign({
+    rootDir,
+    mode: 'drill-rollback',
+    activeEnvironments: ['shell', 'browser', 'orchestrator'],
+    batchTargetCount: 2,
+    onlineBatchSize: 4,
+    rewardWeights: {
+      terminal: 1,
+      successRate: 0.5,
+      rollbackRate: -0.7,
+      humanHandoffRate: -0.4,
+      missedHandoff: -0.45,
+      verificationBlocked: -0.25,
+    },
+    rewardAutoTune: {
+      enabled: true,
+      step: 0.05,
+      min_samples: 1,
+    },
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.reward_config.latest_tuning.tuned, true);
+  assert.equal(result.summary.reward_config.latest_tuning.reason, 'degraded');
+
+  const checkpointPath = result.summary.policy_checkpoint.path;
+  const payload = JSON.parse(await readFile(checkpointPath, 'utf8'));
+  assert.equal(payload.reward_config.latest_tuning.tuned, true);
+  assert.equal(Number(payload.reward_config.weights.rollbackRate) < -0.7, true);
+});
+
+test('mixed campaign guardrails emit drift alerts and auto rollback degraded policy versions', async () => {
+  const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));
+
+  await mod.runMixedCampaign({
+    rootDir,
+    activeEnvironments: ['shell', 'browser', 'orchestrator'],
+    batchTargetCount: 3,
+    onlineBatchSize: 4,
+  });
+
+  const indexPath = path.join(
+    rootDir,
+    'experiments',
+    'rl-mixed-v1',
+    'checkpoints',
+    'orchestrator-bandit-policy.index.json'
+  );
+  const indexPayload = JSON.parse(await readFile(indexPath, 'utf8'));
+  const versions = Array.isArray(indexPayload.versions) ? indexPayload.versions : [];
+  assert.equal(versions.length >= 2, true);
+  for (const entry of versions) {
+    entry.quality_status = 'healthy';
+  }
+  indexPayload.last_good_version_id = String(versions[versions.length - 2].version_id || '');
+  await writeFile(indexPath, `${JSON.stringify(indexPayload, null, 2)}\n`, 'utf8');
+
+  const degraded = await mod.runMixedCampaign({
+    rootDir,
+    mode: 'drill-rollback',
+    activeEnvironments: ['shell', 'browser', 'orchestrator'],
+    batchTargetCount: 1,
+    onlineBatchSize: 4,
+    resume: true,
+    stabilityGuardrails: {
+      auto_policy_rollback_on_critical: true,
+    },
+  });
+
+  assert.equal(degraded.status, 'ok');
+  assert.equal(
+    degraded.summary.stability_guardrails.alerts.some((alert) => alert.code === 'epoch_rollback'),
+    true
+  );
+  assert.equal(
+    degraded.summary.stability_guardrails.alerts.some((alert) => alert.code === 'auto_policy_rollback_applied'),
+    true
+  );
+  assert.equal(degraded.summary.stability_guardrails.auto_policy_rollbacks >= 1, true);
+  assert.equal(degraded.summary.policy_checkpoint.rollback_applied, true);
+});
+
 test('mixed campaign accepts real orchestrator harness mode for trajectory collection', async () => {
   const mod = await import('../lib/rl-mixed-v1/run-orchestrator.mjs');
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-mixed-'));

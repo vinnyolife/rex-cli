@@ -17,6 +17,9 @@ export function buildMixedSummaryPayload({ runId, mode, result }) {
     pre_update_ref_checkpoint_id: result.summary.pre_update_ref_checkpoint_id,
     last_stable_checkpoint_id: result.summary.last_stable_checkpoint_id,
     holdout_validation: result.summary.holdout_validation,
+    reward_config: result.summary.reward_config,
+    ope: result.summary.ope,
+    stability_guardrails: result.summary.stability_guardrails,
     drills: result.summary.drills,
     duplicateEventApplications: result.summary.duplicateEventApplications,
   };
@@ -32,4 +35,3 @@ export async function writeMixedSummary({ rootDir, runId, mode, result }) {
     payload,
   };
 }
-

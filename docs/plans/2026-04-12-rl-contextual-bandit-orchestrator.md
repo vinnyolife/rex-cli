@@ -69,3 +69,32 @@
   - `node --test scripts/tests/rl-core-trainer.test.mjs scripts/tests/rl-orchestrator-v1-schema.test.mjs scripts/tests/rl-shell-v1-trainer.test.mjs`（`21/21` pass）
   - `npm run test:scripts`（`290/290` pass）
   - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）
+
+## 执行结果（2026-04-13，补齐 1 + 2 + 3）
+
+- 1) OPE（IPS/DR）按策略版本落盘：
+  - 新增 `scripts/lib/rl-core/ope-eval.mjs`，实现 `evaluateContextualBanditOpe`（IPS / SNIPS / DR + ESS + CI）与 `computeContextualBanditPolicyDistribution`。
+  - `rl-mixed-v1/run-orchestrator.mjs` 在每个 batch 生成 bandit OPE 日志（`orchestrator-bandit-ope-log.ndjson`），并在每次 checkpoint 保存时把 OPE 结果写入：
+    - `summary.ope`
+    - `checkpoint payload.ope`
+    - `checkpoint index versions[].ope`（按版本可追踪）。
+- 2) reward config + 自动调参：
+  - `runMixedCampaign` 新增 `rewardWeights` 与 `rewardAutoTune` 参数。
+  - reward 计算改为可注入权重并带边界约束；batch 结束后按退化/改善信号做小步调参（bounded step），并持久化到：
+    - `summary.reward_config`
+    - `checkpoint payload.reward_config`。
+- 3) 稳定性护栏（anneal / drift alerts / auto rollback）：
+  - 新增 drift 检测与告警聚合（`summary.stability_guardrails.alerts`）。
+  - 新增探索率 annealing（稳定时降探索，漂移/回滚时升探索），记录在 `summary.stability_guardrails.annealing`。
+  - 新增 critical 场景下策略自动回滚到 `last-good`（若可用），并在 summary 中暴露 `auto_policy_rollbacks` 与 `policy_checkpoint.rollback_applied`。
+- 同步更新：
+  - `scripts/lib/rl-mixed-v1/contextdb-summary.mjs` 与对应测试，确保 OPE/reward/stability 进入 run-summary。
+  - 新增测试 `scripts/tests/rl-core-ope-eval.test.mjs`。
+  - 扩展 `scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs`，覆盖 OPE 落盘、reward 自动调参持久化、guardrails 自动回滚。
+
+- 验证证据（本轮）：
+  - `node --test scripts/tests/rl-core-ope-eval.test.mjs`（`3/3` pass）
+  - `node --test scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs`（`10/10` pass）
+  - `node --test scripts/tests/rl-core-trainer.test.mjs scripts/tests/rl-core-ope-eval.test.mjs scripts/tests/rl-mixed-v1-contextdb-summary.test.mjs scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs`（`25/25` pass）
+  - `npm run test:scripts`（`290/290` pass）
+  - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）
