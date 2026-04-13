@@ -340,6 +340,135 @@ test('real orchestrator harness treats policy executor fallback as baseline rout
   assert.equal(persistedState.effective_mode, 'full');
 });
 
+test('real orchestrator harness policy release auto-promotes canary to full after stable policy successes', async () => {
+  const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-promotion-canary-'));
+  const statePath = path.join(rootDir, 'orchestrator-policy-release.state.json');
+  const adapter = mod.createOrchestratorAdapter({
+    tasks: [makeTask({ task_id: 'orch-release-promotion-canary-001' })],
+    harnessMode: 'real',
+    harnessOptions: {
+      rootDir,
+      executionMode: 'dry-run',
+      fallbackOnMissingDispatchRun: false,
+      policyRelease: {
+        mode: 'canary',
+        rolloutRate: 1,
+        autoDowngrade: false,
+        autoPromotion: true,
+        promotionConsecutiveSuccesses: 1,
+        promotionMinSamples: 1,
+        promotionSuccessRateThreshold: 1,
+        promotionRolloutStep: 1,
+        promotionMaxRolloutRate: 1,
+        statePath,
+      },
+      executeOrchestrate: async (options) => ({
+        exitCode: 0,
+        report: {
+          dispatchPlan: {
+            phaseExecutor: {
+              requested_executor: options.phaseExecutor || null,
+              applied_executor: options.phaseExecutor || 'local-phase',
+              reason: options.phaseExecutor ? 'requested_phase_executor_override' : 'default_phase_executor',
+            },
+          },
+          dispatchRun: {
+            mode: options.executionMode,
+            ok: true,
+            runtime: { id: `runtime-${options.executionMode}` },
+            executorRegistry: [options.phaseExecutor || 'local-phase'],
+            jobRuns: [{ status: 'simulated' }],
+          },
+          dispatchPreflight: { results: [] },
+        },
+      }),
+    },
+  });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
+
+  const first = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-promotion-canary-1',
+    policy: { seed: 37 },
+  });
+  const second = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-promotion-canary-2',
+    policy: { seed: 37 },
+  });
+
+  assert.equal(first.decision_payload.policy_release_mode, 'canary');
+  assert.equal(first.decision_payload.policy_release_promoted, true);
+  assert.equal(first.decision_payload.policy_release_next_mode, 'full');
+  assert.equal(second.decision_payload.policy_release_mode, 'full');
+
+  const persistedState = JSON.parse(await readFile(statePath, 'utf8'));
+  assert.equal(persistedState.effective_mode, 'full');
+  assert.equal(Number(persistedState.counters.promotions || 0), 1);
+});
+
+test('real orchestrator harness policy release auto-promotes observe to canary after stable baseline runs', async () => {
+  const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-promotion-observe-'));
+  const statePath = path.join(rootDir, 'orchestrator-policy-release.state.json');
+  const adapter = mod.createOrchestratorAdapter({
+    tasks: [makeTask({ task_id: 'orch-release-promotion-observe-001' })],
+    harnessMode: 'real',
+    harnessOptions: {
+      rootDir,
+      executionMode: 'dry-run',
+      fallbackOnMissingDispatchRun: false,
+      policyRelease: {
+        mode: 'observe',
+        rolloutRate: 0,
+        autoDowngrade: false,
+        autoPromotion: true,
+        promotionMinSamples: 1,
+        promotionSuccessRateThreshold: 1,
+        promotionInitialRolloutRate: 0.2,
+        promotionMaxRolloutRate: 0.5,
+        statePath,
+      },
+      executeOrchestrate: async () => ({
+        exitCode: 0,
+        report: {
+          dispatchRun: {
+            mode: 'dry-run',
+            ok: true,
+            runtime: { id: 'runtime-dry-run' },
+            executorRegistry: ['local-phase'],
+            jobRuns: [{ status: 'simulated' }],
+          },
+          dispatchPreflight: { results: [] },
+        },
+      }),
+    },
+  });
+  const task = await adapter.sampleTask({ seed: 0, attempt: 0 });
+
+  const first = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-promotion-observe-1',
+    policy: { seed: 41 },
+  });
+  const second = await adapter.runEpisode({
+    task,
+    checkpointId: 'ckpt-release-promotion-observe-2',
+    policy: { seed: 41 },
+  });
+
+  assert.equal(first.decision_payload.policy_release_mode, 'observe');
+  assert.equal(first.decision_payload.policy_release_applied, false);
+  assert.equal(first.decision_payload.policy_release_promoted, true);
+  assert.equal(first.decision_payload.policy_release_next_mode, 'canary');
+  assert.equal(second.decision_payload.policy_release_mode, 'canary');
+
+  const persistedState = JSON.parse(await readFile(statePath, 'utf8'));
+  assert.equal(persistedState.effective_mode, 'canary');
+  assert.equal(Number(persistedState.effective_rollout_rate), 0.2);
+});
+
 test('real orchestrator harness policy release auto-downgrades after policy-routed failures', async () => {
   const mod = await import('../lib/rl-orchestrator-v1/adapter.mjs');
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'aios-rl-release-gate-'));

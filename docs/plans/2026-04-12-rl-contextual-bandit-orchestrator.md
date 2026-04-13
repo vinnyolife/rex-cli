@@ -179,3 +179,33 @@
   - `node --test scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs scripts/tests/rl-mixed-v1-contextdb-summary.test.mjs scripts/tests/aios-orchestrator.test.mjs`（`97/97` pass）
   - `npm run test:scripts`（`294/294` pass）
   - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）
+
+## 执行结果（2026-04-13，补齐“发布门控自动升档”）
+
+- 已完成：
+  - `scripts/lib/rl-orchestrator-v1/policy-release-gate.mjs`
+    - 增加可选自动升档配置（`autoPromotion`，默认关闭）：
+      - `promotionSuccessRateThreshold`
+      - `promotionConsecutiveSuccesses`
+      - `promotionMinSamples`
+      - `promotionRolloutStep`
+      - `promotionInitialRolloutRate`
+      - `promotionMaxRolloutRate`
+    - release state 新增 promotion 统计与原因：
+      - `counters.promotions`
+      - `last_promotion_reason`
+    - 新增升档路径：
+      - `observe -> canary`（基线稳定后恢复灰度）
+      - `canary -> full`（策略稳定后全量）
+  - `scripts/lib/rl-orchestrator-v1/decision-runner.mjs`
+    - evidence 新增 `policy_release_promoted` / `policy_release_promotion_reason`；
+    - release state 更新后，统一回写 `next_mode/next_rollout` 与升降档字段到 evidence。
+  - `scripts/tests/rl-orchestrator-v1-adapter.test.mjs`
+    - 新增 `canary -> full` 自动升档测试；
+    - 新增 `observe -> canary` 自动升档测试。
+
+- 本轮验证证据（全部通过）：
+  - `node --test scripts/tests/rl-orchestrator-v1-adapter.test.mjs`（`13/13` pass）
+  - `node --test scripts/tests/rl-mixed-v1-run-orchestrator.test.mjs scripts/tests/rl-mixed-v1-contextdb-summary.test.mjs scripts/tests/aios-orchestrator.test.mjs scripts/tests/rl-orchestrator-v1-adapter.test.mjs`（`110/110` pass）
+  - `npm run test:scripts`（`294/294` pass）
+  - `cd mcp-server && npm run typecheck && npm run test && npm run build`（`typecheck/test/build` pass）

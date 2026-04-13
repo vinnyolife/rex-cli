@@ -60,11 +60,18 @@ export function normalizePolicyReleaseConfig({
       kill_switch_env_key: 'AIOS_RL_POLICY_RELEASE_OFF',
       kill_switch_file: '',
       auto_downgrade: false,
+      auto_promotion: false,
       downgrade_failure_rate_threshold: 0.6,
       downgrade_consecutive_failures: 3,
       downgrade_min_samples: 6,
       downgrade_rollout_factor: 0.5,
       downgrade_min_rollout_rate: 0.05,
+      promotion_success_rate_threshold: 0.85,
+      promotion_consecutive_successes: 6,
+      promotion_min_samples: 8,
+      promotion_rollout_step: 0.15,
+      promotion_initial_rollout_rate: 0.1,
+      promotion_max_rollout_rate: 1,
       eval_window_size: 24,
       state_path: path.join(rootDir, 'experiments', 'rl-mixed-v1', 'release', 'orchestrator-policy-release.state.json'),
       env,
@@ -85,11 +92,18 @@ export function normalizePolicyReleaseConfig({
     kill_switch_env_key: String(policyRelease.killSwitchEnvKey || 'AIOS_RL_POLICY_RELEASE_OFF').trim() || 'AIOS_RL_POLICY_RELEASE_OFF',
     kill_switch_file: String(policyRelease.killSwitchFile || '').trim(),
     auto_downgrade: policyRelease.autoDowngrade !== false,
+    auto_promotion: policyRelease.autoPromotion === true,
     downgrade_failure_rate_threshold: clamp(policyRelease.downgradeFailureRateThreshold ?? 0.6, 0.05, 1),
     downgrade_consecutive_failures: safePositiveInteger(policyRelease.downgradeConsecutiveFailures, 3),
     downgrade_min_samples: safePositiveInteger(policyRelease.downgradeMinSamples, 6),
     downgrade_rollout_factor: clamp(policyRelease.downgradeRolloutFactor ?? 0.5, 0.1, 0.95),
     downgrade_min_rollout_rate: clamp(policyRelease.downgradeMinRolloutRate ?? 0.05, 0, 0.5),
+    promotion_success_rate_threshold: clamp(policyRelease.promotionSuccessRateThreshold ?? 0.85, 0.5, 1),
+    promotion_consecutive_successes: safePositiveInteger(policyRelease.promotionConsecutiveSuccesses, 6),
+    promotion_min_samples: safePositiveInteger(policyRelease.promotionMinSamples, 8),
+    promotion_rollout_step: clamp(policyRelease.promotionRolloutStep ?? 0.15, 0.01, 1),
+    promotion_initial_rollout_rate: clamp(policyRelease.promotionInitialRolloutRate ?? 0.1, 0.01, 1),
+    promotion_max_rollout_rate: clamp(policyRelease.promotionMaxRolloutRate ?? 1, 0.1, 1),
     eval_window_size: safePositiveInteger(policyRelease.evalWindowSize, 24),
     state_path: statePath || path.join(rootDir, 'experiments', 'rl-mixed-v1', 'release', 'orchestrator-policy-release.state.json'),
     env,
@@ -112,9 +126,11 @@ function createDefaultState(config) {
       consecutive_policy_failures: 0,
       consecutive_policy_success: 0,
       downgrades: 0,
+      promotions: 0,
     },
     recent: [],
     last_downgrade_reason: null,
+    last_promotion_reason: null,
   };
 }
 
@@ -157,10 +173,14 @@ function normalizeState(raw, config) {
       consecutive_policy_failures: Number(counters.consecutive_policy_failures || 0),
       consecutive_policy_success: Number(counters.consecutive_policy_success || 0),
       downgrades: Number(counters.downgrades || 0),
+      promotions: Number(counters.promotions || 0),
     },
     recent,
     last_downgrade_reason: typeof source.last_downgrade_reason === 'string'
       ? source.last_downgrade_reason
+      : null,
+    last_promotion_reason: typeof source.last_promotion_reason === 'string'
+      ? source.last_promotion_reason
       : null,
   };
 }
@@ -326,6 +346,14 @@ function calculatePolicyFailureRate(recent = []) {
   return failureCount / policyRows.length;
 }
 
+function calculateSuccessRate(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return 0;
+  }
+  const successCount = rows.filter((row) => row.success === true).length;
+  return successCount / rows.length;
+}
+
 function resolvePolicyExecutorEffectiveness({ decision, evidence } = {}) {
   if (decision?.apply_policy_executor !== true) {
     return false;
@@ -381,6 +409,116 @@ function downgradeState(state, config, reason) {
   return next;
 }
 
+function resolvePromotionRows(state = {}) {
+  const mode = normalizeMode(state.effective_mode || 'legacy');
+  const recent = Array.isArray(state.recent) ? state.recent : [];
+
+  if (mode === 'observe') {
+    return recent.filter((row) => row.policy_fallback !== true);
+  }
+
+  if (mode === 'canary') {
+    return recent.filter((row) => row.policy_applied === true && row.policy_fallback !== true);
+  }
+
+  return [];
+}
+
+function assessPromotionEligibility({
+  config,
+  state,
+  decision,
+} = {}) {
+  if (!config.auto_promotion) {
+    return {
+      eligible: false,
+      reason: null,
+    };
+  }
+
+  const effectiveMode = normalizeMode(state.effective_mode || decision?.effective_mode || config.mode);
+  if (effectiveMode === 'legacy' || effectiveMode === 'off' || effectiveMode === 'full') {
+    return {
+      eligible: false,
+      reason: null,
+    };
+  }
+  if (normalizeMode(decision?.effective_mode || effectiveMode) === 'off') {
+    return {
+      eligible: false,
+      reason: null,
+    };
+  }
+
+  const rows = resolvePromotionRows(state);
+  const sampleCount = rows.length;
+  const successRate = calculateSuccessRate(rows);
+  const streak = Number(state?.counters?.consecutive_policy_success || 0);
+
+  const byRate = sampleCount >= config.promotion_min_samples
+    && successRate >= config.promotion_success_rate_threshold;
+  const byStreak = effectiveMode === 'canary'
+    && streak >= config.promotion_consecutive_successes;
+  const eligible = byRate || byStreak;
+  if (!eligible) {
+    return {
+      eligible: false,
+      reason: null,
+    };
+  }
+
+  const reason = byStreak
+    ? `consecutive_policy_success=${streak}`
+    : `${effectiveMode}_success_rate=${successRate.toFixed(3)} sample_count=${sampleCount}`;
+  return {
+    eligible: true,
+    reason,
+  };
+}
+
+function promoteState(state, config, reason) {
+  const mode = normalizeMode(state.effective_mode || config.mode);
+  const next = {
+    ...state,
+    counters: {
+      ...state.counters,
+      promotions: Number(state.counters.promotions || 0) + 1,
+      consecutive_policy_success: 0,
+    },
+    last_promotion_reason: reason,
+  };
+
+  if (mode === 'observe' || mode === 'off') {
+    const startRollout = clamp(
+      config.promotion_initial_rollout_rate,
+      config.downgrade_min_rollout_rate,
+      config.promotion_max_rollout_rate
+    );
+    next.effective_mode = 'canary';
+    next.effective_rollout_rate = startRollout;
+    return next;
+  }
+
+  if (mode === 'canary') {
+    const baseRate = clamp(next.effective_rollout_rate || 0, 0, config.promotion_max_rollout_rate);
+    const increased = clamp(
+      baseRate + config.promotion_rollout_step,
+      config.downgrade_min_rollout_rate,
+      config.promotion_max_rollout_rate
+    );
+    if (increased >= 1 || config.promotion_max_rollout_rate >= 1 && increased >= config.promotion_max_rollout_rate) {
+      next.effective_mode = 'full';
+      next.effective_rollout_rate = 1;
+      return next;
+    }
+    next.effective_mode = 'canary';
+    next.effective_rollout_rate = increased;
+    return next;
+  }
+
+  return next;
+}
+
 export function updatePolicyReleaseState({
   config,
   state,
@@ -428,6 +566,7 @@ export function updatePolicyReleaseState({
   next.recent = next.recent.slice(-config.eval_window_size);
 
   let downgraded = false;
+  let promoted = false;
   if (config.auto_downgrade && decision.apply_policy_executor) {
     const failureRate = calculatePolicyFailureRate(next.recent);
     const policySampleCount = next.recent.filter((row) => row.policy_applied).length;
@@ -446,13 +585,34 @@ export function updatePolicyReleaseState({
         state: downgradedState,
         downgraded: true,
         downgrade_reason: reason,
+        promoted: false,
+        promotion_reason: null,
       };
     }
+  }
+
+  const promotion = assessPromotionEligibility({
+    config,
+    state: next,
+    decision,
+  });
+  if (promotion.eligible) {
+    const promotedState = promoteState(next, config, promotion.reason);
+    promotedState.updated_at = next.updated_at;
+    return {
+      state: promotedState,
+      downgraded: false,
+      downgrade_reason: null,
+      promoted: true,
+      promotion_reason: promotion.reason,
+    };
   }
 
   return {
     state: next,
     downgraded,
     downgrade_reason: null,
+    promoted,
+    promotion_reason: null,
   };
 }

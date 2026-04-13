@@ -270,6 +270,8 @@ function buildRealEvidence({
       policy_release_rollout_rate: Number(policyRelease.rollout_rate || 0),
       policy_release_effective_applied: policyReleaseEffectiveApplied,
       policy_release_executor_fallback: policyReleaseExecutorFallback,
+      policy_release_promoted: policyRelease.promoted === true,
+      policy_release_promotion_reason: policyRelease.promotion_reason || null,
       dispatch_phase_executor_requested: dispatchPhaseSelection.requested_executor,
       dispatch_phase_executor_applied: dispatchPhaseSelection.applied_executor,
       dispatch_phase_executor_reason: dispatchPhaseSelection.reason,
@@ -306,6 +308,8 @@ function buildRealEvidence({
       policy_release_executor_fallback: policyReleaseExecutorFallback,
       policy_release_downgraded: policyRelease.downgraded === true,
       policy_release_downgrade_reason: policyRelease.downgrade_reason || null,
+      policy_release_promoted: policyRelease.promoted === true,
+      policy_release_promotion_reason: policyRelease.promotion_reason || null,
       policy_release_state_path: policyRelease.state_path || null,
       dispatch_phase_executor_requested: dispatchPhaseSelection.requested_executor,
       dispatch_phase_executor_applied: dispatchPhaseSelection.applied_executor,
@@ -522,25 +526,30 @@ export function createRealOrchestratorHarness({
           callRecord.policy_release_next_rollout_rate = Number(releaseState.effective_rollout_rate || 0);
           callRecord.policy_release_downgraded = releaseUpdate.downgraded === true;
           callRecord.policy_release_downgrade_reason = releaseUpdate.downgrade_reason || null;
-          if (releaseUpdate.downgraded) {
-            normalizedEvidence = validateOrchestratorEvidence(compactRlDecisionEvidence({
-              ...evidence,
-              context_state: {
-                ...evidence.context_state,
-                policy_release_downgraded: true,
-                policy_release_downgrade_reason: releaseUpdate.downgrade_reason,
-                policy_release_next_mode: releaseState.effective_mode,
-                policy_release_next_rollout_rate: releaseState.effective_rollout_rate,
-              },
-              decision_payload: {
-                ...evidence.decision_payload,
-                policy_release_downgraded: true,
-                policy_release_downgrade_reason: releaseUpdate.downgrade_reason,
-                policy_release_next_mode: releaseState.effective_mode,
-                policy_release_next_rollout_rate: releaseState.effective_rollout_rate,
-              },
-            }));
-          }
+          callRecord.policy_release_promoted = releaseUpdate.promoted === true;
+          callRecord.policy_release_promotion_reason = releaseUpdate.promotion_reason || null;
+
+          normalizedEvidence = validateOrchestratorEvidence(compactRlDecisionEvidence({
+            ...evidence,
+            context_state: {
+              ...evidence.context_state,
+              policy_release_downgraded: releaseUpdate.downgraded === true,
+              policy_release_downgrade_reason: releaseUpdate.downgrade_reason || null,
+              policy_release_promoted: releaseUpdate.promoted === true,
+              policy_release_promotion_reason: releaseUpdate.promotion_reason || null,
+              policy_release_next_mode: releaseState.effective_mode,
+              policy_release_next_rollout_rate: releaseState.effective_rollout_rate,
+            },
+            decision_payload: {
+              ...evidence.decision_payload,
+              policy_release_downgraded: releaseUpdate.downgraded === true,
+              policy_release_downgrade_reason: releaseUpdate.downgrade_reason || null,
+              policy_release_promoted: releaseUpdate.promoted === true,
+              policy_release_promotion_reason: releaseUpdate.promotion_reason || null,
+              policy_release_next_mode: releaseState.effective_mode,
+              policy_release_next_rollout_rate: releaseState.effective_rollout_rate,
+            },
+          }));
         }
         callRecord.execution_mode_effective = selectedMode;
         callRecord.fallback_reason = fallbackReason;
@@ -578,6 +587,8 @@ export function createRealOrchestratorHarness({
             policy_release_rollout_rate: Number(releaseDecision.rollout_rate || 0),
             policy_release_effective_applied: releaseDecision.apply_policy_executor === true,
             policy_release_executor_fallback: false,
+            policy_release_promoted: false,
+            policy_release_promotion_reason: null,
           },
           decision_payload: {
             ...normalizedFallback.decision_payload,
@@ -596,6 +607,8 @@ export function createRealOrchestratorHarness({
             policy_release_rollout_rate: Number(releaseDecision.rollout_rate || 0),
             policy_release_effective_applied: releaseDecision.apply_policy_executor === true,
             policy_release_executor_fallback: false,
+            policy_release_promoted: false,
+            policy_release_promotion_reason: null,
             policy_release_state_path: releaseConfig.enabled ? releaseConfig.state_path : null,
           },
         }));
