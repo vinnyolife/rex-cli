@@ -329,6 +329,61 @@ test('runQualityGate persists quality-specific failure category when session is 
   assert.equal(verificationEvent?.turn?.nextStateRefs.includes('category:quality-logs'), true);
 });
 
+test('runQualityGate fails with quality-release category when strict release gate is unhealthy', async () => {
+  const rootDir = await makeRootDir();
+  const statePath = path.join(
+    rootDir,
+    'experiments',
+    'rl-mixed-v1',
+    'release',
+    'orchestrator-policy-release.state.json'
+  );
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, `${JSON.stringify({
+    schema_version: 1,
+    updated_at: '2026-04-14T10:00:00.000Z',
+    effective_mode: 'canary',
+    effective_rollout_rate: 0.5,
+    counters: {
+      total: 10,
+      policy_applied: 10,
+      baseline_routed: 0,
+      policy_fallback: 4,
+      policy_success: 4,
+      policy_failure: 4,
+      consecutive_policy_failures: 2,
+      consecutive_policy_success: 0,
+      downgrades: 1,
+      promotions: 0,
+    },
+    recent: [
+      { timestamp: '2026-04-14T09:00:00.000Z', policy_applied: true, policy_fallback: false, success: false, failed: true },
+      { timestamp: '2026-04-14T09:01:00.000Z', policy_applied: true, policy_fallback: false, success: true, failed: false },
+      { timestamp: '2026-04-14T09:02:00.000Z', policy_applied: true, policy_fallback: true, success: false, failed: true },
+      { timestamp: '2026-04-14T09:03:00.000Z', policy_applied: true, policy_fallback: true, success: false, failed: true },
+      { timestamp: '2026-04-14T09:04:00.000Z', policy_applied: true, policy_fallback: false, success: true, failed: false },
+      { timestamp: '2026-04-14T09:05:00.000Z', policy_applied: true, policy_fallback: false, success: false, failed: true },
+      { timestamp: '2026-04-14T09:06:00.000Z', policy_applied: true, policy_fallback: true, success: true, failed: false },
+      { timestamp: '2026-04-14T09:07:00.000Z', policy_applied: true, policy_fallback: true, success: false, failed: true },
+    ],
+  }, null, 2)}\n`, 'utf8');
+
+  const report = await runQualityGate(
+    { mode: 'full' },
+    {
+      rootDir,
+      io: { log() {} },
+      env: {
+        AIOS_DISABLED_GATES: 'quality:build,quality:types,quality:scripts,quality:contextdb,quality:logs,quality:git',
+      },
+    }
+  );
+
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.failedChecks, ['Release']);
+  assert.equal(report.failureCategory, 'quality-release');
+});
+
 test('executeEntropyGc dry-run keeps newest artifacts and skips referenced checkpoints', async () => {
   const rootDir = await makeRootDir();
   const sessionId = 'entropy-dry-run';

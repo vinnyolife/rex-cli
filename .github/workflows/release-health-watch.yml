@@ -1,0 +1,95 @@
+name: release-health-watch
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-health-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install repo deps
+        run: npm ci
+
+      - name: Run release strict health gate
+        id: release_gate
+        run: |
+          mkdir -p test-results/release-health
+          set +e
+          node scripts/aios.mjs release-status \
+            --strict \
+            --format json \
+            --output test-results/release-health/release-status.json \
+            --history-output test-results/release-health/release-history.csv \
+            --history-format csv \
+            --history-days 30
+          gate_exit_code=$?
+          set -e
+          echo "exit_code=${gate_exit_code}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release health summary
+        if: always()
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const statusPath = 'test-results/release-health/release-status.json';
+          const summaryPath = 'test-results/release-health/summary.md';
+          let payload = null;
+          try {
+            payload = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+          } catch {
+            payload = { ok: false, exitCode: 1, error: 'release-status output missing', health: {} };
+          }
+          const health = payload.health || {};
+          const metrics = health.metrics || {};
+          const reasons = Array.isArray(health.reasons) && health.reasons.length > 0
+            ? health.reasons.join(', ')
+            : '(none)';
+          const lines = [
+            '# Release Health Watch',
+            '',
+            `- ok: ${payload.ok === true ? 'true' : 'false'}`,
+            `- exit_code: ${Number.isFinite(payload.exitCode) ? payload.exitCode : 1}`,
+            `- health_status: ${health.status || 'unknown'}`,
+            `- gate_passed: ${health.gatePassed === true ? 'true' : 'false'}`,
+            `- samples: ${Number.isFinite(metrics.samples) ? metrics.samples : 0}`,
+            `- failure_rate: ${Number.isFinite(metrics.failureRate) ? metrics.failureRate : 'n/a'}`,
+            `- fallback_rate: ${Number.isFinite(metrics.fallbackRate) ? metrics.fallbackRate : 'n/a'}`,
+            `- reasons: ${reasons}`,
+          ];
+          fs.writeFileSync(summaryPath, `${lines.join('\n')}\n`, 'utf8');
+          NODE
+          cat test-results/release-health/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release health artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-health-watch
+          path: test-results/release-health/*
+          if-no-files-found: error
+
+      - name: Alert when release health is unhealthy
+        if: steps.release_gate.outputs.exit_code != '0'
+        run: |
+          echo "::error title=Release Health Gate Failed::release-status --strict reported an unhealthy release gate. See release-health-watch artifacts."
+          exit 1

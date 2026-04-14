@@ -8,6 +8,7 @@ import {
 import { getDisabledGateIds, isHarnessGateEnabled } from '../harness/profile.mjs';
 import { persistQualityGateEvidence } from '../harness/verification-evidence.mjs';
 import { captureCommand } from '../platform/process.mjs';
+import { runReleaseStatus } from './release-status.mjs';
 
 const LOG_AUDIT_TARGETS = ['scripts', 'mcp-server/src'];
 const LOG_AUDIT_EXCLUDE_GLOBS = [
@@ -24,6 +25,7 @@ const QUALITY_FAILURE_CATEGORY_BY_LABEL = {
   ContextDB: 'quality-contextdb',
   Scripts: 'quality-scripts',
   Logs: 'quality-logs',
+  Release: 'quality-release',
   Security: 'quality-security',
   Git: 'quality-git',
 };
@@ -41,6 +43,10 @@ function countNonEmptyLines(text) {
 
 function runCheck(command, args, options = {}) {
   return captureCommand(command, args, options);
+}
+
+function isReleaseStateUnavailable(result = {}) {
+  return result?.ok === false && /state file not found/i.test(String(result?.error || ''));
 }
 
 function auditConsoleLogs(rootDir, { checkRunner = runCheck } = {}) {
@@ -180,6 +186,34 @@ export async function runQualityGate(
     } else {
       results.push({ label: 'Security', status: 'SKIP', detail: 'disabled by profile/gates' });
     }
+  }
+
+  if (isHarnessGateEnabled('quality:release', { profile: options.profile, disabledGates, profiles: ['standard', 'strict'] })) {
+    const releaseResult = await runReleaseStatus(
+      { strict: true, format: 'json' },
+      {
+        rootDir,
+        io: { log() {} },
+      }
+    );
+    if (releaseResult.exitCode === 0) {
+      results.push({
+        label: 'Release',
+        status: 'OK',
+        detail: `status=${releaseResult?.health?.status || 'healthy'} samples=${releaseResult?.health?.metrics?.samples ?? 0}`,
+      });
+    } else if (isReleaseStateUnavailable(releaseResult)) {
+      results.push({ label: 'Release', status: 'SKIP', detail: 'release state unavailable (state file not found)' });
+    } else {
+      const reasons = Array.isArray(releaseResult?.health?.reasons) ? releaseResult.health.reasons : [];
+      results.push({
+        label: 'Release',
+        status: 'FAIL',
+        detail: reasons.length > 0 ? reasons.join(', ') : (releaseResult?.error || 'release strict gate failed'),
+      });
+    }
+  } else {
+    results.push({ label: 'Release', status: 'SKIP', detail: 'disabled by profile/gates' });
   }
 
   if (isHarnessGateEnabled('quality:git', { profile: options.profile, disabledGates, profiles: ['minimal', 'standard', 'strict'] })) {

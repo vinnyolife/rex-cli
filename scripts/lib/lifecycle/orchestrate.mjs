@@ -23,6 +23,7 @@ import { parseArgs } from '../cli/parse-args.mjs';
 import { runDoctor } from './doctor.mjs';
 import { executeEntropyGc } from './entropy-gc.mjs';
 import { runQualityGate } from './quality-gate.mjs';
+import { runReleaseStatus } from './release-status.mjs';
 import { evaluateClarityGate, persistClarityGateDecision } from '../harness/clarity-gate.mjs';
 import {
   normalizeOrchestrateDispatchMode,
@@ -32,9 +33,12 @@ import {
 
 const DEFAULT_PREFLIGHT_ADAPTERS = {
   qualityGate: runQualityGate,
+  releaseStatus: runReleaseStatus,
   doctor: runDoctor,
   orchestrate: runOrchestrate,
 };
+const PREFLIGHT_RELEASE_GUARD_SOURCE_ID = 'gate.release-health';
+const PREFLIGHT_RELEASE_GUARD_COMMAND = 'node scripts/aios.mjs release-status --strict --format json';
 
 function normalizePositiveInteger(rawValue, fallback) {
   const value = Number.parseInt(String(rawValue ?? '').trim(), 10);
@@ -194,6 +198,49 @@ function writeWarning(io, message) {
     return;
   }
   process.stderr.write(`${text}\n`);
+}
+
+function isReleaseStateUnavailable(result = {}) {
+  return result?.ok === false && /state file not found/i.test(String(result?.error || ''));
+}
+
+function buildReleaseGuardAction() {
+  return {
+    type: 'command',
+    sourceId: PREFLIGHT_RELEASE_GUARD_SOURCE_ID,
+    action: PREFLIGHT_RELEASE_GUARD_COMMAND,
+  };
+}
+
+function didReleaseGuardFail(dispatchPreflight = null) {
+  if (!dispatchPreflight || !Array.isArray(dispatchPreflight.results)) return false;
+  return dispatchPreflight.results.some(
+    (item) => item?.sourceId === PREFLIGHT_RELEASE_GUARD_SOURCE_ID && item?.status === 'failed'
+  );
+}
+
+function applyReleaseGuardBlock(policy = null, dispatchPreflight = null) {
+  if (!policy || typeof policy !== 'object') return policy;
+  if (!didReleaseGuardFail(dispatchPreflight)) {
+    return policy;
+  }
+
+  const blockerIds = [...new Set([...(Array.isArray(policy.blockerIds) ? policy.blockerIds : []), PREFLIGHT_RELEASE_GUARD_SOURCE_ID])];
+  const requiredActions = Array.isArray(policy.requiredActions) ? [...policy.requiredActions] : [];
+  if (!requiredActions.some((item) => item?.sourceId === PREFLIGHT_RELEASE_GUARD_SOURCE_ID)) {
+    requiredActions.push(buildReleaseGuardAction());
+  }
+  const notes = Array.isArray(policy.notes) ? [...policy.notes] : [];
+  notes.push('Preflight release health guard failed: resolve release-status strict gate before continuing.');
+
+  return {
+    ...policy,
+    status: 'blocked',
+    parallelism: 'serial-only',
+    blockerIds,
+    requiredActions,
+    notes,
+  };
 }
 
 function extractBlueprintFromTargetId(targetId) {
@@ -389,6 +436,45 @@ async function runPreflightAction(item, { rootDir, env, sessionId, preflightAdap
         exitCode: dispatchOk ? 0 : (Number.isFinite(result?.exitCode) ? result.exitCode : 1),
       };
     }
+
+    if (parsed.command === 'release-status') {
+      const releaseStatusRunner = preflightAdapters.releaseStatus || runReleaseStatus;
+      const releaseStatusOptions = {
+        ...parsed.options,
+        strict: true,
+        format: 'json',
+      };
+      const result = await releaseStatusRunner(releaseStatusOptions, {
+        rootDir,
+        io: buffered.io,
+      });
+      const unavailable = isReleaseStateUnavailable(result);
+      process.exitCode = priorExitCode;
+      if (unavailable) {
+        return {
+          type: item.type,
+          sourceId: item.sourceId || null,
+          action: item.action,
+          status: 'passed',
+          runner: 'release-status',
+          summary: 'release state unavailable (guard bypassed)',
+          exitCode: 0,
+        };
+      }
+      const passed = Number(result?.exitCode) === 0;
+      const reasons = Array.isArray(result?.health?.reasons) ? result.health.reasons : [];
+      return {
+        type: item.type,
+        sourceId: item.sourceId || null,
+        action: item.action,
+        status: passed ? 'passed' : 'failed',
+        runner: 'release-status',
+        summary: passed
+          ? `release-status healthy samples=${result?.health?.metrics?.samples ?? 0}`
+          : (reasons.length > 0 ? reasons.join(', ') : 'release-status strict gate failed'),
+        exitCode: Number.isFinite(result?.exitCode) ? result.exitCode : (passed ? 0 : 1),
+      };
+    }
   } finally {
     process.exitCode = priorExitCode;
   }
@@ -410,13 +496,18 @@ async function executeDispatchPreflight(dispatchPolicy, {
   sessionId = '',
   preflightMode = 'none',
   preflightAdapters = DEFAULT_PREFLIGHT_ADAPTERS,
+  extraActions = [],
 } = {}) {
   if (preflightMode === 'none' || !dispatchPolicy) {
     return null;
   }
 
   const results = [];
-  for (const item of Array.isArray(dispatchPolicy.requiredActions) ? dispatchPolicy.requiredActions : []) {
+  const actionQueue = [
+    ...(Array.isArray(dispatchPolicy.requiredActions) ? dispatchPolicy.requiredActions : []),
+    ...(Array.isArray(extraActions) ? extraActions : []),
+  ];
+  for (const item of actionQueue) {
     results.push(await runPreflightAction(item, { rootDir, env, sessionId, preflightAdapters }));
   }
 
@@ -818,12 +909,16 @@ export async function runOrchestrate(
     learnEvalReport,
     learnEvalOverlay,
   });
+  const preflightExtraActions = options.preflightMode === 'auto'
+    ? [buildReleaseGuardAction()]
+    : [];
   const dispatchPreflight = await executeDispatchPreflight(rawDispatchPolicy, {
     rootDir,
     env,
     sessionId: options.sessionId,
     preflightMode: options.preflightMode,
     preflightAdapters,
+    extraActions: preflightExtraActions,
   });
   let effectiveLearnEvalReport = learnEvalReport;
   if (
@@ -844,6 +939,7 @@ export async function runOrchestrate(
     dispatchPreflight,
     learnEvalReport: effectiveLearnEvalReport,
   }) || preflightDispatchPolicy || rawDispatchPolicy;
+  const releaseGuardedEffectiveDispatchPolicy = applyReleaseGuardBlock(effectiveDispatchPolicy, dispatchPreflight);
 
   const basePlan = buildOrchestrationPlan({
     blueprint,
@@ -852,11 +948,11 @@ export async function runOrchestrate(
     learnEvalOverlay,
     dispatchPolicy: rawDispatchPolicy,
     dispatchPreflight,
-    effectiveDispatchPolicy,
+    effectiveDispatchPolicy: releaseGuardedEffectiveDispatchPolicy,
   });
   const dagPlan = {
     ...basePlan,
-    dispatchPolicy: effectiveDispatchPolicy,
+    dispatchPolicy: releaseGuardedEffectiveDispatchPolicy,
   };
 
   let dispatchPlan = options.dispatchMode === 'local'
@@ -972,6 +1068,7 @@ export async function runOrchestrate(
     dispatchPreflight,
     learnEvalReport: effectiveLearnEvalReport,
   }) || effectiveDispatchPolicy || postDispatchPolicy;
+  const releaseGuardedFinalDispatchPolicy = applyReleaseGuardBlock(finalEffectiveDispatchPolicy, dispatchPreflight);
   const clarityGate = options.executionMode === 'live' && dispatchRun
     ? evaluateClarityGate(
       {
@@ -1000,12 +1097,12 @@ export async function runOrchestrate(
     : null;
   const clarityAdjustedPolicy = resolvedClarityGate?.needsHuman
     ? {
-      ...finalEffectiveDispatchPolicy,
+      ...releaseGuardedFinalDispatchPolicy,
       status: 'blocked',
       parallelism: 'serial-only',
-      blockerIds: [...new Set([...(finalEffectiveDispatchPolicy?.blockerIds || []), 'gate.clarity-human'])],
+      blockerIds: [...new Set([...(releaseGuardedFinalDispatchPolicy?.blockerIds || []), 'gate.clarity-human'])],
       requiredActions: [
-        ...(Array.isArray(finalEffectiveDispatchPolicy?.requiredActions) ? finalEffectiveDispatchPolicy.requiredActions : []),
+        ...(Array.isArray(releaseGuardedFinalDispatchPolicy?.requiredActions) ? releaseGuardedFinalDispatchPolicy.requiredActions : []),
         {
           type: 'command',
           action: `node scripts/aios.mjs entropy-gc dry-run --session ${options.sessionId} --format json`,
@@ -1018,11 +1115,11 @@ export async function runOrchestrate(
         },
       ],
       notes: [
-        ...(Array.isArray(finalEffectiveDispatchPolicy?.notes) ? finalEffectiveDispatchPolicy.notes : []),
+        ...(Array.isArray(releaseGuardedFinalDispatchPolicy?.notes) ? releaseGuardedFinalDispatchPolicy.notes : []),
         'Clarity gate required human input before continuing automation.',
       ],
     }
-    : finalEffectiveDispatchPolicy;
+    : releaseGuardedFinalDispatchPolicy;
   const entropyGc = options.executionMode === 'live'
     && dispatchRun
     && dispatchRun.ok === true

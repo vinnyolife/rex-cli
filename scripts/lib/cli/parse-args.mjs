@@ -20,6 +20,7 @@ import {
   normalizeOrchestratePreflightMode,
   normalizeQualityGateMode,
   normalizeReleaseStatusFormat,
+  normalizeReleaseStatusHistoryFormat,
   normalizeSnapshotRollbackFormat,
   normalizeSkillInstallMode,
   normalizeSkillNames,
@@ -994,6 +995,20 @@ function parseTopLevelArgs(command, argv) {
         options.outputPath = takeValue(rest, index, '--output');
         index += 1;
         break;
+      case '--history-output':
+        if (command !== 'release-status') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.historyOutputPath = takeValue(rest, index, '--history-output');
+        index += 1;
+        break;
+      case '--history-days':
+        if (command !== 'release-status') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.historyDays = parsePositiveInteger(takeValue(rest, index, '--history-days'), '--history-days');
+        index += 1;
+        break;
       case '--global-security':
         options.globalSecurity = true;
         break;
@@ -1144,6 +1159,13 @@ function parseTopLevelArgs(command, argv) {
         index += 1;
         break;
       }
+      case '--history-format':
+        if (command !== 'release-status') {
+          throw new Error(`Unknown option: ${arg}`);
+        }
+        options.historyFormat = normalizeReleaseStatusHistoryFormat(takeValue(rest, index, '--history-format'));
+        index += 1;
+        break;
       case '--retain':
         if (command !== 'entropy-gc') {
           throw new Error(`Unknown option: ${arg}`);

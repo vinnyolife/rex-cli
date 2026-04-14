@@ -540,6 +540,17 @@ test('parseArgs rejects invalid release-status threshold rates', () => {
   );
 });
 
+test('parseArgs rejects invalid release-status history options', () => {
+  assert.throws(
+    () => parseArgs(['release-status', '--history-days', '0']),
+    /--history-days must be a positive integer/
+  );
+  assert.throws(
+    () => parseArgs(['release-status', '--history-format', 'json']),
+    /release-status history format must be one of: csv, ndjson/
+  );
+});
+
 test('parseArgs rejects invalid skill-candidate-limit', () => {
   assert.throws(
     () => parseArgs(['hud', '--skill-candidate-limit', '0']),
@@ -661,6 +672,12 @@ test('parseArgs accepts release-status options', () => {
     '0.15',
     '--output',
     'tmp/release-status.txt',
+    '--history-output',
+    'tmp/release-history.csv',
+    '--history-format',
+    'ndjson',
+    '--history-days',
+    '21',
     '--format',
     'json',
   ]);
@@ -673,6 +690,9 @@ test('parseArgs accepts release-status options', () => {
   assert.equal(result.options.maxFailureRate, 0.25);
   assert.equal(result.options.maxFallbackRate, 0.15);
   assert.equal(result.options.outputPath, 'tmp/release-status.txt');
+  assert.equal(result.options.historyOutputPath, 'tmp/release-history.csv');
+  assert.equal(result.options.historyFormat, 'ndjson');
+  assert.equal(result.options.historyDays, 21);
   assert.equal(result.options.format, 'json');
 });
 
@@ -1034,6 +1054,80 @@ test('runReleaseStatus strict gate fails when health thresholds are not met', as
     const outputRaw = await fs.readFile(outputPath, 'utf8');
     assert.match(outputRaw, /health:/);
     assert.match(outputRaw, /strict=on/);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('runReleaseStatus exports daily history as csv and ndjson', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-release-status-history-'));
+  const statePath = path.join(
+    workspaceRoot,
+    'experiments',
+    'rl-mixed-v1',
+    'release',
+    'orchestrator-policy-release.state.json'
+  );
+  try {
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, `${JSON.stringify({
+      schema_version: 1,
+      updated_at: '2026-04-13T16:00:00.000Z',
+      effective_mode: 'canary',
+      effective_rollout_rate: 0.5,
+      counters: {
+        total: 20,
+        policy_applied: 10,
+        baseline_routed: 10,
+        policy_fallback: 4,
+        policy_success: 6,
+        policy_failure: 4,
+        consecutive_policy_failures: 0,
+        consecutive_policy_success: 2,
+        downgrades: 1,
+        promotions: 1,
+      },
+      recent: [
+        { timestamp: '2026-04-12T15:54:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+        { timestamp: '2026-04-12T15:55:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: false, failed: true },
+        { timestamp: '2026-04-13T15:56:00.000Z', policy_applied: false, policy_requested: true, policy_fallback: true, success: false, failed: true },
+        { timestamp: '2026-04-13T15:57:00.000Z', policy_applied: false, policy_requested: true, policy_fallback: true, success: true, failed: false },
+      ],
+    }, null, 2)}\n`, 'utf8');
+
+    const csvOutput = path.join(workspaceRoot, 'tmp', 'release-history.csv');
+    const csvResult = await runReleaseStatus(
+      {
+        format: 'json',
+        historyOutputPath: csvOutput,
+        historyFormat: 'csv',
+        historyDays: 7,
+      },
+      { rootDir: workspaceRoot, io: { log() {} } }
+    );
+    assert.equal(csvResult.exitCode, 0);
+    assert.equal(csvResult.historyDaily.totalDays, 2);
+    const csvRaw = await fs.readFile(csvOutput, 'utf8');
+    assert.match(csvRaw, /date,samples,policy_applied/);
+    assert.match(csvRaw, /2026-04-12,2,2,0,1,1,/);
+    assert.match(csvRaw, /2026-04-13,2,0,2,1,1,/);
+
+    const ndjsonOutput = path.join(workspaceRoot, 'tmp', 'release-history.ndjson');
+    const ndjsonResult = await runReleaseStatus(
+      {
+        format: 'json',
+        historyOutputPath: ndjsonOutput,
+        historyFormat: 'ndjson',
+        historyDays: 7,
+      },
+      { rootDir: workspaceRoot, io: { log() {} } }
+    );
+    assert.equal(ndjsonResult.exitCode, 0);
+    const ndjsonRaw = await fs.readFile(ndjsonOutput, 'utf8');
+    const ndjsonRows = ndjsonRaw.trim().split(/\n+/).map((line) => JSON.parse(line));
+    assert.equal(ndjsonRows.length, 2);
+    assert.equal(ndjsonRows[0].date, '2026-04-12');
+    assert.equal(ndjsonRows[1].date, '2026-04-13');
   } finally {
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   }

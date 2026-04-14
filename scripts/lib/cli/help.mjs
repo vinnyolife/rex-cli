@@ -279,6 +279,9 @@ Options:
   --max-failure-rate <0-1>       Strict gate max recent failure rate (default: 0.2)
   --max-fallback-rate <0-1>      Strict gate max recent fallback rate (default: 0.1)
   --output <path>                Write rendered report to file
+  --history-output <path>        Write daily trend history export file
+  --history-format <csv|ndjson>  History export format (default: csv)
+  --history-days <n>             Number of recent days included in history export (default: 14)
   --format <text|json>
   -h, --help
 `;

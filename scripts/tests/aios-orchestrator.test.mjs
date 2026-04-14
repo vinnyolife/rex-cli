@@ -2734,6 +2734,91 @@ test('runOrchestrate preflight refreshes learn-eval from session-scoped verifica
   assert.equal(report.effectiveDispatchPolicy.status, 'caution');
 });
 
+test('runOrchestrate preflight auto blocks when release strict guard fails', async () => {
+  const rootDir = await makeRootDir();
+  await writeSession(
+    rootDir,
+    'preflight-release-fail',
+    { updatedAt: '2026-03-09T03:36:00.000Z', goal: 'Guard release quality before dispatch' },
+    [
+      {
+        seq: 1,
+        ts: '2026-03-09T03:00:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 1',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 900,
+        },
+      },
+      {
+        seq: 2,
+        ts: '2026-03-09T03:05:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 2',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 920,
+        },
+      },
+      {
+        seq: 3,
+        ts: '2026-03-09T03:10:00.000Z',
+        status: 'done',
+        summary: 'Checkpoint 3',
+        nextActions: [],
+        artifacts: [],
+        telemetry: {
+          verification: { result: 'passed', evidence: 'quality-gate pre-pr' },
+          retryCount: 0,
+          elapsedMs: 930,
+        },
+      },
+    ]
+  );
+
+  const logs = [];
+  await runOrchestrate(
+    { sessionId: 'preflight-release-fail', dispatchMode: 'local', preflightMode: 'auto', format: 'json' },
+    {
+      rootDir,
+      io: { log: (line) => logs.push(line) },
+      preflightAdapters: {
+        qualityGate: async () => ({ ok: true, exitCode: 0, mode: 'full', results: [] }),
+        doctor: async () => ({ ok: true, exitCode: 0 }),
+        releaseStatus: async () => ({
+          ok: true,
+          exitCode: 1,
+          strictFailed: true,
+          health: {
+            reasons: ['failure_rate_exceeded(0.5000>0.2000)'],
+          },
+        }),
+      },
+    }
+  );
+  const report = JSON.parse(logs.join('\n'));
+
+  assert.equal(
+    report.dispatchPreflight.results.some(
+      (item) => item.sourceId === 'gate.release-health' && item.runner === 'release-status' && item.status === 'failed'
+    ),
+    true
+  );
+  assert.equal(report.effectiveDispatchPolicy.status, 'blocked');
+  assert.equal(report.effectiveDispatchPolicy.blockerIds.includes('gate.release-health'), true);
+  assert.equal(
+    report.effectiveDispatchPolicy.requiredActions.some((item) => item.sourceId === 'gate.release-health' && /release-status --strict/.test(item.action)),
+    true
+  );
+});
+
 test('runOrchestrate preflight executes supported local orchestrate dry-run actions', async () => {
   const rootDir = await makeRootDir();
   const dispatch = await writeDispatchEvidence(rootDir, 'preflight-blocked', { ok: false, blockedJobs: 1 });

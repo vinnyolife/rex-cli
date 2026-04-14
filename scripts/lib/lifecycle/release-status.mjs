@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import {
   createDefaultReleaseStatusOptions,
+  normalizeReleaseStatusHistoryFormat,
   normalizeReleaseStatusFormat,
 } from './options.mjs';
 import {
@@ -107,6 +108,102 @@ function buildRecentSummary(entries = []) {
   return summary;
 }
 
+function toDayKey(rawTimestamp = '') {
+  const normalized = normalizeText(rawTimestamp);
+  if (!normalized) return '';
+  const parsed = new Date(normalized);
+  if (!Number.isFinite(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildDailyHistory(entries = [], historyDays = 14) {
+  const dayMap = new Map();
+  for (const entry of entries) {
+    const day = toDayKey(entry?.timestamp);
+    if (!day) continue;
+
+    const current = dayMap.get(day) || {
+      date: day,
+      samples: 0,
+      policyApplied: 0,
+      policyFallback: 0,
+      success: 0,
+      failed: 0,
+      successRate: null,
+      failureRate: null,
+      fallbackRate: null,
+      policyApplyRate: null,
+    };
+    current.samples += 1;
+    if (entry?.policy_applied === true) current.policyApplied += 1;
+    if (entry?.policy_fallback === true) current.policyFallback += 1;
+    if (entry?.success === true) current.success += 1;
+    if (entry?.failed === true) current.failed += 1;
+    dayMap.set(day, current);
+  }
+
+  let days = [...dayMap.values()].sort((left, right) => left.date.localeCompare(right.date));
+  if (historyDays > 0 && days.length > historyDays) {
+    days = days.slice(-historyDays);
+  }
+
+  for (const day of days) {
+    const outcomes = day.success + day.failed;
+    if (outcomes > 0) {
+      day.successRate = day.success / outcomes;
+      day.failureRate = day.failed / outcomes;
+    }
+    if (day.samples > 0) {
+      day.fallbackRate = day.policyFallback / day.samples;
+      day.policyApplyRate = day.policyApplied / day.samples;
+    }
+  }
+
+  return {
+    daysRequested: historyDays,
+    totalDays: days.length,
+    entries: days,
+  };
+}
+
+function formatRateValue(value, digits = 6) {
+  if (!Number.isFinite(value)) return '';
+  return Number(value).toFixed(digits);
+}
+
+function renderHistoryCsv(history = {}) {
+  const lines = [
+    'date,samples,policy_applied,policy_fallback,success,failed,success_rate,failure_rate,fallback_rate,policy_apply_rate',
+  ];
+  for (const entry of Array.isArray(history.entries) ? history.entries : []) {
+    lines.push([
+      entry.date,
+      entry.samples,
+      entry.policyApplied,
+      entry.policyFallback,
+      entry.success,
+      entry.failed,
+      formatRateValue(entry.successRate),
+      formatRateValue(entry.failureRate),
+      formatRateValue(entry.fallbackRate),
+      formatRateValue(entry.policyApplyRate),
+    ].join(','));
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function renderHistoryNdjson(history = {}) {
+  const lines = [];
+  for (const entry of Array.isArray(history.entries) ? history.entries : []) {
+    lines.push(JSON.stringify(entry));
+  }
+  return `${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`;
+}
+
+function renderHistoryExport(history = {}, format = 'csv') {
+  return format === 'ndjson' ? renderHistoryNdjson(history) : renderHistoryCsv(history);
+}
+
 function buildHealthSummary({
   recentWindow = {},
   minSamples = 8,
@@ -167,6 +264,9 @@ function buildFailureResult(error, options, statePath) {
     recent: options.recent,
     strict: options.strict === true,
     outputPath: options.outputPath || '',
+    historyOutputPath: options.historyOutputPath || '',
+    historyFormat: options.historyFormat || 'csv',
+    historyDays: options.historyDays || 14,
   };
 }
 
@@ -198,6 +298,7 @@ function renderReleaseStatusText(report = {}) {
     `- recent(${recentWindow.limit || 0}): samples=${recentWindow.total || 0} policy_applied=${recentWindow.policyApplied || 0} fallback=${recentWindow.policyFallback || 0} success=${recentWindow.success || 0} failed=${recentWindow.failed || 0} success_rate=${formatRate(recentWindow.successRate)} failure_rate=${formatRate(recentWindow.failureRate)} fallback_rate=${formatRate(recentWindow.fallbackRate)}`,
     `- health: status=${health.status || 'unknown'} gate_passed=${health.gatePassed === true ? 'yes' : 'no'} strict=${report.strict === true ? 'on' : 'off'}`,
     `- health thresholds: min_samples=${health.thresholds?.minSamples ?? 0} max_failure_rate=${health.thresholds?.maxFailureRate ?? 0} max_fallback_rate=${health.thresholds?.maxFallbackRate ?? 0}`,
+    `- history: days=${report.historyDaily?.totalDays ?? 0}/${report.historyDays ?? 0} format=${report.historyFormat || 'csv'} output=${report.historyOutputPath || '(none)'}`,
   ];
   if (Array.isArray(health.reasons) && health.reasons.length > 0) {
     lines.push(`- health reasons: ${health.reasons.join(', ')}`);
@@ -225,6 +326,9 @@ export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = proce
   const maxFailureRate = parseRate(rawOptions.maxFailureRate, defaults.maxFailureRate, '--max-failure-rate');
   const maxFallbackRate = parseRate(rawOptions.maxFallbackRate, defaults.maxFallbackRate, '--max-fallback-rate');
   const outputPath = normalizeOutputPath(rawOptions.outputPath ?? defaults.outputPath, rootDir);
+  const historyOutputPath = normalizeOutputPath(rawOptions.historyOutputPath ?? defaults.historyOutputPath, rootDir);
+  const historyFormat = normalizeReleaseStatusHistoryFormat(rawOptions.historyFormat ?? defaults.historyFormat);
+  const historyDays = parsePositiveInteger(rawOptions.historyDays, defaults.historyDays, '--history-days');
 
   return {
     statePath,
@@ -235,6 +339,9 @@ export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = proce
     maxFailureRate,
     maxFallbackRate,
     outputPath,
+    historyOutputPath,
+    historyFormat,
+    historyDays,
   };
 }
 
@@ -266,6 +373,15 @@ export function planReleaseStatus(rawOptions = {}, { rootDir = process.cwd() } =
   if (options.outputPath) {
     args.push('--output', toPosixPath(path.relative(rootDir, options.outputPath) || options.outputPath));
   }
+  if (options.historyOutputPath) {
+    args.push('--history-output', toPosixPath(path.relative(rootDir, options.historyOutputPath) || options.historyOutputPath));
+  }
+  if (options.historyFormat !== 'csv') {
+    args.push('--history-format', options.historyFormat);
+  }
+  if (options.historyDays !== 14) {
+    args.push('--history-days', String(options.historyDays));
+  }
 
   return {
     command: 'release-status',
@@ -280,6 +396,9 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
   const outputPath = options.outputPath
     ? toPosixPath(path.relative(rootDir, options.outputPath) || options.outputPath)
     : '';
+  const historyOutputPath = options.historyOutputPath
+    ? toPosixPath(path.relative(rootDir, options.historyOutputPath) || options.historyOutputPath)
+    : '';
 
   const emitResult = async (result) => {
     const rendered = options.format === 'json'
@@ -292,6 +411,13 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
     }
   };
 
+  const emitHistory = async (history) => {
+    if (!options.historyOutputPath) return;
+    const rendered = renderHistoryExport(history, options.historyFormat);
+    await mkdir(path.dirname(options.historyOutputPath), { recursive: true });
+    await writeFile(options.historyOutputPath, rendered, 'utf8');
+  };
+
   try {
     await access(options.statePath);
   } catch (error) {
@@ -299,6 +425,7 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
       const result = {
         ...buildFailureResult(`state file not found: ${statePath}`, options, statePath),
         outputPath,
+        historyOutputPath,
       };
       await emitResult(result);
       return result;
@@ -317,7 +444,9 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
   const recentEntries = Array.isArray(state.recent)
     ? state.recent.slice(-options.recent)
     : [];
+  const historyEntries = Array.isArray(state.recent) ? state.recent : [];
   const recentWindow = buildRecentSummary(recentEntries);
+  const historyDaily = buildDailyHistory(historyEntries, options.historyDays);
   const health = buildHealthSummary({
     recentWindow,
     minSamples: options.minSamples,
@@ -331,6 +460,9 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
     format: options.format,
     statePath,
     outputPath,
+    historyOutputPath,
+    historyFormat: options.historyFormat,
+    historyDays: options.historyDays,
     strict: options.strict,
     updatedAt: state.updated_at || null,
     effectiveMode: state.effective_mode,
@@ -344,11 +476,13 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
       ...recentWindow,
       limit: options.recent,
     },
+    historyDaily,
     health,
     strictFailed,
     state,
   };
 
+  await emitHistory(historyDaily);
   await emitResult(result);
   return result;
 }

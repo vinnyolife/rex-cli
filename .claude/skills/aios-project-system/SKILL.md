@@ -16,6 +16,7 @@ Use this skill as the repository map for `aios`. It explains where state lives, 
 - `scripts/run-browser-use-mcp.sh`: default browser MCP launcher (bridges to `ai-browser-book/mcp-browser-use`).
 - `mcp-server/`: legacy Playwright MCP implementation retained for compatibility workflows.
 - `docs/plans/`: design, implementation, and postmortem documents.
+- `.github/workflows/release-health-watch.yml`: scheduled release gate health watch (strict gate + artifact upload).
 
 ## Runtime Truths (Do Not Skip)
 - MCP server label may still be `puppeteer-stealth`, but default runtime now routes to browser-use tools (`chrome.launch_cdp`, `browser.connect_cdp`, `page.*`) via `scripts/run-browser-use-mcp.sh`.
@@ -26,6 +27,8 @@ Use this skill as the repository map for `aios`. It explains where state lives, 
 - Prefer `page.extract_text` / `page.get_html` evidence before using `page.screenshot`.
 - Repo-local discoverable skills must live in `.codex/skills/` or `.claude/skills/`; do not create ad-hoc skill roots such as `.baoyu-skills/*/SKILL.md`. `.baoyu-skills/` is extension-config territory, not a Codex/Claude skill root.
 - Keep safety constraints aligned with `memory/specs` and `memory/skills/技能使用约束.json`.
+- `node scripts/aios.mjs release-status` supports strict gate and history export flags:
+  `--history-output`, `--history-format <csv|ndjson>`, `--history-days`.
 
 ## Superpowers Route Bridge
 When requests are substantial, chain process skills and harness controls in this order:

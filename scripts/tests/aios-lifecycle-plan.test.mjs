@@ -70,6 +70,9 @@ test('planReleaseStatus preserves strict health-gate options', () => {
     maxFailureRate: 0.25,
     maxFallbackRate: 0.15,
     outputPath: 'tmp/release-status.json',
+    historyOutputPath: 'tmp/release-history.csv',
+    historyFormat: 'ndjson',
+    historyDays: 21,
     format: 'json',
   }, { rootDir: '/tmp/aios-test' });
   assert.equal(plan.command, 'release-status');
@@ -79,12 +82,18 @@ test('planReleaseStatus preserves strict health-gate options', () => {
   assert.equal(plan.options.maxFailureRate, 0.25);
   assert.equal(plan.options.maxFallbackRate, 0.15);
   assert.equal(plan.options.format, 'json');
+  assert.equal(plan.options.historyOutputPath.endsWith('/tmp/release-history.csv'), true);
+  assert.equal(plan.options.historyFormat, 'ndjson');
+  assert.equal(plan.options.historyDays, 21);
   assert.match(plan.preview, /release-status/);
   assert.match(plan.preview, /--strict/);
   assert.match(plan.preview, /--min-samples 10/);
   assert.match(plan.preview, /--max-failure-rate 0.25/);
   assert.match(plan.preview, /--max-fallback-rate 0.15/);
   assert.match(plan.preview, /--output tmp\/release-status.json/);
+  assert.match(plan.preview, /--history-output tmp\/release-history.csv/);
+  assert.match(plan.preview, /--history-format ndjson/);
+  assert.match(plan.preview, /--history-days 21/);
 });
 
 test('runSetup browser flow enables doctor auto-heal by default', async () => {

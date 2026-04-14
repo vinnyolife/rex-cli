@@ -16,6 +16,7 @@ export const ENTROPY_GC_MODE_NAMES = ['dry-run', 'auto', 'off'];
 export const ENTROPY_GC_FORMAT_NAMES = ['text', 'json'];
 export const SNAPSHOT_ROLLBACK_FORMAT_NAMES = ['text', 'json'];
 export const RELEASE_STATUS_FORMAT_NAMES = ['text', 'json'];
+export const RELEASE_STATUS_HISTORY_FORMAT_NAMES = ['csv', 'ndjson'];
 
 export function normalizeWrapMode(raw = 'opt-in') {
   const value = String(raw || 'opt-in').trim().toLowerCase();
@@ -106,6 +107,14 @@ export function normalizeReleaseStatusFormat(raw = 'text') {
   const value = String(raw || 'text').trim().toLowerCase();
   if (!RELEASE_STATUS_FORMAT_NAMES.includes(value)) {
     throw new Error(`release-status format must be one of: ${RELEASE_STATUS_FORMAT_NAMES.join(', ')}`);
+  }
+  return value;
+}
+
+export function normalizeReleaseStatusHistoryFormat(raw = 'csv') {
+  const value = String(raw || 'csv').trim().toLowerCase();
+  if (!RELEASE_STATUS_HISTORY_FORMAT_NAMES.includes(value)) {
+    throw new Error(`release-status history format must be one of: ${RELEASE_STATUS_HISTORY_FORMAT_NAMES.join(', ')}`);
   }
   return value;
 }
@@ -287,5 +296,8 @@ export function createDefaultReleaseStatusOptions() {
     maxFailureRate: 0.2,
     maxFallbackRate: 0.1,
     outputPath: '',
+    historyOutputPath: '',
+    historyFormat: 'csv',
+    historyDays: 14,
   };
 }
