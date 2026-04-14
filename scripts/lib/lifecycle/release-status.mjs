@@ -11,6 +11,9 @@ import {
   normalizePolicyReleaseConfig,
 } from '../rl-orchestrator-v1/policy-release-gate.mjs';
 
+const HISTORY_TREND_FAILURE_DELTA_WARN = 0.05;
+const HISTORY_TREND_FALLBACK_DELTA_WARN = 0.03;
+
 function normalizeText(value = '') {
   return String(value ?? '').trim();
 }
@@ -43,6 +46,12 @@ function toPosixPath(filePath = '') {
 function formatRate(value, digits = 2) {
   if (!Number.isFinite(value)) return 'n/a';
   return `${(value * 100).toFixed(digits)}%`;
+}
+
+function formatSignedRate(value, digits = 2) {
+  if (!Number.isFinite(value)) return 'n/a';
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${(value * 100).toFixed(digits)}%`;
 }
 
 function normalizeStatePath(statePath, rootDir, fallback) {
@@ -116,6 +125,15 @@ function toDayKey(rawTimestamp = '') {
   return parsed.toISOString().slice(0, 10);
 }
 
+function shiftDayKey(dayKey = '', offsetDays = 0) {
+  const normalized = normalizeText(dayKey);
+  if (!normalized) return '';
+  const parsed = new Date(`${normalized}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime())) return '';
+  parsed.setUTCDate(parsed.getUTCDate() + offsetDays);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function buildDailyHistory(entries = [], historyDays = 14) {
   const dayMap = new Map();
   for (const entry of entries) {
@@ -159,10 +177,72 @@ function buildDailyHistory(entries = [], historyDays = 14) {
     }
   }
 
+  const dayByDate = new Map(days.map((item) => [item.date, item]));
+  for (const day of days) {
+    const prevWeek = dayByDate.get(shiftDayKey(day.date, -7));
+    day.wowSamplesDelta = prevWeek ? (day.samples - prevWeek.samples) : null;
+    day.wowFailureRateDelta = prevWeek && Number.isFinite(day.failureRate) && Number.isFinite(prevWeek.failureRate)
+      ? (day.failureRate - prevWeek.failureRate)
+      : null;
+    day.wowFallbackRateDelta = prevWeek && Number.isFinite(day.fallbackRate) && Number.isFinite(prevWeek.fallbackRate)
+      ? (day.fallbackRate - prevWeek.fallbackRate)
+      : null;
+  }
+
   return {
     daysRequested: historyDays,
     totalDays: days.length,
     entries: days,
+  };
+}
+
+function buildHistorySignals({
+  historyDaily = {},
+  maxFailureRate = 0.2,
+  maxFallbackRate = 0.1,
+  failureDeltaWarn = HISTORY_TREND_FAILURE_DELTA_WARN,
+  fallbackDeltaWarn = HISTORY_TREND_FALLBACK_DELTA_WARN,
+} = {}) {
+  const entries = Array.isArray(historyDaily.entries) ? historyDaily.entries : [];
+  const latest = entries.at(-1) || null;
+  const previousWeekDate = latest ? shiftDayKey(latest.date, -7) : '';
+  const previousWeek = previousWeekDate
+    ? entries.find((item) => item.date === previousWeekDate) || null
+    : null;
+  const alerts = [];
+
+  if (latest && Number.isFinite(latest.failureRate) && latest.failureRate > maxFailureRate) {
+    alerts.push(`latest_failure_rate_exceeded(${latest.failureRate.toFixed(4)}>${maxFailureRate.toFixed(4)})`);
+  }
+  if (latest && Number.isFinite(latest.fallbackRate) && latest.fallbackRate > maxFallbackRate) {
+    alerts.push(`latest_fallback_rate_exceeded(${latest.fallbackRate.toFixed(4)}>${maxFallbackRate.toFixed(4)})`);
+  }
+  if (latest && Number.isFinite(latest.wowFailureRateDelta) && latest.wowFailureRateDelta > failureDeltaWarn) {
+    alerts.push(`wow_failure_rate_delta_exceeded(${latest.wowFailureRateDelta.toFixed(4)}>${failureDeltaWarn.toFixed(4)})`);
+  }
+  if (latest && Number.isFinite(latest.wowFallbackRateDelta) && latest.wowFallbackRateDelta > fallbackDeltaWarn) {
+    alerts.push(`wow_fallback_rate_delta_exceeded(${latest.wowFallbackRateDelta.toFixed(4)}>${fallbackDeltaWarn.toFixed(4)})`);
+  }
+
+  return {
+    latestDate: latest?.date || null,
+    previousWeekDate: previousWeek?.date || null,
+    hasAlert: alerts.length > 0,
+    alerts,
+    thresholds: {
+      maxFailureRate,
+      maxFallbackRate,
+      wowFailureRateDeltaWarn: failureDeltaWarn,
+      wowFallbackRateDeltaWarn: fallbackDeltaWarn,
+    },
+    metrics: {
+      latestSamples: latest?.samples ?? null,
+      latestFailureRate: Number.isFinite(latest?.failureRate) ? latest.failureRate : null,
+      latestFallbackRate: Number.isFinite(latest?.fallbackRate) ? latest.fallbackRate : null,
+      wowSamplesDelta: Number.isFinite(latest?.wowSamplesDelta) ? latest.wowSamplesDelta : null,
+      wowFailureRateDelta: Number.isFinite(latest?.wowFailureRateDelta) ? latest.wowFailureRateDelta : null,
+      wowFallbackRateDelta: Number.isFinite(latest?.wowFallbackRateDelta) ? latest.wowFallbackRateDelta : null,
+    },
   };
 }
 
@@ -173,7 +253,7 @@ function formatRateValue(value, digits = 6) {
 
 function renderHistoryCsv(history = {}) {
   const lines = [
-    'date,samples,policy_applied,policy_fallback,success,failed,success_rate,failure_rate,fallback_rate,policy_apply_rate',
+    'date,samples,policy_applied,policy_fallback,success,failed,success_rate,failure_rate,fallback_rate,policy_apply_rate,wow_samples_delta,wow_failure_rate_delta,wow_fallback_rate_delta',
   ];
   for (const entry of Array.isArray(history.entries) ? history.entries : []) {
     lines.push([
@@ -187,6 +267,9 @@ function renderHistoryCsv(history = {}) {
       formatRateValue(entry.failureRate),
       formatRateValue(entry.fallbackRate),
       formatRateValue(entry.policyApplyRate),
+      Number.isFinite(entry.wowSamplesDelta) ? String(entry.wowSamplesDelta) : '',
+      formatRateValue(entry.wowFailureRateDelta),
+      formatRateValue(entry.wowFallbackRateDelta),
     ].join(','));
   }
   return `${lines.join('\n')}\n`;
@@ -283,6 +366,7 @@ function renderReleaseStatusText(report = {}) {
   const counters = report.counters || {};
   const recentWindow = report.recentWindow || {};
   const health = report.health || {};
+  const historySignals = report.historySignals || {};
   const trend = Array.isArray(recentWindow.trend) ? recentWindow.trend.join(' ') : '';
 
   const lines = [
@@ -299,6 +383,7 @@ function renderReleaseStatusText(report = {}) {
     `- health: status=${health.status || 'unknown'} gate_passed=${health.gatePassed === true ? 'yes' : 'no'} strict=${report.strict === true ? 'on' : 'off'}`,
     `- health thresholds: min_samples=${health.thresholds?.minSamples ?? 0} max_failure_rate=${health.thresholds?.maxFailureRate ?? 0} max_fallback_rate=${health.thresholds?.maxFallbackRate ?? 0}`,
     `- history: days=${report.historyDaily?.totalDays ?? 0}/${report.historyDays ?? 0} format=${report.historyFormat || 'csv'} output=${report.historyOutputPath || '(none)'}`,
+    `- history trend: latest=${historySignals.latestDate || '(none)'} prev_week=${historySignals.previousWeekDate || '(none)'} wow_failure_delta=${formatSignedRate(historySignals.metrics?.wowFailureRateDelta)} wow_fallback_delta=${formatSignedRate(historySignals.metrics?.wowFallbackRateDelta)} alerts=${historySignals.hasAlert === true ? 'yes' : 'no'}`,
   ];
   if (Array.isArray(health.reasons) && health.reasons.length > 0) {
     lines.push(`- health reasons: ${health.reasons.join(', ')}`);
@@ -306,6 +391,9 @@ function renderReleaseStatusText(report = {}) {
   if (trend) {
     lines.push(`- trend: ${trend}`);
     lines.push('- trend legend: B=baseline PF=policy_fallback F=policy_failed S=policy_success');
+  }
+  if (Array.isArray(historySignals.alerts) && historySignals.alerts.length > 0) {
+    lines.push(`- history alerts: ${historySignals.alerts.join(', ')}`);
   }
   lines.push('');
   return lines.join('\n');
@@ -447,6 +535,11 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
   const historyEntries = Array.isArray(state.recent) ? state.recent : [];
   const recentWindow = buildRecentSummary(recentEntries);
   const historyDaily = buildDailyHistory(historyEntries, options.historyDays);
+  const historySignals = buildHistorySignals({
+    historyDaily,
+    maxFailureRate: options.maxFailureRate,
+    maxFallbackRate: options.maxFallbackRate,
+  });
   const health = buildHealthSummary({
     recentWindow,
     minSamples: options.minSamples,
@@ -477,6 +570,7 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
       limit: options.recent,
     },
     historyDaily,
+    historySignals,
     health,
     strictFailed,
     state,

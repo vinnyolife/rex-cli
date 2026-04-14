@@ -1109,6 +1109,7 @@ test('runReleaseStatus exports daily history as csv and ndjson', async () => {
     assert.equal(csvResult.historyDaily.totalDays, 2);
     const csvRaw = await fs.readFile(csvOutput, 'utf8');
     assert.match(csvRaw, /date,samples,policy_applied/);
+    assert.match(csvRaw, /wow_samples_delta,wow_failure_rate_delta,wow_fallback_rate_delta/);
     assert.match(csvRaw, /2026-04-12,2,2,0,1,1,/);
     assert.match(csvRaw, /2026-04-13,2,0,2,1,1,/);
 
@@ -1128,6 +1129,82 @@ test('runReleaseStatus exports daily history as csv and ndjson', async () => {
     assert.equal(ndjsonRows.length, 2);
     assert.equal(ndjsonRows[0].date, '2026-04-12');
     assert.equal(ndjsonRows[1].date, '2026-04-13');
+    assert.equal(Object.hasOwn(ndjsonRows[1], 'wowFailureRateDelta'), true);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('runReleaseStatus computes week-over-week deltas and trend alert fields', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-release-status-wow-'));
+  const statePath = path.join(
+    workspaceRoot,
+    'experiments',
+    'rl-mixed-v1',
+    'release',
+    'orchestrator-policy-release.state.json'
+  );
+  try {
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, `${JSON.stringify({
+      schema_version: 1,
+      updated_at: '2026-04-13T16:00:00.000Z',
+      effective_mode: 'canary',
+      effective_rollout_rate: 0.5,
+      counters: {
+        total: 16,
+        policy_applied: 16,
+        baseline_routed: 0,
+        policy_fallback: 2,
+        policy_success: 10,
+        policy_failure: 6,
+        consecutive_policy_failures: 1,
+        consecutive_policy_success: 0,
+        downgrades: 1,
+        promotions: 1,
+      },
+      recent: [
+        { timestamp: '2026-04-06T10:00:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+        { timestamp: '2026-04-06T10:01:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success:true, failed:false },
+        { timestamp: '2026-04-06T10:02:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+        { timestamp: '2026-04-06T10:03:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success:false, failed:true },
+
+        { timestamp: '2026-04-13T10:00:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: true, success:false, failed:true },
+        { timestamp: '2026-04-13T10:01:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: true, success:false, failed:true },
+        { timestamp: '2026-04-13T10:02:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success:false, failed:true },
+        { timestamp: '2026-04-13T10:03:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success:true, failed:false },
+      ],
+    }, null, 2)}\n`, 'utf8');
+
+    const logs = [];
+    const result = await runReleaseStatus(
+      {
+        format: 'json',
+        historyDays: 14,
+      },
+      { rootDir: workspaceRoot, io: { log: (line) => logs.push(String(line)) } }
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.historyDaily.totalDays, 2);
+    assert.equal(result.historySignals.latestDate, '2026-04-13');
+    assert.equal(result.historySignals.previousWeekDate, '2026-04-06');
+    assert.equal(result.historySignals.hasAlert, true);
+    assert.equal(
+      result.historySignals.alerts.some((item) => /wow_failure_rate_delta_exceeded/.test(item)),
+      true
+    );
+    assert.equal(
+      result.historySignals.alerts.some((item) => /wow_fallback_rate_delta_exceeded/.test(item)),
+      true
+    );
+    assert.equal(Number(result.historySignals.metrics.wowFailureRateDelta.toFixed(4)), 0.5);
+    assert.equal(Number(result.historySignals.metrics.wowFallbackRateDelta.toFixed(4)), 0.5);
+
+    const payload = JSON.parse(logs.at(-1));
+    assert.equal(payload.historySignals.hasAlert, true);
+    assert.equal(payload.historyDaily.entries.at(-1).date, '2026-04-13');
+    assert.equal(payload.historyDaily.entries.at(-1).wowSamplesDelta, 0);
   } finally {
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   }

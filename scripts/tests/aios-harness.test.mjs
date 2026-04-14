@@ -384,6 +384,93 @@ test('runQualityGate fails with quality-release category when strict release gat
   assert.equal(report.failureCategory, 'quality-release');
 });
 
+test('runQualityGate applies release thresholds from environment overrides', async () => {
+  const rootDir = await makeRootDir();
+  const statePath = path.join(
+    rootDir,
+    'experiments',
+    'rl-mixed-v1',
+    'release',
+    'orchestrator-policy-release.state.json'
+  );
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, `${JSON.stringify({
+    schema_version: 1,
+    updated_at: '2026-04-14T10:30:00.000Z',
+    effective_mode: 'canary',
+    effective_rollout_rate: 0.4,
+    counters: {
+      total: 8,
+      policy_applied: 8,
+      baseline_routed: 0,
+      policy_fallback: 2,
+      policy_success: 4,
+      policy_failure: 4,
+      consecutive_policy_failures: 1,
+      consecutive_policy_success: 0,
+      downgrades: 1,
+      promotions: 0,
+    },
+    recent: [
+      { timestamp: '2026-04-14T09:00:00.000Z', policy_applied: true, policy_fallback: true, success: false, failed: true },
+      { timestamp: '2026-04-14T09:01:00.000Z', policy_applied: true, policy_fallback: false, success: true, failed: false },
+      { timestamp: '2026-04-14T09:02:00.000Z', policy_applied: true, policy_fallback: false, success: false, failed: true },
+      { timestamp: '2026-04-14T09:03:00.000Z', policy_applied: true, policy_fallback: false, success: true, failed: false },
+      { timestamp: '2026-04-14T09:04:00.000Z', policy_applied: true, policy_fallback: false, success: false, failed: true },
+      { timestamp: '2026-04-14T09:05:00.000Z', policy_applied: true, policy_fallback: false, success: true, failed: false },
+      { timestamp: '2026-04-14T09:06:00.000Z', policy_applied: true, policy_fallback: true, success: false, failed: true },
+      { timestamp: '2026-04-14T09:07:00.000Z', policy_applied: true, policy_fallback: false, success: true, failed: false },
+    ],
+  }, null, 2)}\n`, 'utf8');
+
+  const report = await runQualityGate(
+    { mode: 'full' },
+    {
+      rootDir,
+      io: { log() {} },
+      env: {
+        AIOS_DISABLED_GATES: 'quality:build,quality:types,quality:scripts,quality:contextdb,quality:logs,quality:git',
+        AIOS_RELEASE_GATE_MIN_SAMPLES: '8',
+        AIOS_RELEASE_GATE_MAX_FAILURE_RATE: '0.6',
+        AIOS_RELEASE_GATE_MAX_FALLBACK_RATE: '0.4',
+      },
+    }
+  );
+
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.failedChecks, []);
+  assert.deepEqual(report.releaseThresholds, {
+    minSamples: 8,
+    maxFailureRate: 0.6,
+    maxFallbackRate: 0.4,
+  });
+  const releaseCheck = report.results.find((item) => item.label === 'Release');
+  assert.equal(releaseCheck?.status, 'OK');
+  assert.match(String(releaseCheck?.detail || ''), /thresholds=min=8,failure<=0.6,fallback<=0.4/);
+});
+
+test('runQualityGate fails when release threshold environment values are invalid', async () => {
+  const rootDir = await makeRootDir();
+  const report = await runQualityGate(
+    { mode: 'full' },
+    {
+      rootDir,
+      io: { log() {} },
+      env: {
+        AIOS_DISABLED_GATES: 'quality:build,quality:types,quality:scripts,quality:contextdb,quality:logs,quality:git',
+        AIOS_RELEASE_GATE_MAX_FAILURE_RATE: 'bad-value',
+      },
+    }
+  );
+
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.failedChecks, ['Release']);
+  assert.equal(report.failureCategory, 'quality-release');
+  const releaseCheck = report.results.find((item) => item.label === 'Release');
+  assert.equal(releaseCheck?.status, 'FAIL');
+  assert.match(String(releaseCheck?.detail || ''), /invalid release threshold env/i);
+});
+
 test('executeEntropyGc dry-run keeps newest artifacts and skips referenced checkpoints', async () => {
   const rootDir = await makeRootDir();
   const sessionId = 'entropy-dry-run';

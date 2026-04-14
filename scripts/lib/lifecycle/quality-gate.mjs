@@ -49,6 +49,40 @@ function isReleaseStateUnavailable(result = {}) {
   return result?.ok === false && /state file not found/i.test(String(result?.error || ''));
 }
 
+function parsePositiveIntegerEnv(rawValue, fallback, envName) {
+  const text = String(rawValue ?? '').trim();
+  if (!text) return fallback;
+  const parsed = Number.parseInt(text, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${envName} must be a positive integer`);
+  }
+  return Math.floor(parsed);
+}
+
+function parseRateEnv(rawValue, fallback, envName) {
+  const text = String(rawValue ?? '').trim();
+  if (!text) return fallback;
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`${envName} must be a number between 0 and 1`);
+  }
+  return parsed;
+}
+
+function resolveReleaseGateThresholds(env = process.env) {
+  const minSamplesRaw = env?.AIOS_RELEASE_GATE_MIN_SAMPLES ?? env?.AIOS_RELEASE_MIN_SAMPLES;
+  const maxFailureRateRaw = env?.AIOS_RELEASE_GATE_MAX_FAILURE_RATE ?? env?.AIOS_RELEASE_MAX_FAILURE_RATE;
+  const maxFallbackRateRaw = env?.AIOS_RELEASE_GATE_MAX_FALLBACK_RATE ?? env?.AIOS_RELEASE_MAX_FALLBACK_RATE;
+  const minSamples = parsePositiveIntegerEnv(minSamplesRaw, 8, 'AIOS_RELEASE_GATE_MIN_SAMPLES');
+  const maxFailureRate = parseRateEnv(maxFailureRateRaw, 0.2, 'AIOS_RELEASE_GATE_MAX_FAILURE_RATE');
+  const maxFallbackRate = parseRateEnv(maxFallbackRateRaw, 0.1, 'AIOS_RELEASE_GATE_MAX_FALLBACK_RATE');
+  return {
+    minSamples,
+    maxFailureRate,
+    maxFallbackRate,
+  };
+}
+
 function auditConsoleLogs(rootDir, { checkRunner = runCheck } = {}) {
   const args = ['-n'];
   for (const glob of LOG_AUDIT_EXCLUDE_GLOBS) {
@@ -123,6 +157,7 @@ export async function runQualityGate(
   const disabledGates = getDisabledGateIds(env);
   const mcpDir = path.join(rootDir, 'mcp-server');
   const results = [];
+  let releaseThresholds = null;
 
   io.log(`QUALITY GATE: ${options.mode.toUpperCase()}`);
   io.log('--------------------------');
@@ -189,8 +224,27 @@ export async function runQualityGate(
   }
 
   if (isHarnessGateEnabled('quality:release', { profile: options.profile, disabledGates, profiles: ['standard', 'strict'] })) {
+    try {
+      releaseThresholds = resolveReleaseGateThresholds(env);
+    } catch (error) {
+      results.push({
+        label: 'Release',
+        status: 'FAIL',
+        detail: `invalid release threshold env: ${String(error?.message || error || 'unknown error')}`,
+      });
+      releaseThresholds = null;
+    }
+    if (!releaseThresholds) {
+      // no-op; invalid env already reported as failed above
+    } else {
     const releaseResult = await runReleaseStatus(
-      { strict: true, format: 'json' },
+      {
+        strict: true,
+        format: 'json',
+        minSamples: releaseThresholds.minSamples,
+        maxFailureRate: releaseThresholds.maxFailureRate,
+        maxFallbackRate: releaseThresholds.maxFallbackRate,
+      },
       {
         rootDir,
         io: { log() {} },
@@ -200,7 +254,7 @@ export async function runQualityGate(
       results.push({
         label: 'Release',
         status: 'OK',
-        detail: `status=${releaseResult?.health?.status || 'healthy'} samples=${releaseResult?.health?.metrics?.samples ?? 0}`,
+        detail: `status=${releaseResult?.health?.status || 'healthy'} samples=${releaseResult?.health?.metrics?.samples ?? 0} thresholds=min=${releaseThresholds.minSamples},failure<=${releaseThresholds.maxFailureRate},fallback<=${releaseThresholds.maxFallbackRate}`,
       });
     } else if (isReleaseStateUnavailable(releaseResult)) {
       results.push({ label: 'Release', status: 'SKIP', detail: 'release state unavailable (state file not found)' });
@@ -211,6 +265,7 @@ export async function runQualityGate(
         status: 'FAIL',
         detail: reasons.length > 0 ? reasons.join(', ') : (releaseResult?.error || 'release strict gate failed'),
       });
+    }
     }
   } else {
     results.push({ label: 'Release', status: 'SKIP', detail: 'disabled by profile/gates' });
@@ -249,6 +304,7 @@ export async function runQualityGate(
     profile: options.profile,
     mode: options.mode,
     sessionId: options.sessionId,
+    ...(releaseThresholds ? { releaseThresholds } : {}),
   };
 
   if (options.sessionId) {

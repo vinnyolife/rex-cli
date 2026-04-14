@@ -132,6 +132,9 @@ Options:
   --profile <minimal|standard|strict>
   --global-security
   --session <id>
+  AIOS_RELEASE_GATE_MIN_SAMPLES=<n>        (env) Override release strict gate sample floor (default: 8)
+  AIOS_RELEASE_GATE_MAX_FAILURE_RATE=<0-1> (env) Override release strict gate max failure rate (default: 0.2)
+  AIOS_RELEASE_GATE_MAX_FALLBACK_RATE=<0-1> (env) Override release strict gate max fallback rate (default: 0.1)
   -h, --help
 `;
     case 'orchestrate':

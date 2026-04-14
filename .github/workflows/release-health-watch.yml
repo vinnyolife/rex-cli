@@ -32,6 +32,10 @@ jobs:
 
       - name: Run release strict health gate
         id: release_gate
+        env:
+          AIOS_RELEASE_GATE_MIN_SAMPLES: ${{ vars.AIOS_RELEASE_GATE_MIN_SAMPLES }}
+          AIOS_RELEASE_GATE_MAX_FAILURE_RATE: ${{ vars.AIOS_RELEASE_GATE_MAX_FAILURE_RATE }}
+          AIOS_RELEASE_GATE_MAX_FALLBACK_RATE: ${{ vars.AIOS_RELEASE_GATE_MAX_FALLBACK_RATE }}
         run: |
           mkdir -p test-results/release-health
           set +e
@@ -60,9 +64,14 @@ jobs:
             payload = { ok: false, exitCode: 1, error: 'release-status output missing', health: {} };
           }
           const health = payload.health || {};
+          const historySignals = payload.historySignals || {};
           const metrics = health.metrics || {};
+          const trendMetrics = historySignals.metrics || {};
           const reasons = Array.isArray(health.reasons) && health.reasons.length > 0
             ? health.reasons.join(', ')
+            : '(none)';
+          const trendAlerts = Array.isArray(historySignals.alerts) && historySignals.alerts.length > 0
+            ? historySignals.alerts.join(', ')
             : '(none)';
           const lines = [
             '# Release Health Watch',
@@ -75,6 +84,11 @@ jobs:
             `- failure_rate: ${Number.isFinite(metrics.failureRate) ? metrics.failureRate : 'n/a'}`,
             `- fallback_rate: ${Number.isFinite(metrics.fallbackRate) ? metrics.fallbackRate : 'n/a'}`,
             `- reasons: ${reasons}`,
+            `- latest_date: ${historySignals.latestDate || 'n/a'}`,
+            `- prev_week_date: ${historySignals.previousWeekDate || 'n/a'}`,
+            `- wow_failure_rate_delta: ${Number.isFinite(trendMetrics.wowFailureRateDelta) ? trendMetrics.wowFailureRateDelta : 'n/a'}`,
+            `- wow_fallback_rate_delta: ${Number.isFinite(trendMetrics.wowFallbackRateDelta) ? trendMetrics.wowFallbackRateDelta : 'n/a'}`,
+            `- trend_alerts: ${trendAlerts}`,
           ];
           fs.writeFileSync(summaryPath, `${lines.join('\n')}\n`, 'utf8');
           NODE
@@ -88,7 +102,78 @@ jobs:
           path: test-results/release-health/*
           if-no-files-found: error
 
-      - name: Alert when release health is unhealthy
+      - name: Notify Alert Webhooks
+        if: steps.release_gate.outputs.exit_code != '0'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+
+          const slackUrl = (process.env.SLACK_WEBHOOK_URL || '').trim();
+          const feishuUrl = (process.env.FEISHU_WEBHOOK_URL || '').trim();
+          const summaryPath = 'test-results/release-health/summary.md';
+          const summary = fs.existsSync(summaryPath)
+            ? fs.readFileSync(summaryPath, 'utf8').trim()
+            : 'release-health summary unavailable';
+          const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+          const text = [
+            `[AIOS] release health gate failed`,
+            `repo=${process.env.GITHUB_REPOSITORY}`,
+            `ref=${process.env.GITHUB_REF_NAME}`,
+            `run=${runUrl}`,
+            '',
+            summary,
+          ].join('\n');
+
+          async function post(url, body, headers = {}) {
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                ...headers,
+              },
+              body: JSON.stringify(body),
+            });
+            if (!response.ok) {
+              const bodyText = await response.text().catch(() => '');
+              throw new Error(`http_${response.status}: ${bodyText.slice(0, 500)}`);
+            }
+          }
+
+          (async () => {
+            let sent = 0;
+            if (slackUrl) {
+              try {
+                await post(slackUrl, { text });
+                sent += 1;
+                console.log('sent slack webhook alert');
+              } catch (error) {
+                console.warn(`::warning title=Slack webhook failed::${String(error?.message || error)}`);
+              }
+            }
+            if (feishuUrl) {
+              try {
+                await post(feishuUrl, {
+                  msg_type: 'text',
+                  content: { text },
+                });
+                sent += 1;
+                console.log('sent feishu webhook alert');
+              } catch (error) {
+                console.warn(`::warning title=Feishu webhook failed::${String(error?.message || error)}`);
+              }
+            }
+            if (sent === 0) {
+              console.warn('::warning title=No alert webhooks configured::Set SLACK_WEBHOOK_URL and/or FEISHU_WEBHOOK_URL in repository secrets.');
+            }
+          })().catch((error) => {
+            console.warn(`::warning title=Alert dispatch script failed::${String(error?.message || error)}`);
+          });
+          NODE
+
+      - name: Fail when release health is unhealthy
         if: steps.release_gate.outputs.exit_code != '0'
         run: |
           echo "::error title=Release Health Gate Failed::release-status --strict reported an unhealthy release gate. See release-health-watch artifacts."
