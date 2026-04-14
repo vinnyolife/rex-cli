@@ -13,6 +13,10 @@ import {
 
 const HISTORY_TREND_FAILURE_DELTA_WARN = 0.05;
 const HISTORY_TREND_FALLBACK_DELTA_WARN = 0.03;
+const HISTORY_TREND_FAILURE_DELTA_WARN_ENV = 'AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN';
+const HISTORY_TREND_FALLBACK_DELTA_WARN_ENV = 'AIOS_RELEASE_TREND_WOW_FALLBACK_DELTA_WARN';
+const HISTORY_TREND_FAILURE_DELTA_WARN_ENV_ALIAS = 'AIOS_RELEASE_WOW_FAILURE_RATE_DELTA_WARN';
+const HISTORY_TREND_FALLBACK_DELTA_WARN_ENV_ALIAS = 'AIOS_RELEASE_WOW_FALLBACK_RATE_DELTA_WARN';
 
 function normalizeText(value = '') {
   return String(value ?? '').trim();
@@ -35,6 +39,16 @@ function parseRate(value, fallback, flagName) {
   const parsed = Number.parseFloat(text);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
     throw new Error(`${flagName} must be a number between 0 and 1`);
+  }
+  return parsed;
+}
+
+function parseRateEnv(rawValue, fallback, envName) {
+  const text = String(rawValue ?? '').trim();
+  if (!text) return fallback;
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`${envName} must be a number between 0 and 1`);
   }
   return parsed;
 }
@@ -399,7 +413,7 @@ function renderReleaseStatusText(report = {}) {
   return lines.join('\n');
 }
 
-export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = process.cwd() } = {}) {
+export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = process.cwd(), env = process.env } = {}) {
   const defaults = createDefaultReleaseStatusOptions();
   const defaultConfig = normalizePolicyReleaseConfig({ rootDir });
   const statePath = normalizeStatePath(
@@ -413,6 +427,20 @@ export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = proce
   const minSamples = parsePositiveInteger(rawOptions.minSamples, defaults.minSamples, '--min-samples');
   const maxFailureRate = parseRate(rawOptions.maxFailureRate, defaults.maxFailureRate, '--max-failure-rate');
   const maxFallbackRate = parseRate(rawOptions.maxFallbackRate, defaults.maxFallbackRate, '--max-fallback-rate');
+  const wowFailureRateDeltaWarn = rawOptions.wowFailureRateDeltaWarn === undefined
+    ? parseRateEnv(
+      env?.[HISTORY_TREND_FAILURE_DELTA_WARN_ENV] ?? env?.[HISTORY_TREND_FAILURE_DELTA_WARN_ENV_ALIAS],
+      defaults.wowFailureRateDeltaWarn,
+      HISTORY_TREND_FAILURE_DELTA_WARN_ENV
+    )
+    : parseRate(rawOptions.wowFailureRateDeltaWarn, defaults.wowFailureRateDeltaWarn, '--wow-failure-rate-delta-warn');
+  const wowFallbackRateDeltaWarn = rawOptions.wowFallbackRateDeltaWarn === undefined
+    ? parseRateEnv(
+      env?.[HISTORY_TREND_FALLBACK_DELTA_WARN_ENV] ?? env?.[HISTORY_TREND_FALLBACK_DELTA_WARN_ENV_ALIAS],
+      defaults.wowFallbackRateDeltaWarn,
+      HISTORY_TREND_FALLBACK_DELTA_WARN_ENV
+    )
+    : parseRate(rawOptions.wowFallbackRateDeltaWarn, defaults.wowFallbackRateDeltaWarn, '--wow-fallback-rate-delta-warn');
   const outputPath = normalizeOutputPath(rawOptions.outputPath ?? defaults.outputPath, rootDir);
   const historyOutputPath = normalizeOutputPath(rawOptions.historyOutputPath ?? defaults.historyOutputPath, rootDir);
   const historyFormat = normalizeReleaseStatusHistoryFormat(rawOptions.historyFormat ?? defaults.historyFormat);
@@ -426,6 +454,8 @@ export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = proce
     minSamples,
     maxFailureRate,
     maxFallbackRate,
+    wowFailureRateDeltaWarn,
+    wowFallbackRateDeltaWarn,
     outputPath,
     historyOutputPath,
     historyFormat,
@@ -433,8 +463,8 @@ export function normalizeReleaseStatusOptions(rawOptions = {}, { rootDir = proce
   };
 }
 
-export function planReleaseStatus(rawOptions = {}, { rootDir = process.cwd() } = {}) {
-  const options = normalizeReleaseStatusOptions(rawOptions, { rootDir });
+export function planReleaseStatus(rawOptions = {}, { rootDir = process.cwd(), env = process.env } = {}) {
+  const options = normalizeReleaseStatusOptions(rawOptions, { rootDir, env });
   const defaultConfig = normalizePolicyReleaseConfig({ rootDir });
   const args = ['release-status'];
   if (path.resolve(options.statePath) !== path.resolve(defaultConfig.state_path)) {
@@ -478,8 +508,8 @@ export function planReleaseStatus(rawOptions = {}, { rootDir = process.cwd() } =
   };
 }
 
-export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console } = {}) {
-  const { options } = planReleaseStatus(rawOptions, { rootDir });
+export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console, env = process.env } = {}) {
+  const { options } = planReleaseStatus(rawOptions, { rootDir, env });
   const statePath = toPosixPath(path.relative(rootDir, options.statePath) || options.statePath);
   const outputPath = options.outputPath
     ? toPosixPath(path.relative(rootDir, options.outputPath) || options.outputPath)
@@ -539,6 +569,8 @@ export async function runReleaseStatus(rawOptions = {}, { rootDir, io = console 
     historyDaily,
     maxFailureRate: options.maxFailureRate,
     maxFallbackRate: options.maxFallbackRate,
+    failureDeltaWarn: options.wowFailureRateDeltaWarn,
+    fallbackDeltaWarn: options.wowFallbackRateDeltaWarn,
   });
   const health = buildHealthSummary({
     recentWindow,

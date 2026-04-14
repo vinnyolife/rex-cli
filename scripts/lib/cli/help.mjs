@@ -285,6 +285,8 @@ Options:
   --history-output <path>        Write daily trend history export file
   --history-format <csv|ndjson>  History export format (default: csv)
   --history-days <n>             Number of recent days included in history export (default: 14)
+  AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN=<0-1>   (env) WoW failure-rate delta warning threshold (default: 0.05)
+  AIOS_RELEASE_TREND_WOW_FALLBACK_DELTA_WARN=<0-1>  (env) WoW fallback-rate delta warning threshold (default: 0.03)
   --format <text|json>
   -h, --help
 `;

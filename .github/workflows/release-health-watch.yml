@@ -16,6 +16,9 @@ jobs:
   release-health:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      RELEASE_ALERT_STATE_PATH: .aios/release-health-alert-state.json
+      RELEASE_ALERT_STATE_CACHE_KEY: release-health-alert-state-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,12 +33,23 @@ jobs:
       - name: Install repo deps
         run: npm ci
 
+      - name: Restore release alert state
+        id: restore_alert_state
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.RELEASE_ALERT_STATE_PATH }}
+          key: ${{ env.RELEASE_ALERT_STATE_CACHE_KEY }}
+          restore-keys: |
+            release-health-alert-state-${{ github.repository }}-${{ github.ref_name }}-
+
       - name: Run release strict health gate
         id: release_gate
         env:
           AIOS_RELEASE_GATE_MIN_SAMPLES: ${{ vars.AIOS_RELEASE_GATE_MIN_SAMPLES }}
           AIOS_RELEASE_GATE_MAX_FAILURE_RATE: ${{ vars.AIOS_RELEASE_GATE_MAX_FAILURE_RATE }}
           AIOS_RELEASE_GATE_MAX_FALLBACK_RATE: ${{ vars.AIOS_RELEASE_GATE_MAX_FALLBACK_RATE }}
+          AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN: ${{ vars.AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN }}
+          AIOS_RELEASE_TREND_WOW_FALLBACK_DELTA_WARN: ${{ vars.AIOS_RELEASE_TREND_WOW_FALLBACK_DELTA_WARN }}
         run: |
           mkdir -p test-results/release-health
           set +e
@@ -94,77 +108,358 @@ jobs:
           NODE
           cat test-results/release-health/summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Compute alert decision and update state
+        id: alert_decision
+        if: always()
+        env:
+          RELEASE_GATE_EXIT_CODE: ${{ steps.release_gate.outputs.exit_code }}
+          AIOS_RELEASE_ALERT_REMINDER_EVERY: ${{ vars.AIOS_RELEASE_ALERT_REMINDER_EVERY }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const statusPath = 'test-results/release-health/release-status.json';
+          const summaryPath = 'test-results/release-health/summary.md';
+          const decisionPath = 'test-results/release-health/alert-decision.json';
+          const statePath = process.env.RELEASE_ALERT_STATE_PATH || '.aios/release-health-alert-state.json';
+          const outputPath = process.env.GITHUB_OUTPUT;
+          const nowIso = new Date().toISOString();
+          const gateExitCode = Number.parseInt(process.env.RELEASE_GATE_EXIT_CODE || '1', 10);
+
+          const parsePositiveInt = (raw, fallback) => {
+            const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+            if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+            return parsed;
+          };
+
+          const reminderEvery = parsePositiveInt(process.env.AIOS_RELEASE_ALERT_REMINDER_EVERY, 6);
+
+          let payload = { ok: false, exitCode: 1, error: 'release-status output missing', health: {}, historySignals: {} };
+          try {
+            payload = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+          } catch {
+            // keep fallback payload
+          }
+
+          let previousState = {
+            schemaVersion: 1,
+            status: 'unknown',
+            failureStreak: 0,
+            lastFailureFingerprint: '',
+            lastAlertType: 'none',
+            lastNotifiedAt: null,
+            lastFailureAt: null,
+            lastRecoveryAt: null,
+            updatedAt: null,
+          };
+
+          try {
+            if (fs.existsSync(statePath)) {
+              const parsed = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+              if (parsed && typeof parsed === 'object') {
+                previousState = { ...previousState, ...parsed };
+              }
+            }
+          } catch (error) {
+            console.warn(`::warning title=Alert state parse failed::${String(error?.message || error)}`);
+          }
+
+          const health = payload.health || {};
+          const historySignals = payload.historySignals || {};
+          const healthMetrics = health.metrics || {};
+          const trendMetrics = historySignals.metrics || {};
+
+          const unhealthy = gateExitCode !== 0;
+          const failureFingerprint = unhealthy
+            ? JSON.stringify({
+              status: health.status || 'unknown',
+              reasons: Array.isArray(health.reasons) ? health.reasons : [],
+              latestDate: historySignals.latestDate || null,
+              trendAlerts: Array.isArray(historySignals.alerts) ? historySignals.alerts : [],
+              samples: Number.isFinite(healthMetrics.samples) ? healthMetrics.samples : null,
+              failureRate: Number.isFinite(healthMetrics.failureRate) ? Number(healthMetrics.failureRate.toFixed(4)) : null,
+              fallbackRate: Number.isFinite(healthMetrics.fallbackRate) ? Number(healthMetrics.fallbackRate.toFixed(4)) : null,
+              wowFailureRateDelta: Number.isFinite(trendMetrics.wowFailureRateDelta) ? Number(trendMetrics.wowFailureRateDelta.toFixed(4)) : null,
+              wowFallbackRateDelta: Number.isFinite(trendMetrics.wowFallbackRateDelta) ? Number(trendMetrics.wowFallbackRateDelta.toFixed(4)) : null,
+            })
+            : '';
+
+          const previousStatus = String(previousState.status || 'unknown');
+          const previousStreak = Number.isFinite(previousState.failureStreak) ? Number(previousState.failureStreak) : 0;
+          const failureStreak = unhealthy
+            ? (previousStatus === 'failed' ? previousStreak + 1 : 1)
+            : 0;
+
+          let notifyRequired = false;
+          let alertType = 'none';
+          let notifyReason = 'healthy_noop';
+
+          if (unhealthy) {
+            if (previousStatus !== 'failed') {
+              notifyRequired = true;
+              alertType = 'failure_open';
+              notifyReason = 'state_transition_healthy_to_failed';
+            } else if (String(previousState.lastFailureFingerprint || '') !== failureFingerprint) {
+              notifyRequired = true;
+              alertType = 'failure_update';
+              notifyReason = 'failure_fingerprint_changed';
+            } else if (failureStreak % reminderEvery === 0) {
+              notifyRequired = true;
+              alertType = 'failure_reminder';
+              notifyReason = `failure_streak_${failureStreak}`;
+            } else {
+              notifyRequired = false;
+              alertType = 'none';
+              notifyReason = 'deduplicated_repeat_failure';
+            }
+          } else if (previousStatus === 'failed') {
+            notifyRequired = true;
+            alertType = 'recovery';
+            notifyReason = 'state_transition_failed_to_healthy';
+          }
+
+          const nextState = {
+            ...previousState,
+            schemaVersion: 1,
+            status: unhealthy ? 'failed' : 'healthy',
+            failureStreak,
+            lastFailureFingerprint: unhealthy ? failureFingerprint : '',
+            lastAlertType: alertType,
+            updatedAt: nowIso,
+            lastFailureAt: unhealthy ? nowIso : previousState.lastFailureAt,
+            lastRecoveryAt: !unhealthy ? nowIso : previousState.lastRecoveryAt,
+            ...(notifyRequired ? { lastNotifiedAt: nowIso } : {}),
+          };
+
+          fs.mkdirSync(path.dirname(statePath), { recursive: true });
+          fs.writeFileSync(statePath, `${JSON.stringify(nextState, null, 2)}\n`, 'utf8');
+
+          const decision = {
+            notifyRequired,
+            alertType,
+            notifyReason,
+            unhealthy,
+            failureStreak,
+            reminderEvery,
+            previousStatus,
+            statePath,
+            nextState,
+          };
+
+          fs.mkdirSync(path.dirname(decisionPath), { recursive: true });
+          fs.writeFileSync(decisionPath, `${JSON.stringify(decision, null, 2)}\n`, 'utf8');
+
+          const summaryLine = `- alert_decision: notify_required=${notifyRequired ? 'true' : 'false'} type=${alertType} reason=${notifyReason} failure_streak=${failureStreak} reminder_every=${reminderEvery}`;
+          if (fs.existsSync(summaryPath)) {
+            fs.appendFileSync(summaryPath, `${summaryLine}\n`, 'utf8');
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summaryLine}\n`, 'utf8');
+
+          if (outputPath) {
+            const lines = [
+              `notify_required=${notifyRequired ? 'true' : 'false'}`,
+              `alert_type=${alertType}`,
+              `notify_reason=${notifyReason}`,
+              `failure_streak=${failureStreak}`,
+            ];
+            fs.appendFileSync(outputPath, `${lines.join('\n')}\n`, 'utf8');
+          }
+          NODE
+
       - name: Upload release health artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-health-watch
-          path: test-results/release-health/*
+          path: |
+            test-results/release-health/*
+            ${{ env.RELEASE_ALERT_STATE_PATH }}
           if-no-files-found: error
 
-      - name: Notify Alert Webhooks
-        if: steps.release_gate.outputs.exit_code != '0'
+      - name: Notify alert webhooks
+        if: steps.alert_decision.outputs.notify_required == 'true'
         env:
+          ALERT_TYPE: ${{ steps.alert_decision.outputs.alert_type }}
+          ALERT_NOTIFY_REASON: ${{ steps.alert_decision.outputs.notify_reason }}
+          ALERT_FAILURE_STREAK: ${{ steps.alert_decision.outputs.failure_streak }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          ALERT_WEBHOOK_HMAC_SECRET: ${{ secrets.ALERT_WEBHOOK_HMAC_SECRET }}
+          SLACK_WEBHOOK_HMAC_SECRET: ${{ secrets.SLACK_WEBHOOK_HMAC_SECRET }}
+          FEISHU_WEBHOOK_HMAC_SECRET: ${{ secrets.FEISHU_WEBHOOK_HMAC_SECRET }}
+          FEISHU_WEBHOOK_SIGN_SECRET: ${{ secrets.FEISHU_WEBHOOK_SIGN_SECRET }}
+          AIOS_RELEASE_ALERT_MAX_ATTEMPTS: ${{ vars.AIOS_RELEASE_ALERT_MAX_ATTEMPTS }}
+          AIOS_RELEASE_ALERT_BASE_DELAY_MS: ${{ vars.AIOS_RELEASE_ALERT_BASE_DELAY_MS }}
+          AIOS_RELEASE_ALERT_TIMEOUT_MS: ${{ vars.AIOS_RELEASE_ALERT_TIMEOUT_MS }}
         run: |
           node - <<'NODE'
+          const crypto = require('node:crypto');
           const fs = require('node:fs');
 
-          const slackUrl = (process.env.SLACK_WEBHOOK_URL || '').trim();
-          const feishuUrl = (process.env.FEISHU_WEBHOOK_URL || '').trim();
+          const statusPath = 'test-results/release-health/release-status.json';
           const summaryPath = 'test-results/release-health/summary.md';
+
+          const slackUrl = String(process.env.SLACK_WEBHOOK_URL || '').trim();
+          const feishuUrl = String(process.env.FEISHU_WEBHOOK_URL || '').trim();
+          const alertType = String(process.env.ALERT_TYPE || '').trim() || 'failure_open';
+          const notifyReason = String(process.env.ALERT_NOTIFY_REASON || '').trim() || 'unknown';
+          const failureStreak = Number.parseInt(String(process.env.ALERT_FAILURE_STREAK || '0'), 10) || 0;
+          const sharedHmacSecret = String(process.env.ALERT_WEBHOOK_HMAC_SECRET || '').trim();
+          const slackHmacSecret = String(process.env.SLACK_WEBHOOK_HMAC_SECRET || '').trim() || sharedHmacSecret;
+          const feishuHmacSecret = String(process.env.FEISHU_WEBHOOK_HMAC_SECRET || '').trim() || sharedHmacSecret;
+          const feishuBotSignSecret = String(process.env.FEISHU_WEBHOOK_SIGN_SECRET || '').trim();
+
+          const parsePositiveInt = (raw, fallback) => {
+            const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+            if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+            return parsed;
+          };
+
+          const maxAttempts = parsePositiveInt(process.env.AIOS_RELEASE_ALERT_MAX_ATTEMPTS, 3);
+          const baseDelayMs = parsePositiveInt(process.env.AIOS_RELEASE_ALERT_BASE_DELAY_MS, 1000);
+          const timeoutMs = parsePositiveInt(process.env.AIOS_RELEASE_ALERT_TIMEOUT_MS, 10000);
+
+          const payload = (() => {
+            try {
+              return JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+            } catch {
+              return { ok: false, exitCode: 1, error: 'release-status output missing', health: {} };
+            }
+          })();
+
           const summary = fs.existsSync(summaryPath)
             ? fs.readFileSync(summaryPath, 'utf8').trim()
             : 'release-health summary unavailable';
+
           const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+          const health = payload.health || {};
+          const title = alertType === 'recovery'
+            ? '[AIOS] release health recovered'
+            : '[AIOS] release health gate unhealthy';
           const text = [
-            `[AIOS] release health gate failed`,
+            title,
             `repo=${process.env.GITHUB_REPOSITORY}`,
             `ref=${process.env.GITHUB_REF_NAME}`,
             `run=${runUrl}`,
+            `alert_type=${alertType}`,
+            `notify_reason=${notifyReason}`,
+            `failure_streak=${failureStreak}`,
+            `health_status=${health.status || 'unknown'}`,
             '',
             summary,
           ].join('\n');
 
-          async function post(url, body, headers = {}) {
-            const response = await fetch(url, {
-              method: 'POST',
-              headers: {
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const shouldRetryStatus = (status) => status === 408 || status === 429 || status >= 500;
+
+          function buildHmacHeaders(secret, bodyText) {
+            if (!secret) return {};
+            const timestamp = String(Math.floor(Date.now() / 1000));
+            const signature = crypto
+              .createHmac('sha256', secret)
+              .update(`${timestamp}.${bodyText}`)
+              .digest('hex');
+            return {
+              'x-aios-signature': `sha256=${signature}`,
+              'x-aios-signature-timestamp': timestamp,
+            };
+          }
+
+          function withFeishuBotSign(messagePayload, signSecret) {
+            if (!signSecret) return messagePayload;
+            const timestamp = String(Math.floor(Date.now() / 1000));
+            const stringToSign = `${timestamp}\n${signSecret}`;
+            const sign = crypto
+              .createHmac('sha256', signSecret)
+              .update(stringToSign)
+              .digest('base64');
+            return {
+              ...messagePayload,
+              timestamp,
+              sign,
+            };
+          }
+
+          async function postWithRetry(url, body, { channel, hmacSecret = '' } = {}) {
+            let attempt = 0;
+            let lastError = null;
+
+            while (attempt < maxAttempts) {
+              attempt += 1;
+              const bodyText = JSON.stringify(body);
+              const headers = {
                 'content-type': 'application/json',
-                ...headers,
-              },
-              body: JSON.stringify(body),
-            });
-            if (!response.ok) {
-              const bodyText = await response.text().catch(() => '');
-              throw new Error(`http_${response.status}: ${bodyText.slice(0, 500)}`);
+                ...buildHmacHeaders(hmacSecret, bodyText),
+              };
+
+              try {
+                const response = await fetch(url, {
+                  method: 'POST',
+                  headers,
+                  body: bodyText,
+                  signal: AbortSignal.timeout(timeoutMs),
+                });
+
+                if (response.ok) {
+                  return { attempt };
+                }
+
+                const bodyPreview = await response.text().catch(() => '');
+                const error = new Error(`http_${response.status}: ${bodyPreview.slice(0, 500)}`);
+                if (!shouldRetryStatus(response.status) || attempt >= maxAttempts) {
+                  throw error;
+                }
+                lastError = error;
+              } catch (error) {
+                lastError = error;
+                if (attempt >= maxAttempts) {
+                  throw error;
+                }
+              }
+
+              const jitter = Math.floor(Math.random() * 250);
+              const delayMs = Math.min(baseDelayMs * (2 ** (attempt - 1)) + jitter, 30000);
+              console.warn(`[warn] ${channel} webhook attempt ${attempt}/${maxAttempts} failed; retrying in ${delayMs}ms`);
+              await sleep(delayMs);
             }
+
+            throw lastError || new Error(`${channel} webhook failed`);
           }
 
           (async () => {
             let sent = 0;
+
             if (slackUrl) {
               try {
-                await post(slackUrl, { text });
+                const result = await postWithRetry(slackUrl, { text }, {
+                  channel: 'slack',
+                  hmacSecret: slackHmacSecret,
+                });
                 sent += 1;
-                console.log('sent slack webhook alert');
+                console.log(`sent slack webhook alert (attempt=${result.attempt})`);
               } catch (error) {
                 console.warn(`::warning title=Slack webhook failed::${String(error?.message || error)}`);
               }
             }
+
             if (feishuUrl) {
               try {
-                await post(feishuUrl, {
+                const feishuBody = withFeishuBotSign({
                   msg_type: 'text',
                   content: { text },
+                }, feishuBotSignSecret);
+                const result = await postWithRetry(feishuUrl, feishuBody, {
+                  channel: 'feishu',
+                  hmacSecret: feishuHmacSecret,
                 });
                 sent += 1;
-                console.log('sent feishu webhook alert');
+                console.log(`sent feishu webhook alert (attempt=${result.attempt})`);
               } catch (error) {
                 console.warn(`::warning title=Feishu webhook failed::${String(error?.message || error)}`);
               }
             }
+
             if (sent === 0) {
               console.warn('::warning title=No alert webhooks configured::Set SLACK_WEBHOOK_URL and/or FEISHU_WEBHOOK_URL in repository secrets.');
             }
@@ -172,6 +467,13 @@ jobs:
             console.warn(`::warning title=Alert dispatch script failed::${String(error?.message || error)}`);
           });
           NODE
+
+      - name: Save release alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.RELEASE_ALERT_STATE_PATH }}
+          key: ${{ env.RELEASE_ALERT_STATE_CACHE_KEY }}
 
       - name: Fail when release health is unhealthy
         if: steps.release_gate.outputs.exit_code != '0'

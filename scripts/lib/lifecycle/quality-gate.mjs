@@ -248,6 +248,7 @@ export async function runQualityGate(
       {
         rootDir,
         io: { log() {} },
+        env,
       }
     );
     if (releaseResult.exitCode === 0) {

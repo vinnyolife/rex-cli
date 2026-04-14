@@ -295,6 +295,8 @@ export function createDefaultReleaseStatusOptions() {
     minSamples: 8,
     maxFailureRate: 0.2,
     maxFallbackRate: 0.1,
+    wowFailureRateDeltaWarn: 0.05,
+    wowFallbackRateDeltaWarn: 0.03,
     outputPath: '',
     historyOutputPath: '',
     historyFormat: 'csv',

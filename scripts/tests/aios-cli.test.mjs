@@ -1209,3 +1209,91 @@ test('runReleaseStatus computes week-over-week deltas and trend alert fields', a
     await fs.rm(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test('runReleaseStatus applies WoW trend alert thresholds from environment overrides', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-release-status-wow-env-'));
+  const statePath = path.join(
+    workspaceRoot,
+    'experiments',
+    'rl-mixed-v1',
+    'release',
+    'orchestrator-policy-release.state.json'
+  );
+  try {
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, `${JSON.stringify({
+      schema_version: 1,
+      updated_at: '2026-04-13T16:00:00.000Z',
+      effective_mode: 'canary',
+      effective_rollout_rate: 0.5,
+      counters: {
+        total: 16,
+        policy_applied: 16,
+        baseline_routed: 0,
+        policy_fallback: 2,
+        policy_success: 10,
+        policy_failure: 6,
+        consecutive_policy_failures: 1,
+        consecutive_policy_success: 0,
+        downgrades: 1,
+        promotions: 1,
+      },
+      recent: [
+        { timestamp: '2026-04-06T10:00:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+        { timestamp: '2026-04-06T10:01:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+        { timestamp: '2026-04-06T10:02:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+        { timestamp: '2026-04-06T10:03:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: false, failed: true },
+        { timestamp: '2026-04-13T10:00:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: true, success: false, failed: true },
+        { timestamp: '2026-04-13T10:01:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: true, success: false, failed: true },
+        { timestamp: '2026-04-13T10:02:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: false, failed: true },
+        { timestamp: '2026-04-13T10:03:00.000Z', policy_applied: true, policy_requested: true, policy_fallback: false, success: true, failed: false },
+      ],
+    }, null, 2)}\n`, 'utf8');
+
+    const result = await runReleaseStatus(
+      {
+        format: 'json',
+        historyDays: 14,
+        maxFailureRate: 1,
+        maxFallbackRate: 1,
+      },
+      {
+        rootDir: workspaceRoot,
+        io: { log() {} },
+        env: {
+          AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN: '0.6',
+          AIOS_RELEASE_TREND_WOW_FALLBACK_DELTA_WARN: '0.6',
+        },
+      }
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.historySignals.hasAlert, false);
+    assert.deepEqual(result.historySignals.alerts, []);
+    assert.equal(Number(result.historySignals.thresholds.wowFailureRateDeltaWarn.toFixed(4)), 0.6);
+    assert.equal(Number(result.historySignals.thresholds.wowFallbackRateDeltaWarn.toFixed(4)), 0.6);
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('runReleaseStatus fails when WoW trend threshold env values are invalid', async () => {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aios-release-status-wow-env-invalid-'));
+  try {
+    await assert.rejects(
+      () => runReleaseStatus(
+        { format: 'json' },
+        {
+          rootDir: workspaceRoot,
+          io: { log() {} },
+          env: {
+            AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN: 'bad-value',
+          },
+        }
+      ),
+      /AIOS_RELEASE_TREND_WOW_FAILURE_DELTA_WARN must be a number between 0 and 1/
+    );
+  } finally {
+    await fs.rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
