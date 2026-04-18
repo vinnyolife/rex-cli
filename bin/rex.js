@@ -70,8 +70,7 @@ program.on('command:*', ([cmd]) => {
 program.parse(process.argv);
 
 // Show help if no args provided
-// also show a little greeting so it doesn't feel so bare
 if (!process.argv.slice(2).length) {
-  console.log(`rex v${pkg.version} - happy hacking!\n`);
+  // skip the greeting, just show help directly
   program.outputHelp();
 }
