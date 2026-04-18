@@ -59,6 +59,12 @@ program
     info();
   });
 
+// Show help if no args provided (do this before parse so it exits cleanly)
+if (!process.argv.slice(2).length) {
+  program.outputHelp();
+  process.exit(0);
+}
+
 // Handle unknown commands - show a more helpful message
 program.on('command:*', ([cmd]) => {
   console.error(`Unknown command: ${cmd}`);
@@ -68,9 +74,3 @@ program.on('command:*', ([cmd]) => {
 });
 
 program.parse(process.argv);
-
-// Show help if no args provided
-if (!process.argv.slice(2).length) {
-  // skip the greeting, just show help directly
-  program.outputHelp();
-}
