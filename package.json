@@ -10,6 +10,7 @@
     "start": "node bin/rex.js",
     "dev": "node --watch bin/rex.js",
     "test": "jest --verbose",
+    "test:watch": "jest --verbose --watch",
     "lint": "eslint src/**/*.js"
   },
   "keywords": [
