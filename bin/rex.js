@@ -59,10 +59,11 @@ program
     info();
   });
 
-// Handle unknown commands
+// Handle unknown commands - show a more helpful message
 program.on('command:*', ([cmd]) => {
   console.error(`Unknown command: ${cmd}`);
   console.log('Run rex --help for a list of available commands.');
+  console.log(`Did you mean one of: create, add, list, info?`);
   process.exit(1);
 });
 
