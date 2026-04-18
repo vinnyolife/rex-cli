@@ -1,39 +1,37 @@
 {
-  "name": "aios-scripts",
-  "private": true,
-  "type": "module",
-  "engines": {
-    "node": ">=22 <23"
-  },
-  "dependencies": {
-    "@inkjs/ui": "^1.0.0",
-    "ink": "^4.4.1",
-    "react": "^18.3.1",
-    "react-router": "^7.1.1"
+  "name": "rex-cli",
+  "version": "1.0.0",
+  "description": "A CLI tool for scaffolding and managing projects",
+  "main": "src/index.js",
+  "bin": {
+    "rex": "./bin/rex.js"
   },
   "scripts": {
-    "aios": "node scripts/aios.mjs",
-    "check:site-sync": "node scripts/check-site-sync.mjs",
-    "perf:orchestrate-learn-eval:smoke": "node scripts/perf-orchestrate-learn-eval-smoke.mjs",
-    "perf:team-status-watch:smoke": "node scripts/perf-team-status-watch-smoke.mjs",
-    "test:scripts": "node --test scripts/tests/aios-cli.test.mjs scripts/tests/hud-state.test.mjs scripts/tests/ctx-agent-core.test.mjs scripts/tests/aios-components.test.mjs scripts/tests/aios-doctor.test.mjs scripts/tests/aios-harness.test.mjs scripts/tests/aios-orchestrator.test.mjs scripts/tests/aios-orchestrator-agents.test.mjs scripts/tests/aios-learn-eval.test.mjs scripts/tests/aios-lifecycle-plan.test.mjs scripts/tests/aios-wrappers.test.mjs scripts/tests/atomic-write.test.mjs scripts/tests/repo-lock.test.mjs scripts/tests/native-source-tree.test.mjs scripts/tests/native-sync.test.mjs scripts/tests/native-doctor.test.mjs scripts/tests/native-repairs.test.mjs scripts/tests/release-pipeline.test.mjs",
-    "test:rl-core": "node --test scripts/tests/rl-core-*.test.mjs",
-    "test:rl-browser-v1": "node --test scripts/tests/rl-browser-v1-*.test.mjs",
-    "test:rl-orchestrator-v1": "node --test scripts/tests/rl-orchestrator-v1-*.test.mjs",
-    "test:rl-mixed-v1": "node --test scripts/tests/rl-mixed-v1-*.test.mjs",
-    "test:rl-shell-v1": "node --test scripts/tests/rl-shell-v1-*.test.mjs",
-    "rl-shell-v1:benchmark": "node scripts/generate-rl-shell-v1-benchmark.mjs --config experiments/rl-shell-v1/configs/benchmark-v1.json --seed 17",
-    "rl-shell-v1:train:2a": "node scripts/rl-shell-v1.mjs train --phase 2A --config experiments/rl-shell-v1/configs/benchmark-v1.json --seed 17 --teacher codex-cli",
-    "rl-shell-v1:eval:2b": "node scripts/rl-shell-v1.mjs eval --phase 2B --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli",
-    "rl-shell-v1:campaign": "node scripts/rl-shell-v1.mjs campaign --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli",
-    "rl-shell-v1:campaign:2c": "node scripts/rl-shell-v1.mjs campaign --phase 2C --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli",
-    "rl-shell-v1:phase3:smoke": "node scripts/rl-shell-v1.mjs phase3-train --config experiments/rl-shell-v1/configs/benchmark-v1.json --teacher codex-cli --max-tasks 5 --initial-checkpoint ckpt-a",
-    "rl-mixed-v1:browser": "node scripts/rl-mixed-v1.mjs browser-only --dry-run",
-    "rl-mixed-v1:orchestrator": "node scripts/rl-mixed-v1.mjs orchestrator-only --dry-run",
-    "rl-mixed-v1:mixed": "node scripts/rl-mixed-v1.mjs mixed --dry-run",
-    "rl-mixed-v1:eval": "node scripts/rl-mixed-v1.mjs mixed-eval --window 30 --json-output experiments/rl-mixed-v1/validation/latest.json"
+    "start": "node bin/rex.js",
+    "dev": "node --watch bin/rex.js",
+    "test": "jest",
+    "lint": "eslint src/**/*.js"
+  },
+  "keywords": [
+    "cli",
+    "scaffold",
+    "generator",
+    "rex"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "enquirer": "^2.4.1",
+    "fs-extra": "^11.2.0",
+    "ora": "^7.0.1"
   },
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
