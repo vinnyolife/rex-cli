@@ -26,6 +26,7 @@ description: AI 記憶システム、Hermes ワークフロー、Agent Team、su
 
 ## 最新記事
 
+- [Browser MCP 弱モデル改善: Semantic Snapshot + Text Click](2026-04-browser-mcp-weak-model-upgrade.md)
 - [高度デザインスキルでページ制作: 曖昧プロンプトを本番 UI に変える](advanced-design-skills-page-building.md)
 - [RexCLI TUI リファクタリング：React Ink によるモダンなターミナルUI](2026-04-rexcli-ink-tui-refactor.md)
 - [AIOS RL Training System: Multi-Environment Reinforcement Learning](rl-training-system.md)

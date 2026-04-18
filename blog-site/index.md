@@ -26,6 +26,7 @@ This blog tracks practical patterns for:
 
 ## Latest Posts
 
+- [Browser MCP Weak-Model Upgrade: Semantic Snapshot + Text Click](2026-04-browser-mcp-weak-model-upgrade.md)
 - [Advanced Design Skills for Page Building: From Vague Prompts to Production UI](advanced-design-skills-page-building.md)
 - [RexCLI TUI Refactor: Modern Terminal UI with React Ink](2026-04-rexcli-ink-tui-refactor.md)
 - [AIOS RL Training System: Multi-Environment Reinforcement Learning](rl-training-system.md)

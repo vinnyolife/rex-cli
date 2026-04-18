@@ -26,6 +26,7 @@ description: AI 기억 시스템, Hermes 워크플로, Agent Team, 자동 subage
 
 ## 최신 글
 
+- [Browser MCP 약한 모델 개선: Semantic Snapshot + Text Click](2026-04-browser-mcp-weak-model-upgrade.md)
 - [고급 디자인 스킬 페이지 제작: 모호한 프롬프트를 실전 UI로](advanced-design-skills-page-building.md)
 - [RexCLI TUI 리팩토링: React Ink 기반의 현대적 터미널 UI](2026-04-rexcli-ink-tui-refactor.md)
 - [AIOS RL Training System: Multi-Environment Reinforcement Learning](rl-training-system.md)

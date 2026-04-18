@@ -26,6 +26,7 @@ description: 聚焦 AI 记忆系统、Hermes 引擎工作流、Agent Team 与自
 
 ## 最新文章
 
+- [Browser MCP 弱模型升级：语义快照 + 文本点击](2026-04-browser-mcp-weak-model-upgrade.md)
 - [高级设计技能页面制作：把模糊提示词变成可生产 UI](advanced-design-skills-page-building.md)
 - [RexCli TUI 重构：基于 React Ink 的现代终端交互](zh/2026-04-rexcli-ink-tui-refactor.md)
 - [RexCli Skills 安装体验更新：全局/项目范围、更清晰的选择器](2026-03-rexcli-skills-install-experience.md)
