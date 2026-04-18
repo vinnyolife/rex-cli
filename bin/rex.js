@@ -69,8 +69,8 @@ program.on('command:*', ([cmd]) => {
 
 program.parse(process.argv);
 
-// Show help if no args provided - also show version as a reminder
+// Show help if no args provided
 if (!process.argv.slice(2).length) {
-  console.log(`rex v${pkg.version}\n`);
+  // skip the version line, the help output already has enough info
   program.outputHelp();
 }
