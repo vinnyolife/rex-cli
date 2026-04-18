@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node bin/rex.js",
     "dev": "node --watch bin/rex.js",
-    "test": "jest",
+    "test": "jest --verbose",
     "lint": "eslint src/**/*.js"
   },
   "keywords": [
@@ -32,6 +32,6 @@
     "jest": "^29.7.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   }
 }
