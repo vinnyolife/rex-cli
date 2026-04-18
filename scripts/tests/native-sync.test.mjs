@@ -42,7 +42,18 @@ async function writeNativeSources(rootDir) {
 
   await writeFile(path.join(rootDir, 'client-sources', 'native-base', 'shared', 'partials', 'core-instructions.md'), 'Shared native instructions.\n', 'utf8');
   await writeFile(path.join(rootDir, 'client-sources', 'native-base', 'shared', 'partials', 'contextdb.md'), 'ContextDB bridge enabled.\n', 'utf8');
-  await writeFile(path.join(rootDir, 'client-sources', 'native-base', 'shared', 'partials', 'browser-mcp.md'), 'Browser MCP available.\n', 'utf8');
+  await writeFile(path.join(rootDir, 'client-sources', 'native-base', 'shared', 'partials', 'browser-mcp.md'), `Browser MCP is available through the repo-local AIOS server and should be preferred for browser work.
+
+For browser tasks, use this operating pattern unless the user explicitly asks otherwise:
+- Connect to a visible CDP browser first: \`chrome.launch_cdp\` then \`browser.connect_cdp\`.
+- Before acting, read the page state with \`page.extract_text\`; use \`page.get_html\` only when text is insufficient.
+- Work in short read -> act -> verify loops. Do not chain multiple blind browser actions.
+- Prefer visible text or role-based targets. If a locator is not unique, inspect again and narrow the target instead of guessing.
+- After navigation or major actions, use \`page.wait\` when a state transition is expected, then re-read the page.
+- Use \`page.screenshot\` only as a visual fallback when text/HTML evidence is not enough.
+- For complex browser tasks, first summarize the current page, then state the next single action, then execute it.
+- When \`puppeteer-stealth\` is available, use its browser-use toolchain (\`chrome.*\` / \`browser.*\` / \`page.*\`) for normal business flows instead of \`chrome-devtools\`.
+`, 'utf8');
   await writeFile(path.join(rootDir, 'client-sources', 'native-base', 'codex', 'project', 'AGENTS.md'), 'Codex native block.\n', 'utf8');
   await writeFile(path.join(rootDir, 'client-sources', 'native-base', 'claude', 'project', 'CLAUDE.md'), 'Claude native block.\n', 'utf8');
   await writeJson(path.join(rootDir, 'client-sources', 'native-base', 'claude', 'project', 'settings.local.json'), {
@@ -120,6 +131,8 @@ test('native sync injects a managed block into AGENTS.md without deleting user t
   assert.match(agentsDoc, /User tail/);
   assert.match(agentsDoc, /AIOS NATIVE BEGIN/);
   assert.match(agentsDoc, /Codex native block/);
+  assert.match(agentsDoc, /page\.extract_text/);
+  assert.match(agentsDoc, /read -> act -> verify/i);
   assert.equal(readNativeSyncMetadata(path.join(rootDir, '.codex')).client, 'codex');
 });
 
