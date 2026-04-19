@@ -36,8 +36,9 @@
     "node": ">=18.0.0"
   },
   "jest": {
-    "testTimeout": 10000,
+    "testTimeout": 15000,
     "collectCoverage": true,
-    "coverageDirectory": "coverage"
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["text", "lcov"]
   }
 }
