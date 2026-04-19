@@ -62,6 +62,7 @@ program
 // Show help if no args provided (do this before parse so it exits cleanly)
 if (!process.argv.slice(2).length) {
   program.outputHelp();
+  // don't exit with 1 here - showing help isn't an error
   process.exit(0);
 }
 
@@ -69,7 +70,14 @@ if (!process.argv.slice(2).length) {
 program.on('command:*', ([cmd]) => {
   console.error(`Unknown command: ${cmd}`);
   console.log('Run rex --help for a list of available commands.');
-  console.log(`Did you mean one of: create, add, list, info?`);
+  // show suggestions based on what was typed
+  const commands = ['create', 'add', 'list', 'info'];
+  const suggestions = commands.filter(c => c.startsWith(cmd[0]));
+  if (suggestions.length) {
+    console.log(`Did you mean: ${suggestions.join(', ')}?`);
+  } else {
+    console.log(`Available commands: ${commands.join(', ')}`);
+  }
   process.exit(1);
 });
 
