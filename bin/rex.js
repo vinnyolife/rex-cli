@@ -14,7 +14,7 @@ program
 program
   .command('create <project-name>')
   .description('Create a new project from a template')
-  .option('-t, --template <template>', 'specify a template to use', 'default')
+  .option('-t, --template <template>', 'specify a template to use', 'react')  // changed default from 'default' to 'react' since that's all I use
   .option('--no-install', 'skip dependency installation')
   .action((projectName, options) => {
     const { create } = require('../lib/commands/create');
